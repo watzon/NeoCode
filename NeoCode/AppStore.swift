@@ -105,6 +105,11 @@ final class AppStore {
         return projects.first
     }
 
+    var selectedSessionActivity: OpenCodeSessionActivity? {
+        guard let selectedSessionID else { return nil }
+        return liveSessionStatuses[selectedSessionID]
+    }
+
     func project(for sessionID: String) -> ProjectSummary? {
         projects.first(where: { project in
             project.sessions.contains(where: { $0.id == sessionID })

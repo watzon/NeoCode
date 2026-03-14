@@ -23,8 +23,13 @@ struct ComposerView: View {
         VStack(alignment: .leading, spacing: 10) {
             composerCard
 
-            HStack {
-                Spacer()
+            HStack(alignment: .center, spacing: 0) {
+                if let activityState {
+                    ComposerActivityIndicator(state: activityState)
+                        .transition(.opacity)
+                }
+
+                Spacer(minLength: 0)
 
                 if let sessionID = store.selectedSession?.id {
                     YoloModeToggleButton(
@@ -73,6 +78,7 @@ struct ComposerView: View {
                     }
                 )
             }
+            .animation(.spring(response: 0.32, dampingFraction: 0.82), value: activityState)
         }
         .frame(width: contentWidth, alignment: .leading)
         .fileImporter(
@@ -236,6 +242,25 @@ struct ComposerView: View {
         store.selectedSession?.status == .running
     }
 
+    private var activityState: ComposerActivityState? {
+        if let activity = store.selectedSessionActivity {
+            switch activity {
+            case .busy:
+                return .thinking
+            case .retry:
+                return .retrying
+            case .idle:
+                break
+            }
+        }
+
+        if store.selectedSession?.status == .running {
+            return .thinking
+        }
+
+        return nil
+    }
+
     private var canTriggerPrimaryAction: Bool {
         isStopMode || canSend
     }
@@ -284,10 +309,180 @@ private enum ComposerLayout {
     static let minimumTextViewHeight: CGFloat = 36
 }
 
+private enum ComposerActivityState: Equatable {
+    case thinking
+    case retrying
+
+    var title: String {
+        switch self {
+        case .thinking:
+            return "thinking"
+        case .retrying:
+            return "retrying"
+        }
+    }
+
+    var accessibilityValue: String {
+        switch self {
+        case .thinking:
+            return "Agent is working"
+        case .retrying:
+            return "Agent is retrying"
+        }
+    }
+
+    var helpText: String {
+        switch self {
+        case .thinking:
+            return "The agent is still working."
+        case .retrying:
+            return "The agent is retrying after a temporary interruption."
+        }
+    }
+
+    var primaryTint: Color {
+        switch self {
+        case .thinking:
+            return NeoCodeTheme.accent
+        case .retrying:
+            return NeoCodeTheme.warning
+        }
+    }
+
+    var secondaryTint: Color {
+        switch self {
+        case .thinking:
+            return NeoCodeTheme.success
+        case .retrying:
+            return NeoCodeTheme.accent
+        }
+    }
+}
+
 struct ComposerTextSelectionRequest: Equatable {
     let id = UUID()
     let text: String
     let cursorLocation: Int
+}
+
+private struct ComposerActivityIndicator: View {
+    let state: ComposerActivityState
+
+    var body: some View {
+        ComposerActivityGlyph(state: state)
+            .frame(width: 40, height: 24)
+        .help(state.helpText)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Agent activity")
+        .accessibilityValue(state.accessibilityValue)
+    }
+}
+
+private struct ComposerActivityGlyph: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    let state: ComposerActivityState
+
+    var body: some View {
+        Group {
+            if reduceMotion {
+                glyphCanvas(time: 0)
+            } else {
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+                    glyphCanvas(time: timeline.date.timeIntervalSinceReferenceDate)
+                }
+            }
+        }
+        .drawingGroup()
+    }
+
+    private func glyphCanvas(time: TimeInterval) -> some View {
+        Canvas(rendersAsynchronously: true) { context, size in
+            drawGlyph(in: &context, size: size, time: time)
+        }
+    }
+
+    private func drawGlyph(in context: inout GraphicsContext, size: CGSize, time: TimeInterval) {
+        let center = CGPoint(x: size.width / 2, y: size.height / 2)
+        let orbitSize = CGSize(width: size.width * 0.72, height: size.height * 0.58)
+        let orbitRect = CGRect(
+            x: center.x - orbitSize.width / 2,
+            y: center.y - orbitSize.height / 2,
+            width: orbitSize.width,
+            height: orbitSize.height
+        )
+        let pulse = 0.5 + 0.5 * sin(time * 2.4)
+        let coreRadius = size.height * (0.17 + 0.045 * pulse)
+
+        context.stroke(
+            Path(ellipseIn: orbitRect),
+            with: .color(NeoCodeTheme.lineStrong.opacity(0.4)),
+            lineWidth: 0.9
+        )
+
+        let accentArc = Path { path in
+            path.addArc(
+                center: center,
+                radius: orbitRect.width * 0.42,
+                startAngle: .degrees(time * 88),
+                endAngle: .degrees(time * 88 + 118),
+                clockwise: false
+            )
+        }
+        context.stroke(
+            accentArc,
+            with: .color(state.primaryTint.opacity(0.34)),
+            style: .init(lineWidth: 1.3, lineCap: .round)
+        )
+
+        drawCore(in: &context, center: center, radius: coreRadius)
+        drawOrbiters(in: &context, center: center, orbitRect: orbitRect, time: time)
+    }
+
+    private func drawCore(in context: inout GraphicsContext, center: CGPoint, radius: CGFloat) {
+        let glowLayers: [(CGFloat, Color, Double)] = [
+            (radius * 2.8, state.primaryTint, 0.12),
+            (radius * 1.9, state.secondaryTint, 0.18),
+            (radius * 1.2, state.primaryTint, 0.95)
+        ]
+
+        for (layerRadius, color, opacity) in glowLayers {
+            let rect = CGRect(
+                x: center.x - layerRadius,
+                y: center.y - layerRadius,
+                width: layerRadius * 2,
+                height: layerRadius * 2
+            )
+            context.fill(Path(ellipseIn: rect), with: .color(color.opacity(opacity)))
+        }
+    }
+
+    private func drawOrbiters(in context: inout GraphicsContext, center: CGPoint, orbitRect: CGRect, time: TimeInterval) {
+        let orbiters: [(phase: Double, speed: Double, color: Color, radius: CGFloat)] = [
+            (0, 1.5, state.primaryTint, 2.2),
+            (.pi, -1.15, state.secondaryTint, 1.8)
+        ]
+
+        for orbiter in orbiters {
+            for trailIndex in stride(from: 3, through: 0, by: -1) {
+                let trailOffset = Double(trailIndex) * 0.22 * (orbiter.speed >= 0 ? 1 : -1)
+                let angle = CGFloat(time * orbiter.speed * .pi + orbiter.phase - trailOffset)
+                let point = CGPoint(
+                    x: center.x + cos(angle) * orbitRect.width * 0.5,
+                    y: center.y + sin(angle) * orbitRect.height * 0.5
+                )
+                let dotRadius = orbiter.radius - CGFloat(trailIndex) * 0.28
+                let opacity = max(0.12, 0.9 - Double(trailIndex) * 0.22)
+                let rect = CGRect(
+                    x: point.x - dotRadius,
+                    y: point.y - dotRadius,
+                    width: dotRadius * 2,
+                    height: dotRadius * 2
+                )
+                context.fill(Path(ellipseIn: rect), with: .color(orbiter.color.opacity(opacity)))
+            }
+        }
+    }
 }
 
 private struct YoloModeToggleButton: View {
