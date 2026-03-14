@@ -6,27 +6,28 @@
 //
 
 import SwiftUI
-import SwiftData
 
 @main
 struct NeoCodeApp: App {
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            Item.self,
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
-        do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
-        } catch {
-            fatalError("Could not create ModelContainer: \(error)")
-        }
-    }()
-
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            AppSceneView()
         }
-        .modelContainer(sharedModelContainer)
+        .defaultSize(width: 1280, height: 900)
+        .windowResizability(.contentMinSize)
+        .windowStyle(.hiddenTitleBar)
+    }
+}
+
+private struct AppSceneView: View {
+    @State private var store = AppStore()
+    @State private var runtime = OpenCodeRuntime()
+
+    var body: some View {
+        ContentView()
+            .frame(minWidth: 980, minHeight: 600)
+            .environment(store)
+            .environment(runtime)
+            .preferredColorScheme(.dark)
     }
 }

@@ -6,54 +6,75 @@
 //
 
 import SwiftUI
-import SwiftData
 
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+    @Environment(AppStore.self) private var store
+    @Environment(OpenCodeRuntime.self) private var runtime
+    @State private var toastMessage: String?
+
+    private let uiTestModeKey = "NEOCODE_UI_TEST_MODE"
 
     var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
-                    }
-                }
-                .onDelete(perform: deleteItems)
+        HStack(spacing: 0) {
+            AppSidebarView()
+                .frame(width: 318)
+
+            ConversationScreen(selectedSessionID: store.selectedSessionID)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .ignoresSafeArea(.container, edges: .top)
+        .background(NeoCodeTheme.canvas.ignoresSafeArea())
+        .background(WindowChromeConfigurator())
+        .overlay(alignment: .topTrailing) {
+            if let toastMessage {
+                ErrorToast(message: toastMessage)
+                    .padding(.top, 18)
+                    .padding(.trailing, 18)
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
-            .navigationSplitViewColumnWidth(min: 180, ideal: 200)
-            .toolbar {
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
-                }
-            }
-        } detail: {
-            Text("Select an item")
+        }
+        .task(id: store.selectedProject?.id) {
+            guard isRuntimeBootstrappingEnabled else { return }
+            await store.connect(to: runtime)
+        }
+        .task(id: store.selectedSessionID) {
+            guard isRuntimeBootstrappingEnabled else { return }
+            await store.syncSelectedSession(using: runtime)
+        }
+        .onChange(of: store.lastError) { _, newValue in
+            showToast(newValue)
+        }
+        .onChange(of: runtime.userFacingError) { _, newValue in
+            showToast(newValue)
         }
     }
 
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
+    private func showToast(_ message: String?) {
+        guard let message, !message.isEmpty else { return }
+
+        withAnimation(.easeOut(duration: 0.18)) {
+            toastMessage = message
+        }
+
+        Task {
+            try? await Task.sleep(for: .seconds(4))
+            if toastMessage == message {
+                await MainActor.run {
+                    withAnimation(.easeIn(duration: 0.18)) {
+                        toastMessage = nil
+                    }
+                }
+            }
         }
     }
 
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
-            }
-        }
+    private var isRuntimeBootstrappingEnabled: Bool {
+        ProcessInfo.processInfo.environment[uiTestModeKey] != "1"
     }
 }
 
 #Preview {
     ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
+        .environment(AppStore())
+        .frame(width: 1440, height: 920)
 }

@@ -6,8 +6,12 @@
 //
 
 import XCTest
+import AppKit
 
 final class NeoCodeUITests: XCTestCase {
+    private let targetBundleIdentifier = "tech.watzon.NeoCode"
+    private let uiTestModeKey = "NEOCODE_UI_TEST_MODE"
+    private var launchedApplication: XCUIApplication?
 
     override func setUpWithError() throws {
         // Put setup code here. This method is called before the invocation of each test method in the class.
@@ -19,23 +23,49 @@ final class NeoCodeUITests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
-        // Put teardown code here. This method is called after the invocation of each test method in the class.
+        if let launchedApplication, launchedApplication.state != .notRunning {
+            launchedApplication.terminate()
+        }
+        launchedApplication = nil
     }
 
     @MainActor
     func testExample() throws {
-        // UI tests must launch the application that they test.
-        let app = XCUIApplication()
+        try skipIfTargetAppIsAlreadyRunning()
+
+        let app = configuredApplication()
+        launchedApplication = app
         app.launch()
 
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 5))
     }
 
     @MainActor
     func testLaunchPerformance() throws {
-        // This measures how long it takes to launch your application.
+        try skipIfTargetAppIsAlreadyRunning()
+
         measure(metrics: [XCTApplicationLaunchMetric()]) {
-            XCUIApplication().launch()
+            configuredApplication().launch()
         }
+
+        terminateLaunchedApplicationsIfNeeded()
+    }
+
+    private func configuredApplication() -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchEnvironment[uiTestModeKey] = "1"
+        return app
+    }
+
+    private func skipIfTargetAppIsAlreadyRunning() throws {
+        let runningApplications = NSRunningApplication.runningApplications(withBundleIdentifier: targetBundleIdentifier)
+        if !runningApplications.isEmpty {
+            throw XCTSkip("Quit NeoCode before running UI tests so XCTest does not force-terminate your active app session.")
+        }
+    }
+
+    private func terminateLaunchedApplicationsIfNeeded() {
+        NSRunningApplication.runningApplications(withBundleIdentifier: targetBundleIdentifier)
+            .forEach { $0.terminate() }
     }
 }

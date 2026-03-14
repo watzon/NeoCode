@@ -6,8 +6,12 @@
 //
 
 import XCTest
+import AppKit
 
 final class NeoCodeUITestsLaunchTests: XCTestCase {
+    private let targetBundleIdentifier = "tech.watzon.NeoCode"
+    private let uiTestModeKey = "NEOCODE_UI_TEST_MODE"
+    private var launchedApplication: XCUIApplication?
 
     override class var runsForEachTargetApplicationUIConfiguration: Bool {
         true
@@ -17,9 +21,19 @@ final class NeoCodeUITestsLaunchTests: XCTestCase {
         continueAfterFailure = false
     }
 
+    override func tearDownWithError() throws {
+        if let launchedApplication, launchedApplication.state != .notRunning {
+            launchedApplication.terminate()
+        }
+        launchedApplication = nil
+    }
+
     @MainActor
     func testLaunch() throws {
-        let app = XCUIApplication()
+        try skipIfTargetAppIsAlreadyRunning()
+
+        let app = configuredApplication()
+        launchedApplication = app
         app.launch()
 
         // Insert steps here to perform after app launch but before taking a screenshot,
@@ -29,5 +43,18 @@ final class NeoCodeUITestsLaunchTests: XCTestCase {
         attachment.name = "Launch Screen"
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    private func configuredApplication() -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchEnvironment[uiTestModeKey] = "1"
+        return app
+    }
+
+    private func skipIfTargetAppIsAlreadyRunning() throws {
+        let runningApplications = NSRunningApplication.runningApplications(withBundleIdentifier: targetBundleIdentifier)
+        if !runningApplications.isEmpty {
+            throw XCTSkip("Quit NeoCode before running UI tests so XCTest does not force-terminate your active app session.")
+        }
     }
 }
