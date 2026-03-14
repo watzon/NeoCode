@@ -442,6 +442,7 @@ struct ConversationView: View {
                 onMoveAuxiliarySelection: moveSlashCommandSelection,
                 onCancelAuxiliaryUI: dismissSlashPopover,
                 onSend: {
+                    _ = dismissSlashPopover()
                     let shouldRemainPinned = isPinnedToBottom
                     if shouldRemainPinned {
                         scrollToBottom(using: proxy, animated: false)

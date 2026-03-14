@@ -883,7 +883,7 @@ struct NeoCodeTests {
         #expect(service.sentCommands[0].command == "review")
         #expect(service.sentCommands[0].arguments == "current diff")
         #expect(store.draft.isEmpty)
-        #expect(store.selectedSession?.transcript.last?.text == "/review current diff")
+        #expect(store.selectedSession?.transcript.isEmpty == true)
         #expect(store.selectedSession?.status == .running)
     }
 

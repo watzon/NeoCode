@@ -447,6 +447,7 @@ final class AppStore {
         guard !trimmed.isEmpty || !attachments.isEmpty else { return false }
 
         let slashCommand = slashCommandInvocation(in: trimmed)
+        let shouldShowOptimisticUserMessage = slashCommand == nil
 
         isSending = true
         lastError = nil
@@ -462,26 +463,28 @@ final class AppStore {
 
         let optimisticID = "optimistic-user-\(UUID().uuidString)"
         let now = Date()
-        if !trimmed.isEmpty {
+        if shouldShowOptimisticUserMessage && !trimmed.isEmpty {
             upsertMessage(
                 ChatMessage(id: optimisticID, role: .user, text: trimmed, timestamp: now, emphasis: .normal),
                 in: sessionID,
                 projectID: projectID
             )
         }
-        for attachment in attachments {
-            upsertMessage(
-                ChatMessage(
-                    id: "optimistic-user-attachment-\(UUID().uuidString)",
-                    role: .user,
-                    text: ChatAttachment(attachment: attachment).displayTitle,
-                    timestamp: now,
-                    emphasis: .normal,
-                    attachment: ChatAttachment(attachment: attachment)
-                ),
-                in: sessionID,
-                projectID: projectID
-            )
+        if shouldShowOptimisticUserMessage {
+            for attachment in attachments {
+                upsertMessage(
+                    ChatMessage(
+                        id: "optimistic-user-attachment-\(UUID().uuidString)",
+                        role: .user,
+                        text: ChatAttachment(attachment: attachment).displayTitle,
+                        timestamp: now,
+                        emphasis: .normal,
+                        attachment: ChatAttachment(attachment: attachment)
+                    ),
+                    in: sessionID,
+                    projectID: projectID
+                )
+            }
         }
         draft = ""
         attachedFiles = []
@@ -518,10 +521,12 @@ final class AppStore {
             }
         } catch {
             logger.error("Failed to send draft for session \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")
-            if !trimmed.isEmpty {
+            if shouldShowOptimisticUserMessage && !trimmed.isEmpty {
                 removeMessage(id: optimisticID, sessionID: sessionID, projectID: projectID)
             }
-            removeOptimisticAttachmentMessages(in: sessionID, projectID: projectID)
+            if shouldShowOptimisticUserMessage {
+                removeOptimisticAttachmentMessages(in: sessionID, projectID: projectID)
+            }
             draft = trimmed
             attachedFiles = attachments
             setSessionStatus(.attention, sessionID: sessionID, projectID: projectID)
