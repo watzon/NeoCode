@@ -55,6 +55,7 @@ struct ConversationView: View {
     @State private var editingMessageID: String?
     @State private var editingText = ""
     @State private var slashSelectionIndex = 0
+    @State private var slashScrollTargetID: String?
     @State private var dismissedSlashQuery: String?
     @State private var slashSelectionRequest: ComposerTextSelectionRequest?
 
@@ -157,15 +158,18 @@ struct ConversationView: View {
             }
             .onChange(of: activeSlashQuery) { _, _ in
                 slashSelectionIndex = 0
+                slashScrollTargetID = nil
             }
             .onChange(of: showsSlashPopover) { _, isShowing in
                 if isShowing {
                     slashSelectionIndex = 0
+                    slashScrollTargetID = nil
                 }
             }
             .onChange(of: filteredSlashCommandIDs) { _, ids in
                 guard !ids.isEmpty else {
                     slashSelectionIndex = 0
+                    slashScrollTargetID = nil
                     return
                 }
                 slashSelectionIndex = min(slashSelectionIndex, ids.count - 1)
@@ -268,6 +272,7 @@ struct ConversationView: View {
 
         let count = filteredSlashCommands.count
         slashSelectionIndex = (slashSelectionIndex + delta + count) % count
+        slashScrollTargetID = filteredSlashCommands[slashSelectionIndex].id
         return true
     }
 
@@ -424,6 +429,7 @@ struct ConversationView: View {
                 ComposerSlashCommandsPopover(
                     commands: filteredSlashCommands,
                     selectedIndex: slashSelectionIndex,
+                    scrollTargetID: slashScrollTargetID,
                     onHoverIndex: { slashSelectionIndex = $0 },
                     onSelect: insertSlashCommand
                 )

@@ -558,6 +558,7 @@ private struct HeightPreferenceKey: PreferenceKey {
 struct ComposerSlashCommandsPopover: View {
     let commands: [ComposerSlashCommand]
     let selectedIndex: Int
+    let scrollTargetID: String?
     let onHoverIndex: (Int) -> Void
     let onSelect: (ComposerSlashCommand) -> Void
 
@@ -620,23 +621,21 @@ struct ComposerSlashCommandsPopover: View {
             )
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
             .shadow(color: NeoCodeTheme.canvas.opacity(0.34), radius: 24, x: 0, y: 12)
-            .onAppear {
-                scrollSelectionIfNeeded(using: proxy)
-            }
-            .onChange(of: selectedIndex) { _, _ in
-                scrollSelectionIfNeeded(using: proxy)
-            }
-            .onChange(of: commands.map(\.id)) { _, _ in
+            .onChange(of: scrollTargetID) { _, _ in
                 scrollSelectionIfNeeded(using: proxy)
             }
         }
     }
 
     private func scrollSelectionIfNeeded(using proxy: ScrollViewProxy) {
-        guard commands.indices.contains(selectedIndex) else { return }
+        guard let scrollTargetID,
+              commands.contains(where: { $0.id == scrollTargetID })
+        else {
+            return
+        }
 
         withAnimation(.easeOut(duration: 0.12)) {
-            proxy.scrollTo(commands[selectedIndex].id, anchor: .center)
+            proxy.scrollTo(scrollTargetID, anchor: .center)
         }
     }
 
