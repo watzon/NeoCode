@@ -42,10 +42,11 @@ struct ConversationView: View {
     @Environment(AppStore.self) private var store
     @Environment(OpenCodeRuntime.self) private var runtime
     @FocusState private var composerFocused: Bool
-    // Measured height of the overlaid composer dock. We use this to add extra
-    // scroll content at the bottom without changing the scroll view's own frame,
-    // which keeps the scrollbar track reaching the full height of the pane.
-    @State private var promptDockHeight: CGFloat = 0
+    // Measured height of the full overlaid prompt dock. We use this to add
+    // extra scroll content at the bottom without changing the scroll view's own
+    // frame, which keeps the scrollbar track reaching the full height of the
+    // pane.
+    @State private var promptOverlayHeight: CGFloat = 0
     @State private var textInputHeight: CGFloat = 36
     @State private var isPinnedToBottom = true
     @State private var isMaintainingPinnedPosition = false
@@ -68,11 +69,15 @@ struct ConversationView: View {
     private let composerTopPadding: CGFloat = 8
     private let composerBottomPadding: CGFloat = 14
     private let composerControlSpacing: CGFloat = 12
-    // This is intentional extra breathing room above the overlaid composer.
+    private let loadingPromptFallbackHeight: CGFloat = 96
+    private let permissionPromptFallbackHeight: CGFloat = 280
+    private let questionPromptFallbackHeight: CGFloat = 360
+    // This is intentional extra breathing room above the overlaid prompt UI.
     // Keep it inside scroll content via `contentBottomInset`; do not move this
     // to a safe area inset or external padding unless you also want the
     // scrollbar track to shrink.
-    private let transcriptBottomClearance: CGFloat = 160
+    private let composerBottomClearance: CGFloat = 160
+    private let promptOverlayBottomClearance: CGFloat = 40
     private let scrollbarCompensation = ConversationLayout.scrollbarCompensation
 
     let sessionID: String
@@ -147,7 +152,7 @@ struct ConversationView: View {
                     finishInitialPresentation()
                 }
             }
-            .onChange(of: promptDockHeight) { _, _ in
+            .onChange(of: promptOverlayHeight) { _, _ in
                 guard isPinnedToBottom else { return }
                 maintainPinnedPosition(using: proxy, animated: false)
             }
@@ -463,7 +468,6 @@ struct ConversationView: View {
                     }
                 }
             )
-            .readHeight { promptDockHeight = $0 }
         }
         .padding(.horizontal, transcriptHorizontalInset)
         .frame(maxWidth: transcriptColumnWidth)
@@ -477,6 +481,7 @@ struct ConversationView: View {
             )
         )
         .frame(maxWidth: .infinity, alignment: .center)
+        .readHeight { promptOverlayHeight = $0 }
         .animation(.easeOut(duration: 0.16), value: showsSlashPopover)
     }
 
@@ -522,8 +527,35 @@ struct ConversationView: View {
     private var contentBottomInset: CGFloat {
         // This spacer lives inside the scroll content on purpose. It clears the
         // overlaid composer while keeping the scroll view and scrollbar track at
-        // their original height.
-        max(bottomAnchorSpacerHeight, promptDockHeight + transcriptBottomClearance)
+        // their original height. Keep a fallback floor for non-composer prompt
+        // surfaces so transcript rows still clear the overlay even if the live
+        // height measurement lags or under-reports during transitions.
+        max(
+            bottomAnchorSpacerHeight,
+            max(promptOverlayHeight, promptOverlayFallbackHeight) + bottomClearance
+        )
+    }
+
+    private var promptOverlayFallbackHeight: CGFloat {
+        switch promptSurface {
+        case .composer:
+            return 0
+        case .loading:
+            return loadingPromptFallbackHeight
+        case .permission:
+            return permissionPromptFallbackHeight
+        case .question:
+            return questionPromptFallbackHeight
+        }
+    }
+
+    private var bottomClearance: CGFloat {
+        switch promptSurface {
+        case .composer:
+            return composerBottomClearance
+        case .loading, .permission, .question:
+            return promptOverlayBottomClearance
+        }
     }
 
     private var renderedGroups: [DisplayMessageGroup] {
