@@ -33,6 +33,71 @@ struct OpenCodeAgent: Decodable, Equatable, Identifiable {
     }
 }
 
+struct OpenCodeCommand: Decodable, Equatable, Identifiable, Hashable {
+    let name: String
+    let description: String?
+    let agent: String?
+    let model: String?
+    let source: String?
+    let template: String?
+    let subtask: Bool?
+    let hints: [String]
+
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case description
+        case agent
+        case model
+        case source
+        case template
+        case subtask
+        case hints
+    }
+
+    init(
+        name: String,
+        description: String?,
+        agent: String?,
+        model: String?,
+        source: String?,
+        template: String?,
+        subtask: Bool?,
+        hints: [String]
+    ) {
+        self.name = name
+        self.description = description
+        self.agent = agent
+        self.model = model
+        self.source = source
+        self.template = template
+        self.subtask = subtask
+        self.hints = hints
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        description = try container.decodeIfPresent(String.self, forKey: .description)
+        agent = try container.decodeIfPresent(String.self, forKey: .agent)
+        model = try container.decodeIfPresent(String.self, forKey: .model)
+        source = try container.decodeIfPresent(String.self, forKey: .source)
+        subtask = try container.decodeIfPresent(Bool.self, forKey: .subtask)
+        hints = (try? container.decodeIfPresent([String].self, forKey: .hints)) ?? []
+
+        if let value = try? container.decodeIfPresent(String.self, forKey: .template) {
+            template = value
+        } else {
+            template = nil
+        }
+    }
+
+    var id: String { name }
+
+    var trimmedDescription: String? {
+        description?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmptyTrimmed
+    }
+}
+
 struct OpenCodePromptOptions {
     let model: ComposerModelOption?
     let agentName: String?
@@ -175,6 +240,25 @@ struct OpenCodeQuestionRejectEvent: Codable, Equatable, Hashable {
     let requestID: String
 }
 
+struct OpenCodeFileSourceText: Decodable, Equatable {
+    let value: String
+    let start: Int?
+    let end: Int?
+}
+
+struct OpenCodeFileSourceRange: Decodable, Equatable {
+    let start: Int?
+    let end: Int?
+}
+
+struct OpenCodeFileSource: Decodable, Equatable {
+    let text: OpenCodeFileSourceText?
+    let path: String?
+    let range: OpenCodeFileSourceRange?
+    let clientName: String?
+    let uri: String?
+}
+
 struct OpenCodePart: Decodable, Equatable {
     enum Kind: String, Decodable {
         case text
@@ -196,12 +280,27 @@ struct OpenCodePart: Decodable, Equatable {
     let type: Kind
     let text: String?
     let tool: String?
+    let mime: String?
+    let filename: String?
+    let url: String?
+    let source: OpenCodeFileSource?
     let state: OpenCodeToolState?
     let time: OpenCodeTimeContainer?
 
     var updatedAt: Date? { time?.completed ?? time?.updated ?? time?.created }
     var toolStatus: OpenCodeToolState.Status? { state?.status }
     var trimmedText: String { (text ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
+    var attachment: ChatAttachment? {
+        guard type == .file,
+              let mime,
+              let url
+        else {
+            return nil
+        }
+
+        return ChatAttachment(filename: filename, mimeType: mime, url: url, sourcePath: source?.path)
+    }
+
     var isInProgress: Bool {
         switch type {
         case .tool:
@@ -218,7 +317,9 @@ struct OpenCodePart: Decodable, Equatable {
 
     var shouldDisplay: Bool {
         switch type {
-        case .text, .reasoning, .file, .diff, .unknown:
+        case .file:
+            return attachment != nil || !trimmedText.isEmpty
+        case .text, .reasoning, .diff, .unknown:
             return !trimmedText.isEmpty
         case .tool:
             if ["todoread", "todowrite"].contains(tool?.lowercased() ?? "") {
@@ -246,7 +347,9 @@ struct OpenCodePart: Decodable, Equatable {
             case .running, .pending, .none:
                 return "\(name) running\n\(state?.input?.prettyPrinted ?? state?.rawInput ?? "")".trimmingCharacters(in: .whitespacesAndNewlines)
             }
-        case .file, .diff, .unknown:
+        case .file:
+            return attachment?.displayTitle ?? text ?? ""
+        case .diff, .unknown:
             return text ?? ""
         }
     }
@@ -369,4 +472,3 @@ struct OpenCodePartDelta: Decodable, Equatable {
     let field: String
     let delta: String
 }
-

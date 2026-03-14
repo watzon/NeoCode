@@ -7,9 +7,13 @@ struct ComposerView: View {
     @State private var isImportingFiles = false
     @State private var isCreatingBranch = false
     @State private var newBranchName = ""
-    @State private var textViewHeight: CGFloat = 36
+    @State private var textViewHeight: CGFloat = ComposerLayout.minimumTextViewHeight
 
     @Binding var text: String
+    @Binding var selectionRequest: ComposerTextSelectionRequest?
+    let onConfirmAuxiliarySelection: () -> Bool
+    let onMoveAuxiliarySelection: (Int) -> Bool
+    let onCancelAuxiliaryUI: () -> Bool
     let onSend: () -> Void
     let onStop: () -> Void
 
@@ -17,121 +21,7 @@ struct ComposerView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 12) {
-                if !store.attachedFiles.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(store.attachedFiles) { attachment in
-                                ComposerAttachmentChip(attachment: attachment) {
-                                    store.removeAttachment(id: attachment.id)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                GrowingTextView(
-                    text: $text,
-                    measuredHeight: $textViewHeight,
-                    onPrimaryAction: primaryAction,
-                    allowsEmptyPrimaryAction: isStopMode
-                )
-                    .frame(height: textViewHeight)
-
-                HStack(alignment: .center, spacing: 8) {
-                    Menu {
-                        Button("Attach Files...") {
-                            isImportingFiles = true
-                        }
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(NeoCodeTheme.textSecondary)
-                            .frame(width: 28, height: 28)
-                    }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-
-                    SearchableComposerDropdown(
-                        title: store.selectedModel?.title ?? "Select model",
-                        items: store.availableModels,
-                        emptyMessage: "No models found.",
-                        placeholder: "Search models",
-                        isSearchable: true
-                    ) { model in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(model.title)
-                                .font(.neoBody)
-                                .foregroundStyle(NeoCodeTheme.textPrimary)
-                            Text(model.providerID)
-                                .font(.neoMonoSmall)
-                                .foregroundStyle(NeoCodeTheme.textMuted)
-                        }
-                    } searchableText: { model in
-                        [model.title, model.providerID, model.modelID]
-                    } onSelect: { model in
-                        store.selectedModelID = model.id
-                        store.refreshThinkingLevels()
-                    }
-
-                    SearchableComposerDropdown(
-                        title: store.selectedAgent.isEmpty ? "Agent" : store.displayAgentName(store.selectedAgent),
-                        items: store.availableAgents.map { ComposerDropdownOption(id: $0, title: store.displayAgentName($0)) },
-                        emptyMessage: "No agents available.",
-                        placeholder: "Search agents",
-                        isSearchable: false
-                    ) { option in
-                        Text(option.title)
-                            .font(.neoBody)
-                            .foregroundStyle(NeoCodeTheme.textPrimary)
-                    } searchableText: { option in
-                        [option.title, option.id]
-                    } onSelect: { option in
-                        store.selectedAgent = option.id
-                    }
-
-                    SearchableComposerDropdown(
-                        title: store.selectedThinkingLevel ?? "Reasoning",
-                        items: store.availableThinkingLevels.map { ComposerDropdownOption(id: $0, title: $0) },
-                        emptyMessage: "No variants available.",
-                        placeholder: "Search reasoning",
-                        isSearchable: false
-                    ) { option in
-                        Text(option.title)
-                            .font(.neoBody)
-                            .foregroundStyle(NeoCodeTheme.textPrimary)
-                    } searchableText: { option in
-                        [option.title]
-                    } onSelect: { option in
-                        store.selectedThinkingLevel = option.id
-                    }
-
-                    Spacer(minLength: 12)
-
-                    Button(action: primaryAction) {
-                        Image(systemName: primaryActionSymbol)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(primaryActionForeground)
-                            .frame(width: 30, height: 30)
-                            .background(Circle().fill(primaryActionBackground))
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!canTriggerPrimaryAction)
-                    .help(primaryActionHelp)
-                    .accessibilityLabel(primaryActionHelp)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 16)
-            .padding(.bottom, 12)
-            .background(
-                RoundedRectangle(cornerRadius: 18)
-                    .fill(NeoCodeTheme.panelRaised)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 18)
-                            .stroke(NeoCodeTheme.line, lineWidth: 1)
-                    )
-            )
+            composerCard
 
             HStack {
                 Spacer()
@@ -184,14 +74,16 @@ struct ComposerView: View {
                 )
             }
         }
-        .frame(maxWidth: contentWidth)
+        .frame(width: contentWidth, alignment: .leading)
         .fileImporter(
             isPresented: $isImportingFiles,
             allowedContentTypes: [.item],
             allowsMultipleSelection: true
         ) { result in
             if case .success(let urls) = result {
-                store.addAttachments(from: urls)
+                Task {
+                    await store.addAttachments(from: urls)
+                }
             }
         }
         .alert("Create Branch", isPresented: $isCreatingBranch) {
@@ -205,10 +97,139 @@ struct ComposerView: View {
         } message: {
             Text("Create a new branch for this session.")
         }
+        .onChange(of: text) { _, newValue in
+            if newValue.isEmpty {
+                textViewHeight = ComposerLayout.minimumTextViewHeight
+            }
+        }
+    }
+
+    private var composerCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if !store.attachedFiles.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(store.attachedFiles) { attachment in
+                            ComposerAttachmentChip(attachment: attachment) {
+                                store.removeAttachment(id: attachment.id)
+                            }
+                        }
+                    }
+                }
+            }
+
+            GrowingTextView(
+                text: $text,
+                measuredHeight: $textViewHeight,
+                selectionRequest: $selectionRequest,
+                onPrimaryAction: handlePrimaryAction,
+                onConfirmAuxiliarySelection: onConfirmAuxiliarySelection,
+                onMoveAuxiliarySelection: onMoveAuxiliarySelection,
+                onCancelAuxiliaryUI: onCancelAuxiliaryUI,
+                allowsEmptyPrimaryAction: isStopMode,
+                onImportAttachments: importAttachments
+            )
+            .frame(height: textViewHeight)
+
+            HStack(alignment: .center, spacing: 8) {
+                Menu {
+                    Button("Attach Files...") {
+                        isImportingFiles = true
+                    }
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(NeoCodeTheme.textSecondary)
+                        .frame(width: 28, height: 28)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+
+                SearchableComposerDropdown(
+                    title: store.selectedModel?.title ?? "Select model",
+                    items: store.availableModels,
+                    emptyMessage: "No models found.",
+                    placeholder: "Search models",
+                    isSearchable: true
+                ) { model in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(model.title)
+                            .font(.neoBody)
+                            .foregroundStyle(NeoCodeTheme.textPrimary)
+                        Text(model.providerID)
+                            .font(.neoMonoSmall)
+                            .foregroundStyle(NeoCodeTheme.textMuted)
+                    }
+                } searchableText: { model in
+                    [model.title, model.providerID, model.modelID]
+                } onSelect: { model in
+                    store.selectedModelID = model.id
+                    store.refreshThinkingLevels()
+                }
+
+                SearchableComposerDropdown(
+                    title: store.selectedAgent.isEmpty ? "Agent" : store.displayAgentName(store.selectedAgent),
+                    items: store.availableAgents.map { ComposerDropdownOption(id: $0, title: store.displayAgentName($0)) },
+                    emptyMessage: "No agents available.",
+                    placeholder: "Search agents",
+                    isSearchable: false
+                ) { option in
+                    Text(option.title)
+                        .font(.neoBody)
+                        .foregroundStyle(NeoCodeTheme.textPrimary)
+                } searchableText: { option in
+                    [option.title, option.id]
+                } onSelect: { option in
+                    store.selectedAgent = option.id
+                }
+
+                SearchableComposerDropdown(
+                    title: store.selectedThinkingLevel ?? "Reasoning",
+                    items: store.availableThinkingLevels.map { ComposerDropdownOption(id: $0, title: $0) },
+                    emptyMessage: "No variants available.",
+                    placeholder: "Search reasoning",
+                    isSearchable: false
+                ) { option in
+                    Text(option.title)
+                        .font(.neoBody)
+                        .foregroundStyle(NeoCodeTheme.textPrimary)
+                } searchableText: { option in
+                    [option.title]
+                } onSelect: { option in
+                    store.selectedThinkingLevel = option.id
+                }
+
+                Spacer(minLength: 12)
+
+                Button(action: handlePrimaryAction) {
+                    Image(systemName: primaryActionSymbol)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(primaryActionForeground)
+                        .frame(width: 30, height: 30)
+                        .background(Circle().fill(primaryActionBackground))
+                }
+                .buttonStyle(.plain)
+                .disabled(!canTriggerPrimaryAction)
+                .help(primaryActionHelp)
+                .accessibilityLabel(primaryActionHelp)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 16)
+        .padding(.bottom, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 18)
+                .fill(NeoCodeTheme.panelRaised)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18)
+                        .stroke(NeoCodeTheme.line, lineWidth: 1)
+                )
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var canSend: Bool {
-        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !store.attachedFiles.isEmpty
     }
 
     private var isStopMode: Bool {
@@ -241,6 +262,32 @@ struct ComposerView: View {
     private var primaryActionHelp: String {
         isStopMode ? "Stop current response" : "Send message"
     }
+
+    private func handlePrimaryAction() {
+        guard canTriggerPrimaryAction else { return }
+
+        if !isStopMode {
+            textViewHeight = ComposerLayout.minimumTextViewHeight
+        }
+
+        primaryAction()
+    }
+
+    private func importAttachments(_ items: [ComposerAttachmentImportItem]) {
+        Task {
+            await store.addAttachments(from: items)
+        }
+    }
+}
+
+private enum ComposerLayout {
+    static let minimumTextViewHeight: CGFloat = 36
+}
+
+struct ComposerTextSelectionRequest: Equatable {
+    let id = UUID()
+    let text: String
+    let cursorLocation: Int
 }
 
 private struct YoloModeToggleButton: View {
@@ -295,10 +342,15 @@ struct GrowingTextView: NSViewRepresentable {
     @Environment(\.composerTextInputHeight) private var externalHeight
     @Binding var text: String
     @Binding var measuredHeight: CGFloat
+    @Binding var selectionRequest: ComposerTextSelectionRequest?
     let onPrimaryAction: () -> Void
+    let onConfirmAuxiliarySelection: () -> Bool
+    let onMoveAuxiliarySelection: (Int) -> Bool
+    let onCancelAuxiliaryUI: () -> Bool
     let allowsEmptyPrimaryAction: Bool
+    let onImportAttachments: ([ComposerAttachmentImportItem]) -> Void
 
-    private let minimumHeight: CGFloat = 36
+    private let minimumHeight: CGFloat = ComposerLayout.minimumTextViewHeight
     private let maximumHeight: CGFloat = 140
 
     func makeCoordinator() -> Coordinator {
@@ -306,7 +358,7 @@ struct GrowingTextView: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let textView = NSTextView()
+        let textView = ComposerNSTextView()
         textView.drawsBackground = false
         textView.isRichText = false
         textView.isAutomaticQuoteSubstitutionEnabled = false
@@ -318,6 +370,10 @@ struct GrowingTextView: NSViewRepresentable {
         textView.textContainerInset = NSSize(width: 0, height: 4)
         textView.textContainer?.lineFragmentPadding = 0
         textView.string = text
+        textView.onImportAttachments = onImportAttachments
+        textView.onConfirmAuxiliarySelection = onConfirmAuxiliarySelection
+        textView.onMoveAuxiliarySelection = onMoveAuxiliarySelection
+        textView.onCancelAuxiliaryUI = onCancelAuxiliaryUI
 
         let scrollView = NSScrollView()
         scrollView.drawsBackground = false
@@ -335,7 +391,7 @@ struct GrowingTextView: NSViewRepresentable {
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
-        guard let textView = scrollView.documentView as? NSTextView else { return }
+        guard let textView = scrollView.documentView as? ComposerNSTextView else { return }
         if textView.string != text {
             textView.string = text
 
@@ -344,11 +400,28 @@ struct GrowingTextView: NSViewRepresentable {
                 return
             }
         }
+        textView.onImportAttachments = onImportAttachments
+        textView.onConfirmAuxiliarySelection = onConfirmAuxiliarySelection
+        textView.onMoveAuxiliarySelection = onMoveAuxiliarySelection
+        textView.onCancelAuxiliaryUI = onCancelAuxiliaryUI
+
+        if let selectionRequest, context.coordinator.lastSelectionRequestID != selectionRequest.id {
+            context.coordinator.lastSelectionRequestID = selectionRequest.id
+            textView.string = selectionRequest.text
+            textView.setSelectedRange(NSRange(location: selectionRequest.cursorLocation, length: 0))
+            textView.window?.makeFirstResponder(textView)
+
+            DispatchQueue.main.async {
+                self.selectionRequest = nil
+            }
+        }
+
         context.coordinator.recalculateHeight(for: textView)
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: GrowingTextView
+        var lastSelectionRequestID: UUID?
 
         init(_ parent: GrowingTextView) {
             self.parent = parent
@@ -361,6 +434,22 @@ struct GrowingTextView: NSViewRepresentable {
         }
 
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            if commandSelector == #selector(NSResponder.moveUp(_:)) {
+                return parent.onMoveAuxiliarySelection(-1)
+            }
+
+            if commandSelector == #selector(NSResponder.moveDown(_:)) {
+                return parent.onMoveAuxiliarySelection(1)
+            }
+
+            if commandSelector == #selector(NSResponder.insertTab(_:)) {
+                return parent.onConfirmAuxiliarySelection()
+            }
+
+            if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+                return parent.onCancelAuxiliaryUI()
+            }
+
             let insertsNewline = commandSelector == #selector(NSResponder.insertNewline(_:))
                 || commandSelector == #selector(NSResponder.insertLineBreak(_:))
                 || commandSelector == #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:))
@@ -370,6 +459,10 @@ struct GrowingTextView: NSViewRepresentable {
             let shiftPressed = NSApp.currentEvent?.modifierFlags.contains(.shift) == true
             if shiftPressed {
                 return false
+            }
+
+            if parent.onConfirmAuxiliarySelection() {
+                return true
             }
 
             let trimmed = textView.string.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -401,10 +494,217 @@ struct GrowingTextView: NSViewRepresentable {
     }
 }
 
+private final class ComposerNSTextView: NSTextView {
+    var onImportAttachments: (([ComposerAttachmentImportItem]) -> Void)?
+    var onConfirmAuxiliarySelection: (() -> Bool)?
+    var onMoveAuxiliarySelection: ((Int) -> Bool)?
+    var onCancelAuxiliaryUI: (() -> Bool)?
+
+    override func paste(_ sender: Any?) {
+        let items = composerAttachmentItems(from: .general)
+        if !items.isEmpty {
+            onImportAttachments?(items)
+            return
+        }
+
+        super.paste(sender)
+    }
+
+    private func composerAttachmentItems(from pasteboard: NSPasteboard) -> [ComposerAttachmentImportItem] {
+        let fileURLs = composerFileURLs(from: pasteboard)
+        let orderedFileURLs = fileURLs.sorted { lhs, rhs in
+            isImageFileURL(lhs) && !isImageFileURL(rhs)
+        }
+
+        if !orderedFileURLs.isEmpty {
+            return orderedFileURLs.map(ComposerAttachmentImportItem.fileURL)
+        }
+
+        if let imageData = pasteboard.data(forType: .png) {
+            return [.imageData(imageData, filename: "Pasted Image.png", mimeType: "image/png")]
+        }
+
+        if let tiffData = pasteboard.data(forType: .tiff),
+           let image = NSImage(data: tiffData),
+           let tiffRepresentation = image.tiffRepresentation,
+           let bitmap = NSBitmapImageRep(data: tiffRepresentation),
+           let pngData = bitmap.representation(using: .png, properties: [:]) {
+            return [.imageData(pngData, filename: "Pasted Image.png", mimeType: "image/png")]
+        }
+
+        return []
+    }
+
+    private func composerFileURLs(from pasteboard: NSPasteboard) -> [URL] {
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
+        return (pasteboard.readObjects(forClasses: [NSURL.self], options: options) as? [URL]) ?? []
+    }
+
+    private func isImageFileURL(_ url: URL) -> Bool {
+        let resolvedURL = url.standardizedFileURL.resolvingSymlinksInPath()
+        let contentType = (try? resolvedURL.resourceValues(forKeys: [.contentTypeKey]))?.contentType
+            ?? UTType(filenameExtension: resolvedURL.pathExtension)
+        return contentType?.preferredMIMEType?.lowercased().hasPrefix("image/") == true
+    }
+}
+
 private struct HeightPreferenceKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
+    }
+}
+
+struct ComposerSlashCommandsPopover: View {
+    let commands: [ComposerSlashCommand]
+    let selectedIndex: Int
+    let onHoverIndex: (Int) -> Void
+    let onSelect: (ComposerSlashCommand) -> Void
+
+    private let cornerRadius: CGFloat = 20
+    private let visibleRowLimit = 5
+    private let estimatedRowHeight: CGFloat = 56
+    private let rowSpacing: CGFloat = 4
+    private let listVerticalPadding: CGFloat = 16
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Slash Commands")
+                    .font(.neoMonoSmall)
+                    .foregroundStyle(NeoCodeTheme.textMuted)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 12)
+                    .padding(.bottom, 8)
+
+                ScrollView(.vertical, showsIndicators: false) {
+                    LazyVStack(alignment: .leading, spacing: 4) {
+                        if commands.isEmpty {
+                            Text("No matching slash commands.")
+                                .font(.neoBody)
+                                .foregroundStyle(NeoCodeTheme.textMuted)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 12)
+                        } else {
+                            ForEach(Array(commands.enumerated()), id: \.element.id) { index, command in
+                                ComposerSlashCommandRow(
+                                    command: command,
+                                    isSelected: index == selectedIndex
+                                )
+                                .id(command.id)
+                                .contentShape(RoundedRectangle(cornerRadius: 14))
+                                .onHover { hovering in
+                                    if hovering {
+                                        onHoverIndex(index)
+                                    }
+                                }
+                                .onTapGesture {
+                                    onSelect(command)
+                                }
+                            }
+                        }
+                    }
+                    .padding(8)
+                }
+                .frame(height: listHeight)
+                .clipped()
+            }
+            .background(
+                RoundedRectangle(cornerRadius: cornerRadius)
+                    .fill(NeoCodeTheme.panelRaised)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: cornerRadius)
+                            .stroke(NeoCodeTheme.lineStrong, lineWidth: 1)
+                    )
+            )
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+            .shadow(color: NeoCodeTheme.canvas.opacity(0.34), radius: 24, x: 0, y: 12)
+            .onAppear {
+                scrollSelectionIfNeeded(using: proxy)
+            }
+            .onChange(of: selectedIndex) { _, _ in
+                scrollSelectionIfNeeded(using: proxy)
+            }
+            .onChange(of: commands.map(\.id)) { _, _ in
+                scrollSelectionIfNeeded(using: proxy)
+            }
+        }
+    }
+
+    private func scrollSelectionIfNeeded(using proxy: ScrollViewProxy) {
+        guard commands.indices.contains(selectedIndex) else { return }
+
+        withAnimation(.easeOut(duration: 0.12)) {
+            proxy.scrollTo(commands[selectedIndex].id, anchor: .center)
+        }
+    }
+
+    private var listHeight: CGFloat {
+        let visibleCount = max(1, min(commands.count, visibleRowLimit))
+        let spacingTotal = CGFloat(max(visibleCount - 1, 0)) * rowSpacing
+        return CGFloat(visibleCount) * estimatedRowHeight + spacingTotal + listVerticalPadding
+    }
+}
+
+private struct ComposerSlashCommandRow: View {
+    let command: ComposerSlashCommand
+    let isSelected: Bool
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text("/\(command.name)")
+                        .font(.neoBody)
+                        .foregroundStyle(NeoCodeTheme.textPrimary)
+
+                    if let badgeTitle = command.badgeTitle {
+                        Text(badgeTitle)
+                            .font(.neoMonoSmall)
+                            .foregroundStyle(NeoCodeTheme.textMuted)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(
+                                Capsule()
+                                    .fill(NeoCodeTheme.panelSoft)
+                                    .overlay(
+                                        Capsule()
+                                            .stroke(NeoCodeTheme.line, lineWidth: 1)
+                                    )
+                            )
+                    }
+                }
+
+                if let description = command.description {
+                    Text(description)
+                        .font(.neoMonoSmall)
+                        .foregroundStyle(NeoCodeTheme.textSecondary)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer(minLength: 12)
+
+            if command.title.caseInsensitiveCompare(command.name) != .orderedSame {
+                Text(command.title)
+                    .font(.neoMonoSmall)
+                    .foregroundStyle(NeoCodeTheme.textMuted)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(rowBackground)
+    }
+
+    private var rowBackground: some View {
+        RoundedRectangle(cornerRadius: 14)
+            .fill(isSelected ? NeoCodeTheme.panelSoft : Color.clear)
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(isSelected ? NeoCodeTheme.lineStrong : Color.clear, lineWidth: 1)
+            )
     }
 }
 
@@ -567,15 +867,37 @@ struct ComposerAttachmentChip: View {
     let onRemove: () -> Void
 
     var body: some View {
+        Group {
+            if attachment.isImage {
+                ComposerImageAttachmentChip(attachment: attachment, onRemove: onRemove)
+            } else {
+                ComposerFileAttachmentChip(attachment: attachment, onRemove: onRemove)
+            }
+        }
+    }
+}
+
+private struct ComposerFileAttachmentChip: View {
+    let attachment: ComposerAttachment
+    let onRemove: () -> Void
+
+    var body: some View {
         HStack(spacing: 6) {
             Image(systemName: "paperclip")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(NeoCodeTheme.textMuted)
 
-            Text(attachment.name)
-                .font(.neoMonoSmall)
-                .foregroundStyle(NeoCodeTheme.textSecondary)
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(attachment.name)
+                    .font(.neoMonoSmall)
+                    .foregroundStyle(NeoCodeTheme.textSecondary)
+                    .lineLimit(1)
+
+                Text(attachment.mimeType)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(NeoCodeTheme.textMuted)
+                    .lineLimit(1)
+            }
 
             Button(action: onRemove) {
                 Image(systemName: "xmark")
@@ -584,14 +906,100 @@ struct ComposerAttachmentChip: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
         .background(
             Capsule()
                 .fill(NeoCodeTheme.panelSoft)
                 .overlay(Capsule().stroke(NeoCodeTheme.line, lineWidth: 1))
         )
     }
+}
+
+private struct ComposerImageAttachmentChip: View {
+    let attachment: ComposerAttachment
+    let onRemove: () -> Void
+    @State private var isHovering = false
+
+    private let previewWidth: CGFloat = 80
+    private let previewHeight: CGFloat = 64
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ZStack {
+                Group {
+                    if let image = composerAttachmentImage(for: attachment) {
+                        Image(nsImage: image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    } else {
+                        Rectangle()
+                            .fill(NeoCodeTheme.panelSoft)
+                            .overlay {
+                                Image(systemName: "photo")
+                                    .foregroundStyle(NeoCodeTheme.textMuted)
+                            }
+                    }
+                }
+                .frame(width: previewWidth, height: previewHeight)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                if isHovering {
+                    Button(action: onRemove) {
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.red.opacity(0.88))
+                            .overlay {
+                                VStack(spacing: 6) {
+                                    Image(systemName: "trash")
+                                        .font(.system(size: 18, weight: .semibold))
+                                    Text("Remove")
+                                        .font(.system(size: 11, weight: .semibold))
+                                }
+                                .foregroundStyle(Color.white)
+                            }
+                    }
+                    .buttonStyle(.plain)
+                    .frame(width: previewWidth, height: previewHeight)
+                    .help("Remove attachment")
+                    .accessibilityLabel("Remove attachment")
+                    .transition(.opacity)
+                }
+            }
+            .onHover { isHovering = $0 }
+            .animation(.easeOut(duration: 0.14), value: isHovering)
+
+            Text(attachment.name)
+                .font(.neoMonoSmall)
+                .foregroundStyle(NeoCodeTheme.textSecondary)
+                .lineLimit(1)
+                .frame(width: previewWidth, alignment: .leading)
+        }
+        .padding(7)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(NeoCodeTheme.panelSoft)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(NeoCodeTheme.line, lineWidth: 1)
+                )
+        )
+    }
+}
+
+private func composerAttachmentImage(for attachment: ComposerAttachment) -> NSImage? {
+    switch attachment.content {
+    case .file(let path):
+        return NSImage(contentsOfFile: path)
+    case .dataURL(let dataURL):
+        guard let data = data(fromDataURL: dataURL) else { return nil }
+        return NSImage(data: data)
+    }
+}
+
+private func data(fromDataURL dataURL: String) -> Data? {
+    guard let commaIndex = dataURL.firstIndex(of: ",") else { return nil }
+    let encoded = String(dataURL[dataURL.index(after: commaIndex)...])
+    return Data(base64Encoded: encoded)
 }
 
 struct InlineStatusView: View {

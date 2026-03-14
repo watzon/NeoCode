@@ -13,7 +13,6 @@ final class AppStore {
     private let autoRespondedPermissionTTL: TimeInterval = 60 * 60
 
     var projects: [ProjectSummary]
-    var collapsedProjectIDs = Set<ProjectSummary.ID>()
     var selectedProjectID: ProjectSummary.ID?
     var selectedSessionID: String?
     var draft = "" {
@@ -27,11 +26,13 @@ final class AppStore {
     var selectedModelVariant: String?
     var selectedAgent = ""
     var availableAgents: [String] = []
+    var availableCommands: [OpenCodeCommand] = []
     var availableThinkingLevels: [String] = []
     var selectedThinkingLevel: String?
     var selectedBranch = "main"
     var availableBranches: [String] = []
     var isLoadingSessions = false
+    var loadingTranscriptSessionID: String?
     var isSending = false
     var isRespondingToPrompt = false
     var isPromptReady = true
@@ -59,12 +60,14 @@ final class AppStore {
     private var promptPersistTask: Task<Void, Never>?
     private var yoloSessionKeys: Set<String>
     private var autoRespondedPermissionIDs: [String: Date] = [:]
+    private var activeTranscriptLoadKeys = Set<String>()
 
     init() {
         let persistedProjects = Self.normalizedProjects(PersistedProjectsStore().loadProjects())
         self.projects = persistedProjects
         self.selectedProjectID = persistedProjects.first?.id
         self.selectedSessionID = persistedProjects.first?.sessions.first?.id
+        self.loadingTranscriptSessionID = persistedProjects.first?.sessions.first?.id
         self.yoloSessionKeys = PersistedYoloPreferencesStore().loadYoloSessionKeys()
         seedComposerDefaults()
     }
@@ -74,6 +77,7 @@ final class AppStore {
         self.projects = normalizedProjects
         self.selectedProjectID = normalizedProjects.first?.id
         self.selectedSessionID = normalizedProjects.first?.sessions.first?.id
+        self.loadingTranscriptSessionID = normalizedProjects.first?.sessions.first?.id
         self.yoloSessionKeys = PersistedYoloPreferencesStore().loadYoloSessionKeys()
         seedComposerDefaults()
     }
@@ -88,7 +92,7 @@ final class AppStore {
     var selectedProject: ProjectSummary? {
         if let selectedSessionID,
            let project = projects.first(where: { project in
-               project.sessions.contains(where: { $0.id == selectedSessionID })
+                project.sessions.contains(where: { $0.id == selectedSessionID })
            }) {
             return project
         }
@@ -99,6 +103,28 @@ final class AppStore {
         }
 
         return projects.first
+    }
+
+    func project(for sessionID: String) -> ProjectSummary? {
+        projects.first(where: { project in
+            project.sessions.contains(where: { $0.id == sessionID })
+        })
+    }
+
+    func preferredEditorID(for projectID: ProjectSummary.ID) -> String? {
+        projects.first(where: { $0.id == projectID })?.settings.preferredEditorID
+    }
+
+    func setPreferredEditorID(_ editorID: String?, for projectID: ProjectSummary.ID) {
+        guard let projectIndex = projects.firstIndex(where: { $0.id == projectID }) else { return }
+        projects[projectIndex].settings.preferredEditorID = editorID
+        scheduleProjectPersistence()
+    }
+
+    func setProjectCollapsed(_ isCollapsed: Bool, for projectID: ProjectSummary.ID) {
+        guard let projectIndex = projects.firstIndex(where: { $0.id == projectID }) else { return }
+        projects[projectIndex].settings.isCollapsedInSidebar = isCollapsed
+        scheduleProjectPersistence()
     }
 
     func pendingPermission(for sessionID: String) -> OpenCodePermissionRequest? {
@@ -184,6 +210,11 @@ final class AppStore {
         discardSelectedEphemeralSessionIfNeeded(excluding: sessionID)
         selectedSessionID = sessionID
         selectedProjectID = projectID(for: sessionID)
+        if selectedSession?.isEphemeral == true {
+            loadingTranscriptSessionID = nil
+        } else {
+            loadingTranscriptSessionID = sessionID
+        }
         primePromptState(for: sessionID)
     }
 
@@ -207,20 +238,15 @@ final class AppStore {
         selectedProjectID = project.id
         selectedSessionID = nil
         primePromptState(for: nil)
-        collapsedProjectIDs.remove(project.id)
         lastError = nil
     }
 
     func toggleProjectCollapsed(_ projectID: ProjectSummary.ID) {
-        if collapsedProjectIDs.contains(projectID) {
-            collapsedProjectIDs.remove(projectID)
-        } else {
-            collapsedProjectIDs.insert(projectID)
-        }
+        setProjectCollapsed(!isProjectCollapsed(projectID), for: projectID)
     }
 
     func isProjectCollapsed(_ projectID: ProjectSummary.ID) -> Bool {
-        collapsedProjectIDs.contains(projectID)
+        projects.first(where: { $0.id == projectID })?.settings.isCollapsedInSidebar ?? false
     }
 
     func connect(to runtime: OpenCodeRuntime) async {
@@ -261,23 +287,38 @@ final class AppStore {
     }
 
     func syncSelectedSession(using runtime: OpenCodeRuntime) async {
-        guard let selectedSessionID,
-              let projectID = projectID(for: selectedSessionID),
+        guard let selectedSessionID else {
+            loadingTranscriptSessionID = nil
+            return
+        }
+
+        loadingTranscriptSessionID = selectedSessionID
+
+        guard let projectID = projectID(for: selectedSessionID),
               let project = projects.first(where: { $0.id == projectID }),
               session(for: selectedSessionID)?.isEphemeral != true
         else {
+            if loadingTranscriptSessionID == selectedSessionID {
+                loadingTranscriptSessionID = nil
+            }
             return
         }
 
         guard let service = await connectProject(projectID, using: runtime, includeComposerOptions: selectedProjectID == projectID),
               let connection = runtime.connection(for: project.path)
         else {
+            if loadingTranscriptSessionID == selectedSessionID {
+                loadingTranscriptSessionID = nil
+            }
             reevaluateRuntimeRetention(using: runtime)
             return
         }
 
         let connectionIdentifier = Self.connectionIdentifier(for: connection)
         guard isCurrentConnection(connectionIdentifier, for: projectID, runtime: runtime) else {
+            if loadingTranscriptSessionID == selectedSessionID {
+                loadingTranscriptSessionID = nil
+            }
             reevaluateRuntimeRetention(using: runtime)
             return
         }
@@ -369,9 +410,20 @@ final class AppStore {
 
     func sendDraft(using runtime: OpenCodeRuntime) async {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty,
+        guard !trimmed.isEmpty || !attachedFiles.isEmpty,
               let projectID = selectedProject?.id
         else { return }
+
+        if let localCommand = localSlashCommandInvocation(in: trimmed) {
+            let handled = await executeLocalSlashCommand(localCommand, in: projectID, using: runtime)
+            if handled {
+                logger.info(
+                    "Handled local slash command project=\(projectID.uuidString, privacy: .public) command=\(localCommand.command.name, privacy: .public)"
+                )
+            }
+            reevaluateRuntimeRetention(using: runtime)
+            return
+        }
 
         guard let service = await liveService(for: projectID, runtime: runtime) else {
             logger.error("Cannot send draft because live service is unavailable for project: \(projectID.uuidString, privacy: .public)")
@@ -380,46 +432,106 @@ final class AppStore {
 
         guard let sessionID = await resolveSessionForSend(projectID: projectID, service: service) else { return }
 
+        let accepted = await sendDraft(using: service, projectID: projectID, sessionID: sessionID)
+        if accepted {
+            scheduleStreamingRecoveryCheck(for: sessionID, projectID: projectID, using: runtime)
+        }
+
+        reevaluateRuntimeRetention(using: runtime)
+    }
+
+    @discardableResult
+    func sendDraft(using service: any OpenCodeServicing, projectID: ProjectSummary.ID, sessionID: String) async -> Bool {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let attachments = attachedFiles
+        guard !trimmed.isEmpty || !attachments.isEmpty else { return false }
+
+        let slashCommand = slashCommandInvocation(in: trimmed)
+
         isSending = true
         lastError = nil
-        logger.info(
-            "Sending draft session=\(sessionID, privacy: .public) characters=\(trimmed.count, privacy: .public) project=\(projectID.uuidString, privacy: .public)"
-        )
+        if let slashCommand {
+            logger.info(
+                "Sending slash command session=\(sessionID, privacy: .public) command=\(slashCommand.command.name, privacy: .public) argumentLength=\(slashCommand.arguments.count, privacy: .public) project=\(projectID.uuidString, privacy: .public)"
+            )
+        } else {
+            logger.info(
+                "Sending draft session=\(sessionID, privacy: .public) characters=\(trimmed.count, privacy: .public) project=\(projectID.uuidString, privacy: .public)"
+            )
+        }
 
         let optimisticID = "optimistic-user-\(UUID().uuidString)"
         let now = Date()
-        upsertMessage(
-            ChatMessage(id: optimisticID, role: .user, text: trimmed, timestamp: now, emphasis: .normal),
-            in: sessionID,
-            projectID: projectID
-        )
+        if !trimmed.isEmpty {
+            upsertMessage(
+                ChatMessage(id: optimisticID, role: .user, text: trimmed, timestamp: now, emphasis: .normal),
+                in: sessionID,
+                projectID: projectID
+            )
+        }
+        for attachment in attachments {
+            upsertMessage(
+                ChatMessage(
+                    id: "optimistic-user-attachment-\(UUID().uuidString)",
+                    role: .user,
+                    text: ChatAttachment(attachment: attachment).displayTitle,
+                    timestamp: now,
+                    emphasis: .normal,
+                    attachment: ChatAttachment(attachment: attachment)
+                ),
+                in: sessionID,
+                projectID: projectID
+            )
+        }
         draft = ""
         attachedFiles = []
         setSessionStatus(.running, sessionID: sessionID, projectID: projectID)
 
         do {
-            try await service.sendPromptAsync(
-                sessionID: sessionID,
-                text: trimmed,
-                options: OpenCodePromptOptions(
-                    model: selectedModel,
-                    agentName: selectedAgent.isEmpty ? nil : selectedAgent,
-                    variant: selectedThinkingLevel
+            if let slashCommand {
+                try await service.sendCommand(
+                    sessionID: sessionID,
+                    command: slashCommand.command.name,
+                    arguments: slashCommand.arguments,
+                    attachments: attachments,
+                    options: OpenCodePromptOptions(
+                        model: selectedModel,
+                        agentName: selectedAgent.isEmpty ? nil : selectedAgent,
+                        variant: selectedThinkingLevel
+                    )
                 )
-            )
-            logger.info("Draft accepted for session: \(sessionID, privacy: .public)")
-            scheduleStreamingRecoveryCheck(for: sessionID, projectID: projectID, using: runtime)
+                logger.info(
+                    "Slash command accepted for session \(sessionID, privacy: .public): \(slashCommand.command.name, privacy: .public)"
+                )
+            } else {
+                try await service.sendPromptAsync(
+                    sessionID: sessionID,
+                    text: trimmed,
+                    attachments: attachments,
+                    options: OpenCodePromptOptions(
+                        model: selectedModel,
+                        agentName: selectedAgent.isEmpty ? nil : selectedAgent,
+                        variant: selectedThinkingLevel
+                    )
+                )
+                logger.info("Draft accepted for session: \(sessionID, privacy: .public)")
+            }
         } catch {
             logger.error("Failed to send draft for session \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")
-            removeMessage(id: optimisticID, sessionID: sessionID, projectID: projectID)
+            if !trimmed.isEmpty {
+                removeMessage(id: optimisticID, sessionID: sessionID, projectID: projectID)
+            }
+            removeOptimisticAttachmentMessages(in: sessionID, projectID: projectID)
             draft = trimmed
+            attachedFiles = attachments
             setSessionStatus(.attention, sessionID: sessionID, projectID: projectID)
-            cancelStreamingRecoveryCheck(for: sessionID)
             lastError = error.localizedDescription
+            isSending = false
+            return false
         }
 
         isSending = false
-        reevaluateRuntimeRetention(using: runtime)
+        return true
     }
 
     @discardableResult
@@ -496,6 +608,7 @@ final class AppStore {
             try await service.sendPromptAsync(
                 sessionID: sessionID,
                 text: trimmed,
+                attachments: [],
                 options: OpenCodePromptOptions(
                     model: selectedModel,
                     agentName: selectedAgent.isEmpty ? nil : selectedAgent,
@@ -557,12 +670,19 @@ final class AppStore {
         }
     }
 
-    func addAttachments(from urls: [URL]) {
-        let existing = Set(attachedFiles.map(\.path))
-        let newAttachments = urls.compactMap { url -> ComposerAttachment? in
-            guard !existing.contains(url.path) else { return nil }
-            return ComposerAttachment(name: url.lastPathComponent, path: url.path)
-        }
+    func addAttachments(from urls: [URL]) async {
+        let attachments = await ComposerAttachment.makeAttachments(from: urls)
+        addAttachments(attachments)
+    }
+
+    func addAttachments(from items: [ComposerAttachmentImportItem]) async {
+        let attachments = await ComposerAttachment.makeAttachments(from: items)
+        addAttachments(attachments)
+    }
+
+    func addAttachments(_ attachments: [ComposerAttachment]) {
+        let existing = Set(attachedFiles.map(\.deduplicationKey))
+        let newAttachments = attachments.filter { !existing.contains($0.deduplicationKey) }
         attachedFiles.append(contentsOf: newAttachments)
     }
 
@@ -711,6 +831,7 @@ final class AppStore {
         refreshTask?.cancel()
         refreshTask = nil
         composerOptionsProjectPath = nil
+        availableCommands = []
         messageRoles = [:]
         liveSessionStatuses = [:]
         pendingPermissionsBySession = [:]
@@ -744,18 +865,21 @@ final class AppStore {
 
         if composerOptionsProjectPath == projectPath(for: projectID) {
             composerOptionsProjectPath = nil
+            availableCommands = []
         }
     }
 
     private func loadComposerOptions(using service: any OpenCodeServicing, projectPath: String) async {
         async let providersTask = service.listProviders()
         async let agentsTask = service.listAgents()
+        async let commandsTask = service.listCommands()
         async let branchesTask = GitBranchService().listBranches(in: projectPath)
         async let currentBranchTask = GitBranchService().currentBranch(in: projectPath)
 
         do {
             let providersResponse = try await providersTask
             let agents = try await agentsTask
+            let commands = (try? await commandsTask) ?? []
             let branches = (try? await branchesTask) ?? []
             let currentBranch = (try? await currentBranchTask) ?? selectedBranch
 
@@ -786,6 +910,13 @@ final class AppStore {
             if !availableAgents.contains(selectedAgent) {
                 selectedAgent = availableAgents.first ?? ""
             }
+
+            availableCommands = commands.sorted {
+                $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+            }
+            logger.info(
+                "Loaded composer options project=\(projectPath, privacy: .public) models=\(models.count, privacy: .public) agents=\(self.availableAgents.count, privacy: .public) commands=\(self.availableCommands.count, privacy: .public)"
+            )
 
             refreshThinkingLevels()
 
@@ -913,11 +1044,194 @@ final class AppStore {
             .joined(separator: " ")
     }
 
+    private func slashCommandInvocation(in text: String) -> SlashCommandInvocation? {
+        guard text.hasPrefix("/") else { return nil }
+
+        let components = text.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+        guard let first = components.first else { return nil }
+
+        let name = String(first.dropFirst())
+        guard !name.isEmpty,
+              let command = availableCommands.first(where: { $0.name == name })
+        else {
+            return nil
+        }
+
+        let arguments = components.count > 1 ? String(components[1]).trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        return SlashCommandInvocation(command: command, arguments: arguments)
+    }
+
+    private func localSlashCommandInvocation(in text: String) -> LocalSlashCommandInvocation? {
+        guard text.hasPrefix("/") else { return nil }
+
+        let components = text.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+        guard let first = components.first else { return nil }
+
+        let name = String(first.dropFirst()).lowercased()
+        guard !name.isEmpty,
+              let command = LocalComposerSlashCommand.allCases.first(where: { $0.matches(name: name) })
+        else {
+            return nil
+        }
+
+        let arguments = components.count > 1 ? String(components[1]).trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        return LocalSlashCommandInvocation(command: command, arguments: arguments)
+    }
+
+    private func executeLocalSlashCommand(
+        _ invocation: LocalSlashCommandInvocation,
+        in projectID: ProjectSummary.ID,
+        using runtime: OpenCodeRuntime
+    ) async -> Bool {
+        lastError = nil
+
+        switch invocation.command {
+        case .new:
+            createEphemeralSession(in: projectID)
+            draft = invocation.arguments
+            return true
+
+        case .model:
+            guard let query = invocation.arguments.nonEmptyTrimmed else {
+                lastError = "Usage: /model <name>"
+                return false
+            }
+            guard let match = bestMatchingModel(for: query) else {
+                lastError = "No model matches '\(query)'."
+                return false
+            }
+            selectedModelID = match.id
+            refreshThinkingLevels()
+            draft = ""
+            return true
+
+        case .agent:
+            guard let query = invocation.arguments.nonEmptyTrimmed else {
+                lastError = "Usage: /agent <name>"
+                return false
+            }
+            guard let match = bestMatchingAgent(for: query) else {
+                lastError = "No agent matches '\(query)'."
+                return false
+            }
+            selectedAgent = match
+            draft = ""
+            return true
+
+        case .branch:
+            guard let query = invocation.arguments.nonEmptyTrimmed else {
+                lastError = "Usage: /branch <name>"
+                return false
+            }
+            guard let match = bestMatchingBranch(for: query) else {
+                lastError = "No branch matches '\(query)'."
+                return false
+            }
+            selectedBranch = match
+            draft = ""
+            return true
+
+        case .reasoning:
+            guard let query = invocation.arguments.nonEmptyTrimmed else {
+                lastError = "Usage: /reasoning <level>"
+                return false
+            }
+            guard let match = bestMatchingThinkingLevel(for: query) else {
+                lastError = "No reasoning level matches '\(query)'."
+                return false
+            }
+            selectedThinkingLevel = match
+            draft = ""
+            return true
+
+        case .workspace:
+            guard let project = projects.first(where: { $0.id == projectID }) else {
+                lastError = "Select a project before opening a workspace."
+                return false
+            }
+            let service = WorkspaceToolService()
+            let tools = service.discoveredTools()
+            guard !tools.isEmpty else {
+                lastError = "No supported workspace tools were found."
+                return false
+            }
+            let preferredID = preferredEditorID(for: projectID)
+            let tool = tools.first(where: { $0.id == preferredID })
+                ?? service.defaultToolID(from: tools).flatMap { id in tools.first(where: { $0.id == id }) }
+                ?? tools.first
+            guard let tool else {
+                lastError = "No supported workspace tools were found."
+                return false
+            }
+            setPreferredEditorID(tool.id, for: projectID)
+            service.openProject(at: project.path, with: tool)
+            draft = ""
+            return true
+
+        case .yolo:
+            guard let sessionID = selectedSession?.id else {
+                lastError = "Select a session before changing YOLO mode."
+                return false
+            }
+            let action = invocation.arguments.lowercased()
+            let nextValue: Bool
+            switch action {
+            case "", "toggle":
+                nextValue = !isYoloModeEnabled(for: sessionID)
+            case "on", "enable", "enabled", "true":
+                nextValue = true
+            case "off", "disable", "disabled", "false":
+                nextValue = false
+            default:
+                lastError = "Usage: /yolo [on|off|toggle]"
+                return false
+            }
+            setYoloMode(nextValue, for: sessionID)
+            draft = ""
+            _ = runtime
+            return true
+        }
+    }
+
+    private func bestMatchingModel(for query: String) -> ComposerModelOption? {
+        bestMatch(in: availableModels, query: query) { model in
+            [model.title, model.providerID, model.modelID, model.id]
+        }
+    }
+
+    private func bestMatchingAgent(for query: String) -> String? {
+        bestMatch(in: availableAgents, query: query) { agent in
+            [agent, displayAgentName(agent)]
+        }
+    }
+
+    private func bestMatchingBranch(for query: String) -> String? {
+        bestMatch(in: availableBranches, query: query) { [$0] }
+    }
+
+    private func bestMatchingThinkingLevel(for query: String) -> String? {
+        bestMatch(in: availableThinkingLevels, query: query) { [$0] }
+    }
+
+    private func bestMatch<T>(in values: [T], query: String, searchableText: (T) -> [String]) -> T? {
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalizedQuery.isEmpty else { return nil }
+
+        return values.first(where: { value in
+            searchableText(value).contains(where: { $0.lowercased() == normalizedQuery })
+        }) ?? values.first(where: { value in
+            searchableText(value).contains(where: { $0.lowercased().hasPrefix(normalizedQuery) })
+        }) ?? values.first(where: { value in
+            searchableText(value).contains(where: { $0.lowercased().contains(normalizedQuery) })
+        })
+    }
+
     private func seedComposerDefaults() {
         let fallback = ComposerModelOption(id: "openai/gpt-5.4", providerID: "openai", modelID: "gpt-5.4", title: "GPT-5.4", variants: ["high", "medium", "low"])
         availableModels = [fallback]
         selectedModelID = fallback.id
         availableAgents = ["Builder"]
+        availableCommands = []
         selectedAgent = "Builder"
         availableThinkingLevels = fallback.variants
         selectedThinkingLevel = fallback.variants.first
@@ -974,7 +1288,23 @@ final class AppStore {
     }
 
     private func loadMessages(for sessionID: String, using service: any OpenCodeServicing, projectID: ProjectSummary.ID, allowCachedFallback: Bool = false) async {
+        let loadKey = "\(projectID.uuidString)|\(sessionID)"
+        guard activeTranscriptLoadKeys.insert(loadKey).inserted else { return }
+
         let keepsCurrentUI = allowCachedFallback && hasCachedTranscript(for: sessionID, projectID: projectID)
+        let shouldTrackVisibleLoadingState = selectedSessionID == sessionID && selectedProjectID == projectID
+
+        if shouldTrackVisibleLoadingState {
+            loadingTranscriptSessionID = sessionID
+        }
+
+        defer {
+            activeTranscriptLoadKeys.remove(loadKey)
+
+            if loadingTranscriptSessionID == sessionID {
+                loadingTranscriptSessionID = nil
+            }
+        }
 
         do {
             let messages = try await service.listMessages(sessionID: sessionID)
@@ -1197,6 +1527,7 @@ final class AppStore {
 
         if message.role == .user {
             reconcileOptimisticUserMessage(with: message, sessionID: sessionID, projectID: projectID)
+            reconcileOptimisticAttachmentMessage(with: message, sessionID: sessionID, projectID: projectID)
         }
 
         upsertMessage(message, in: sessionID, projectID: projectID)
@@ -1507,6 +1838,8 @@ final class AppStore {
     }
 
     private func reconcileOptimisticUserMessage(with message: ChatMessage, sessionID: String, projectID: ProjectSummary.ID) {
+        guard message.attachment == nil else { return }
+
         guard let indices = indices(for: sessionID, projectID: projectID) else { return }
         let transcript = projects[indices.project].sessions[indices.session].transcript
 
@@ -1517,6 +1850,30 @@ final class AppStore {
         }
 
         projects[indices.project].sessions[indices.session].transcript.remove(at: optimisticIndex)
+    }
+
+    private func reconcileOptimisticAttachmentMessage(with message: ChatMessage, sessionID: String, projectID: ProjectSummary.ID) {
+        guard let attachment = message.attachment,
+              let indices = indices(for: sessionID, projectID: projectID)
+        else {
+            return
+        }
+
+        let transcript = projects[indices.project].sessions[indices.session].transcript
+        guard let optimisticIndex = transcript.firstIndex(where: {
+            $0.id.hasPrefix("optimistic-user-attachment-") && $0.attachment?.optimisticKey == attachment.optimisticKey
+        }) else {
+            return
+        }
+
+        projects[indices.project].sessions[indices.session].transcript.remove(at: optimisticIndex)
+    }
+
+    private func removeOptimisticAttachmentMessages(in sessionID: String, projectID: ProjectSummary.ID) {
+        guard let indices = indices(for: sessionID, projectID: projectID) else { return }
+        projects[indices.project].sessions[indices.session].transcript.removeAll(where: {
+            $0.id.hasPrefix("optimistic-user-attachment-")
+        })
     }
 
     private func streamingPlaceholder(for part: OpenCodePart, defaultRole: ChatMessage.Role) -> ChatMessage? {
@@ -1662,6 +2019,8 @@ final class AppStore {
     }
 
     private func primePromptState(for sessionID: String?) {
+        attachedFiles = []
+
         guard let sessionID,
               let promptKey = promptDraftKey(for: sessionID)
         else {
@@ -1712,12 +2071,6 @@ final class AppStore {
     private func yoloPreferenceKey(for sessionID: String) -> String? {
         guard let project = selectedProject ?? project(for: sessionID) else { return nil }
         return "\(project.path)::\(sessionID)"
-    }
-
-    private func project(for sessionID: String) -> ProjectSummary? {
-        projects.first(where: { project in
-            project.sessions.contains(where: { $0.id == sessionID })
-        })
     }
 
     private func replacePendingQuestions(_ requests: [OpenCodeQuestionRequest], in projectID: ProjectSummary.ID) {
@@ -1998,4 +2351,14 @@ final class AppStore {
             projectPersistence.saveProjects(projects)
         }
     }
+}
+
+private struct SlashCommandInvocation {
+    let command: OpenCodeCommand
+    let arguments: String
+}
+
+private struct LocalSlashCommandInvocation {
+    let command: LocalComposerSlashCommand
+    let arguments: String
 }

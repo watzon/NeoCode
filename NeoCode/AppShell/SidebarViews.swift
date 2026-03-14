@@ -194,9 +194,9 @@ struct ProjectTreeNode: View {
                 }
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 4)
+            .padding(.vertical, 7)
             .background(selectionBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .clipShape(RoundedRectangle(cornerRadius: SidebarLayout.selectionCornerRadius, style: .continuous))
             .contentShape(Rectangle())
             .onTapGesture {
                 store.selectProject(project.id)
@@ -226,7 +226,15 @@ struct ProjectTreeNode: View {
     }
 
     private var selectionBackground: some ShapeStyle {
-        isSelectedProject ? NeoCodeTheme.panelSoft : .clear
+        if isSelectedProject {
+            return AnyShapeStyle(NeoCodeTheme.panelSoft)
+        }
+
+        if isHovering {
+            return AnyShapeStyle(NeoCodeTheme.panelSoft.opacity(SidebarLayout.hoverFillOpacity))
+        }
+
+        return AnyShapeStyle(.clear)
     }
 
     private func toggleCollapsed() {
@@ -270,11 +278,22 @@ struct SessionTreeRow: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
         .background(selectionBackground)
-        .contentShape(RoundedRectangle(cornerRadius: 10))
+        .clipShape(RoundedRectangle(cornerRadius: SidebarLayout.selectionCornerRadius, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: SidebarLayout.selectionCornerRadius, style: .continuous))
         .onHover { isHovering = $0 }
         .animation(.easeOut(duration: 0.16), value: isHovering)
         .contextMenu {
-            sessionActions
+            SessionActionMenuContent(
+                onRename: {
+                    renameTitle = session.title
+                    isRenaming = true
+                },
+                onDelete: {
+                    Task {
+                        await store.deleteSession(session.id, using: runtime)
+                    }
+                }
+            )
         }
         .alert("Rename Thread", isPresented: $isRenaming) {
             TextField("Thread name", text: $renameTitle)
@@ -316,7 +335,17 @@ struct SessionTreeRow: View {
 
     private var sessionMenuButton: some View {
         Menu {
-            sessionActions
+            SessionActionMenuContent(
+                onRename: {
+                    renameTitle = session.title
+                    isRenaming = true
+                },
+                onDelete: {
+                    Task {
+                        await store.deleteSession(session.id, using: runtime)
+                    }
+                }
+            )
         } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: 12, weight: .medium))
@@ -328,24 +357,16 @@ struct SessionTreeRow: View {
         .fixedSize()
     }
 
-    @ViewBuilder
-    private var sessionActions: some View {
-            Button("Rename") {
-                renameTitle = session.title
-                isRenaming = true
-            }
-
-            Divider()
-
-            Button("Delete", role: .destructive) {
-                Task {
-                    await store.deleteSession(session.id, using: runtime)
-                }
-            }
-    }
-
     private var selectionBackground: some ShapeStyle {
-        isSelected ? NeoCodeTheme.panelSoft : .clear
+        if isSelected {
+            return AnyShapeStyle(NeoCodeTheme.panelSoft)
+        }
+
+        if isHovering {
+            return AnyShapeStyle(NeoCodeTheme.panelSoft.opacity(SidebarLayout.hoverFillOpacity))
+        }
+
+        return AnyShapeStyle(.clear)
     }
 
     private var relativeAge: String {
@@ -442,4 +463,9 @@ struct SidebarSessionStatusBadge: View {
             NeoCodeTheme.warning.opacity(0.12)
         }
     }
+}
+
+private enum SidebarLayout {
+    static let selectionCornerRadius: CGFloat = 6
+    static let hoverFillOpacity: Double = 0.45
 }

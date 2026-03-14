@@ -1,14 +1,108 @@
 import Foundation
+import UniformTypeIdentifiers
+
+enum ComposerAttachmentContent: Hashable {
+    case file(path: String)
+    case dataURL(String)
+}
+
+enum ComposerAttachmentImportItem: Hashable {
+    case fileURL(URL)
+    case imageData(Data, filename: String, mimeType: String)
+}
 
 struct ComposerAttachment: Identifiable, Hashable {
     let id: UUID
     var name: String
-    var path: String
+    var mimeType: String
+    var content: ComposerAttachmentContent
 
-    init(id: UUID = UUID(), name: String, path: String) {
+    init(id: UUID = UUID(), name: String, mimeType: String, content: ComposerAttachmentContent) {
         self.id = id
         self.name = name
-        self.path = path
+        self.mimeType = mimeType
+        self.content = content
+    }
+
+    var isImage: Bool {
+        mimeType.lowercased().hasPrefix("image/")
+    }
+
+    var requestURL: String {
+        switch content {
+        case .file(let path):
+            return URL(fileURLWithPath: path).absoluteString
+        case .dataURL(let value):
+            return value
+        }
+    }
+
+    var deduplicationKey: String {
+        requestURL
+    }
+
+    var filePath: String? {
+        guard case .file(let path) = content else { return nil }
+        return path
+    }
+
+    static func makeAttachments(from urls: [URL]) async -> [ComposerAttachment] {
+        await makeAttachments(from: urls.map(ComposerAttachmentImportItem.fileURL))
+    }
+
+    static func makeAttachments(from items: [ComposerAttachmentImportItem]) async -> [ComposerAttachment] {
+        var attachments: [ComposerAttachment] = []
+        for item in items {
+            if let attachment = await makeAttachment(from: item) {
+                attachments.append(attachment)
+            }
+        }
+        return attachments
+    }
+
+    private static func makeAttachment(from item: ComposerAttachmentImportItem) async -> ComposerAttachment? {
+        switch item {
+        case .fileURL(let url):
+            return await makeAttachment(from: url)
+        case .imageData(let data, let filename, let mimeType):
+            return makeImageAttachment(data: data, filename: filename, mimeType: mimeType)
+        }
+    }
+
+    private static func makeAttachment(from url: URL) async -> ComposerAttachment? {
+        let loaded = await Task.detached(priority: .userInitiated) { () -> (name: String, mimeType: String, content: ComposerAttachmentContent)? in
+            let resolvedURL = url.standardizedFileURL.resolvingSymlinksInPath()
+            guard resolvedURL.isFileURL else { return nil }
+
+            let values = try? resolvedURL.resourceValues(forKeys: [.contentTypeKey, .nameKey, .isRegularFileKey])
+            if values?.isRegularFile == false {
+                return nil
+            }
+
+            let name = values?.name ?? resolvedURL.lastPathComponent
+            let mimeType = values?.contentType?.preferredMIMEType
+                ?? UTType(filenameExtension: resolvedURL.pathExtension)?.preferredMIMEType
+                ?? "application/octet-stream"
+
+            if mimeType.lowercased().hasPrefix("image/"),
+               let data = try? Data(contentsOf: resolvedURL) {
+                return (name, mimeType, .dataURL("data:\(mimeType);base64,\(data.base64EncodedString())"))
+            }
+
+            return (name, mimeType, .file(path: resolvedURL.path))
+        }.value
+
+        guard let loaded else { return nil }
+        return ComposerAttachment(name: loaded.name, mimeType: loaded.mimeType, content: loaded.content)
+    }
+
+    private static func makeImageAttachment(data: Data, filename: String, mimeType: String) -> ComposerAttachment? {
+        guard mimeType.lowercased().hasPrefix("image/") else { return nil }
+        return ComposerAttachment(
+            name: filename,
+            mimeType: mimeType,
+            content: .dataURL("data:\(mimeType);base64,\(data.base64EncodedString())")
+        )
     }
 }
 
@@ -18,6 +112,112 @@ struct ComposerModelOption: Identifiable, Hashable {
     let modelID: String
     let title: String
     let variants: [String]
+}
+
+enum LocalComposerSlashCommand: String, CaseIterable, Hashable, Identifiable {
+    case new
+    case model
+    case agent
+    case branch
+    case reasoning
+    case workspace
+    case yolo
+
+    nonisolated var id: String { rawValue }
+
+    nonisolated var name: String { rawValue }
+
+    nonisolated var title: String {
+        switch self {
+        case .new:
+            return "New Session"
+        case .model:
+            return "Switch Model"
+        case .agent:
+            return "Switch Agent"
+        case .branch:
+            return "Switch Branch"
+        case .reasoning:
+            return "Set Reasoning"
+        case .workspace:
+            return "Open Workspace"
+        case .yolo:
+            return "Toggle YOLO"
+        }
+    }
+
+    nonisolated var description: String {
+        switch self {
+        case .new:
+            return "Create a new session. Add text after it to seed the new draft."
+        case .model:
+            return "Change the selected model by name, provider, or model id."
+        case .agent:
+            return "Change the selected agent by name."
+        case .branch:
+            return "Change the selected git branch."
+        case .reasoning:
+            return "Set the current reasoning level, like low, medium, or high."
+        case .workspace:
+            return "Open the current project in the preferred workspace tool."
+        case .yolo:
+            return "Turn YOLO mode on, off, or toggle it for the current session."
+        }
+    }
+
+    nonisolated var aliases: [String] {
+        switch self {
+        case .reasoning:
+            return ["thinking"]
+        default:
+            return []
+        }
+    }
+
+    nonisolated var keywords: [String] {
+        [title, description] + aliases
+    }
+
+    nonisolated var badgeTitle: String? { "app" }
+
+    nonisolated func matches(name candidate: String) -> Bool {
+        candidate == name || aliases.contains(candidate)
+    }
+}
+
+struct ComposerSlashCommand: Identifiable, Hashable {
+    enum Kind: Hashable {
+        case local(LocalComposerSlashCommand)
+        case remote
+    }
+
+    let kind: Kind
+    let name: String
+    let title: String
+    let description: String?
+    let badgeTitle: String?
+    let keywords: [String]
+
+    var id: String {
+        switch kind {
+        case .local(let command):
+            return "local:\(command.rawValue)"
+        case .remote:
+            return "remote:\(name)"
+        }
+    }
+
+    nonisolated static func local(_ command: LocalComposerSlashCommand) -> Self {
+        Self(
+            kind: .local(command),
+            name: command.name,
+            title: command.title,
+            description: command.description,
+            badgeTitle: command.badgeTitle,
+            keywords: command.keywords
+        )
+    }
+
 }
 
 extension String {

@@ -194,6 +194,31 @@ struct NeoCodeTests {
         }
     }
 
+    @Test func decodesSlashCommands() throws {
+        let commands: [OpenCodeCommand] = try decode(
+            """
+            [
+              {
+                "name": "review",
+                "description": "Review the current working tree",
+                "agent": "builder",
+                "model": "openai/gpt-5.4",
+                "source": "skill",
+                "template": "Please review $1",
+                "subtask": true,
+                "hints": ["$1"]
+              }
+            ]
+            """
+        )
+
+        #expect(commands.count == 1)
+        #expect(commands[0].id == "review")
+        #expect(commands[0].trimmedDescription == "Review the current working tree")
+        #expect(commands[0].source == "skill")
+        #expect(commands[0].hints == ["$1"])
+    }
+
     @MainActor
     @Test func appStoreAppliesStreamingEventsToSelectedSession() throws {
         let store = AppStore(projects: [
@@ -512,6 +537,10 @@ struct NeoCodeTests {
                     type: .text,
                     text: "Fix session naming so new chats stop getting stuck on placeholders",
                     tool: nil,
+                    mime: nil,
+                    filename: nil,
+                    url: nil,
+                    source: nil,
                     state: nil,
                     time: OpenCodeTimeContainer(created: now, updated: now, completed: nil)
                 )
@@ -641,10 +670,287 @@ struct NeoCodeTests {
         #expect(service.sentPrompts.count == 1)
         #expect(service.sentPrompts[0].sessionID == "ses_1")
         #expect(service.sentPrompts[0].text == "Updated prompt")
+        #expect(service.sentPrompts[0].attachments.isEmpty)
         #expect(store.selectedSession?.transcript.count == 1)
         #expect(store.selectedSession?.transcript.first?.text == "Updated prompt")
         #expect(store.selectedSession?.transcript.first?.id.hasPrefix("optimistic-user-") == true)
         #expect(store.selectedSession?.status == .running)
+    }
+
+    @MainActor
+    @Test func chatMessageFileAttachmentRoundTripsThroughCodable() throws {
+        let message = ChatMessage(
+            id: "file_1",
+            role: .user,
+            text: "diagram.png",
+            timestamp: Date(timeIntervalSince1970: 100),
+            emphasis: .normal,
+            attachment: ChatAttachment(filename: "diagram.png", mimeType: "image/png", url: "data:image/png;base64,AAAA")
+        )
+
+        let data = try JSONEncoder().encode(message)
+        let decoded = try JSONDecoder().decode(ChatMessage.self, from: data)
+
+        #expect(decoded == message)
+    }
+
+    @MainActor
+    @Test func openCodeClientPostsPromptAttachments() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { MockURLProtocol.requestHandler = nil }
+        var capturedRequest: URLRequest?
+
+        MockURLProtocol.requestHandler = { request in
+            capturedRequest = request
+
+            guard let url = request.url,
+                  let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)
+            else {
+                throw URLError(.badServerResponse)
+            }
+
+            return (response, Data("{}".utf8))
+        }
+
+        let baseURL = try #require(URL(string: "http://127.0.0.1:4000"))
+        let client = OpenCodeClient(
+            connection: OpenCodeRuntime.Connection(
+                projectPath: "/tmp/NeoCode",
+                baseURL: baseURL,
+                username: "user",
+                password: "pass",
+                version: "1.0.0"
+            ),
+            session: session
+        )
+
+        try await client.sendPromptAsync(
+            sessionID: "ses_1",
+            text: "Look at this",
+            attachments: [
+                ComposerAttachment(
+                    name: "diagram.png",
+                    mimeType: "image/png",
+                    content: .dataURL("data:image/png;base64,AAAA")
+                ),
+            ],
+            options: nil
+        )
+
+        let request = try #require(capturedRequest)
+        #expect(request.httpMethod == "POST")
+        #expect(request.url?.path == "/session/ses_1/prompt_async")
+
+        let bodyData = try requestBodyData(from: request)
+        let body = try #require(bodyData)
+        let payload = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+        let parts = try #require(payload?["parts"] as? [[String: Any]])
+        #expect(parts.count == 2)
+        #expect(parts[0]["type"] as? String == "text")
+        #expect(parts[1]["type"] as? String == "file")
+        #expect(parts[1]["mime"] as? String == "image/png")
+        #expect(parts[1]["filename"] as? String == "diagram.png")
+        #expect(parts[1]["url"] as? String == "data:image/png;base64,AAAA")
+    }
+
+    @MainActor
+    @Test func openCodeClientPostsSlashCommandRequests() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { MockURLProtocol.requestHandler = nil }
+        var capturedRequest: URLRequest?
+
+        MockURLProtocol.requestHandler = { request in
+            capturedRequest = request
+
+            guard let url = request.url,
+                  let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)
+            else {
+                throw URLError(.badServerResponse)
+            }
+
+            let body = Data(
+                """
+                {
+                  "info": {
+                    "id": "msg_1",
+                    "sessionID": "ses_1",
+                    "role": "assistant",
+                    "agent": null,
+                    "modelID": null,
+                    "time": null
+                  },
+                  "parts": []
+                }
+                """.utf8
+            )
+            return (response, body)
+        }
+
+        let baseURL = try #require(URL(string: "http://127.0.0.1:4000"))
+        let client = OpenCodeClient(
+            connection: OpenCodeRuntime.Connection(
+                projectPath: "/tmp/NeoCode",
+                baseURL: baseURL,
+                username: "user",
+                password: "pass",
+                version: "1.0.0"
+            ),
+            session: session
+        )
+
+        try await client.sendCommand(
+            sessionID: "ses_1",
+            command: "review",
+            arguments: "current diff",
+            attachments: [
+                ComposerAttachment(
+                    name: "diagram.png",
+                    mimeType: "image/png",
+                    content: .dataURL("data:image/png;base64,AAAA")
+                ),
+            ],
+            options: OpenCodePromptOptions(
+                model: ComposerModelOption(
+                    id: "openai/gpt-5.4",
+                    providerID: "openai",
+                    modelID: "gpt-5.4",
+                    title: "GPT-5.4",
+                    variants: ["high"]
+                ),
+                agentName: "builder",
+                variant: "high"
+            )
+        )
+
+        let request = try #require(capturedRequest)
+        #expect(request.httpMethod == "POST")
+        #expect(request.url?.path == "/session/ses_1/command")
+
+        let bodyData = try #require(try requestBodyData(from: request))
+        let payload = try #require(JSONSerialization.jsonObject(with: bodyData) as? [String: Any])
+        #expect(payload["command"] as? String == "review")
+        #expect(payload["arguments"] as? String == "current diff")
+        #expect(payload["model"] as? String == "openai/gpt-5.4")
+        #expect(payload["agent"] as? String == "builder")
+        #expect(payload["variant"] as? String == "high")
+
+        let parts = try #require(payload["parts"] as? [[String: Any]])
+        #expect(parts.count == 1)
+        #expect(parts[0]["type"] as? String == "file")
+        #expect(parts[0]["filename"] as? String == "diagram.png")
+    }
+
+    @MainActor
+    @Test func appStoreRoutesMatchingSlashDraftThroughCommandEndpoint() async {
+        let projectID = UUID()
+        let store = AppStore(projects: [
+            ProjectSummary(
+                id: projectID,
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(id: "ses_1", title: "Existing", lastUpdatedAt: .distantPast),
+                ]
+            ),
+        ])
+        let service = MockOpenCodeService()
+
+        store.selectSession("ses_1")
+        store.availableCommands = [
+            OpenCodeCommand(
+                name: "review",
+                description: "Review current changes",
+                agent: nil,
+                model: nil,
+                source: "skill",
+                template: nil,
+                subtask: true,
+                hints: ["$1"]
+            ),
+        ]
+        store.draft = "/review current diff"
+
+        let didSend = await store.sendDraft(using: service, projectID: projectID, sessionID: "ses_1")
+
+        #expect(didSend == true)
+        #expect(service.sentPrompts.isEmpty)
+        #expect(service.sentCommands.count == 1)
+        #expect(service.sentCommands[0].sessionID == "ses_1")
+        #expect(service.sentCommands[0].command == "review")
+        #expect(service.sentCommands[0].arguments == "current diff")
+        #expect(store.draft.isEmpty)
+        #expect(store.selectedSession?.transcript.last?.text == "/review current diff")
+        #expect(store.selectedSession?.status == .running)
+    }
+
+    @MainActor
+    @Test func appStoreFallsBackToPromptForUnknownSlashDraft() async {
+        let projectID = UUID()
+        let store = AppStore(projects: [
+            ProjectSummary(
+                id: projectID,
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(id: "ses_1", title: "Existing", lastUpdatedAt: .distantPast),
+                ]
+            ),
+        ])
+        let service = MockOpenCodeService()
+
+        store.selectSession("ses_1")
+        store.availableCommands = []
+        store.draft = "/unknown raw text"
+
+        let didSend = await store.sendDraft(using: service, projectID: projectID, sessionID: "ses_1")
+
+        #expect(didSend == true)
+        #expect(service.sentCommands.isEmpty)
+        #expect(service.sentPrompts.count == 1)
+        #expect(service.sentPrompts[0].text == "/unknown raw text")
+    }
+
+    @MainActor
+    @Test func appStoreRestoresSlashDraftWhenCommandExecutionFails() async {
+        let projectID = UUID()
+        let store = AppStore(projects: [
+            ProjectSummary(
+                id: projectID,
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(id: "ses_1", title: "Existing", lastUpdatedAt: .distantPast),
+                ]
+            ),
+        ])
+        let service = MockOpenCodeService(sendPromptError: TestFailure.failed("command failed"))
+
+        store.selectSession("ses_1")
+        store.availableCommands = [
+            OpenCodeCommand(
+                name: "review",
+                description: nil,
+                agent: nil,
+                model: nil,
+                source: "command",
+                template: nil,
+                subtask: nil,
+                hints: []
+            ),
+        ]
+        store.draft = "/review current diff"
+
+        let didSend = await store.sendDraft(using: service, projectID: projectID, sessionID: "ses_1")
+
+        #expect(didSend == false)
+        #expect(store.draft == "/review current diff")
+        #expect(store.lastError == "command failed")
+        #expect(store.selectedSession?.status == .attention)
+        #expect(service.sentCommands.isEmpty)
     }
 
     @MainActor
@@ -1068,15 +1374,24 @@ private final class MockURLProtocol: URLProtocol {
 }
 
 private final class MockOpenCodeService: OpenCodeServicing {
-    struct SentPrompt: Equatable {
+    struct SentPrompt {
         let sessionID: String
         let text: String
+        let attachments: [ComposerAttachment]
+    }
+
+    struct SentCommand {
+        let sessionID: String
+        let command: String
+        let arguments: String
+        let attachments: [ComposerAttachment]
     }
 
     var revertedSessionID: String?
     var revertedMessageID: String?
     var unrevertedSessionIDs: [String] = []
     var sentPrompts: [SentPrompt] = []
+    var sentCommands: [SentCommand] = []
     var repliedPermissionIDs: [String] = []
     var repliedQuestionIDs: [String] = []
     var rejectedQuestionIDs: [String] = []
@@ -1090,6 +1405,7 @@ private final class MockOpenCodeService: OpenCodeServicing {
     func listSessionStatuses() async throws -> [String: OpenCodeSessionActivity] { [:] }
     func listPermissions() async throws -> [OpenCodePermissionRequest] { [] }
     func listQuestions() async throws -> [OpenCodeQuestionRequest] { [] }
+    func listCommands() async throws -> [OpenCodeCommand] { [] }
     func createSession(title: String?) async throws -> OpenCodeSession { fatalError("Unused in test") }
     func updateSession(sessionID: String, title: String) async throws -> OpenCodeSession { fatalError("Unused in test") }
     func deleteSession(sessionID: String) async throws -> Bool { true }
@@ -1119,11 +1435,24 @@ private final class MockOpenCodeService: OpenCodeServicing {
     func listAgents() async throws -> [OpenCodeAgent] { [] }
     func listMessages(sessionID: String) async throws -> [OpenCodeMessageEnvelope] { [] }
 
-    func sendPromptAsync(sessionID: String, text: String, options: OpenCodePromptOptions?) async throws {
+    func sendPromptAsync(sessionID: String, text: String, attachments: [ComposerAttachment], options: OpenCodePromptOptions?) async throws {
         if let sendPromptError {
             throw sendPromptError
         }
-        sentPrompts.append(SentPrompt(sessionID: sessionID, text: text))
+        sentPrompts.append(SentPrompt(sessionID: sessionID, text: text, attachments: attachments))
+    }
+
+    func sendCommand(
+        sessionID: String,
+        command: String,
+        arguments: String,
+        attachments: [ComposerAttachment],
+        options: OpenCodePromptOptions?
+    ) async throws {
+        if let sendPromptError {
+            throw sendPromptError
+        }
+        sentCommands.append(SentCommand(sessionID: sessionID, command: command, arguments: arguments, attachments: attachments))
     }
 
     func eventStream() throws -> AsyncThrowingStream<OpenCodeEvent, Error> {

@@ -7,18 +7,37 @@ struct ProjectSummary: Codable, Identifiable, Hashable {
     var name: String
     var path: String
     var status: RuntimeStatus
+    var settings: ProjectSettings
     var sessions: [SessionSummary]
 
-    init(id: UUID = UUID(), name: String, path: String, status: RuntimeStatus = .idle, sessions: [SessionSummary] = []) {
+    init(
+        id: UUID = UUID(),
+        name: String,
+        path: String,
+        status: RuntimeStatus = .idle,
+        settings: ProjectSettings = .init(),
+        sessions: [SessionSummary] = []
+    ) {
         self.id = id
         self.name = name
         self.path = path
         self.status = status
+        self.settings = settings
         self.sessions = sessions
     }
 
     var displayedSessions: [SessionSummary] {
         Array(sessions.prefix(Self.displayedSessionLimit))
+    }
+}
+
+struct ProjectSettings: Codable, Hashable {
+    var isCollapsedInSidebar: Bool
+    var preferredEditorID: String?
+
+    init(isCollapsedInSidebar: Bool = false, preferredEditorID: String? = nil) {
+        self.isCollapsedInSidebar = isCollapsedInSidebar
+        self.preferredEditorID = preferredEditorID
     }
 }
 
@@ -118,6 +137,67 @@ struct SessionSummary: Codable, Identifiable, Hashable {
     }
 }
 
+struct ChatAttachment: Codable, Hashable {
+    let filename: String?
+    let mimeType: String
+    let url: String
+    let sourcePath: String?
+
+    init(filename: String?, mimeType: String, url: String, sourcePath: String? = nil) {
+        self.filename = filename
+        self.mimeType = mimeType
+        self.url = url
+        self.sourcePath = sourcePath
+    }
+
+    init(attachment: ComposerAttachment) {
+        self.init(
+            filename: attachment.name,
+            mimeType: attachment.mimeType,
+            url: attachment.requestURL,
+            sourcePath: attachment.filePath
+        )
+    }
+
+    var isImage: Bool {
+        mimeType.lowercased().hasPrefix("image/")
+    }
+
+    var displayTitle: String {
+        if let filename, !filename.isEmpty {
+            return filename
+        }
+
+        if let sourcePath, !sourcePath.isEmpty {
+            return URL(fileURLWithPath: sourcePath).lastPathComponent
+        }
+
+        if url.hasPrefix("data:") {
+            return mimeType
+        }
+
+        if let parsedURL = URL(string: url) {
+            let lastPathComponent = parsedURL.lastPathComponent
+            if !lastPathComponent.isEmpty {
+                return lastPathComponent
+            }
+        }
+
+        return "Attachment"
+    }
+
+    var displaySubtitle: String? {
+        if let sourcePath, !sourcePath.isEmpty {
+            return sourcePath
+        }
+        return mimeType.isEmpty ? nil : mimeType
+    }
+
+    var optimisticKey: String {
+        url
+    }
+}
+
 struct ChatMessage: Codable, Identifiable, Hashable {
     enum Role: String, Codable, Hashable {
         case user
@@ -193,8 +273,19 @@ struct ChatMessage: Codable, Identifiable, Hashable {
     var emphasis: Emphasis
     var kind: Kind
     var isInProgress: Bool
+    var attachment: ChatAttachment?
 
-    init(id: String, messageID: String? = nil, role: Role, text: String, timestamp: Date, emphasis: Emphasis, kind: Kind = .plain, isInProgress: Bool = false) {
+    init(
+        id: String,
+        messageID: String? = nil,
+        role: Role,
+        text: String,
+        timestamp: Date,
+        emphasis: Emphasis,
+        kind: Kind = .plain,
+        isInProgress: Bool = false,
+        attachment: ChatAttachment? = nil
+    ) {
         self.id = id
         self.messageID = messageID
         self.role = role
@@ -203,6 +294,7 @@ struct ChatMessage: Codable, Identifiable, Hashable {
         self.emphasis = emphasis
         self.kind = kind
         self.isInProgress = isInProgress
+        self.attachment = attachment
     }
 
     init?(part: OpenCodePart, defaultRole: Role = .assistant) {
@@ -215,6 +307,7 @@ struct ChatMessage: Codable, Identifiable, Hashable {
         self.emphasis = part.chatEmphasis
         self.kind = part.chatMessageKind
         self.isInProgress = part.isInProgress
+        self.attachment = part.attachment
     }
 
     static func makeTranscript(from messages: [OpenCodeMessageEnvelope]) -> [ChatMessage] {
@@ -229,7 +322,8 @@ struct ChatMessage: Codable, Identifiable, Hashable {
                     timestamp: part.updatedAt ?? timestamp,
                     emphasis: part.chatEmphasis,
                     kind: part.chatMessageKind,
-                    isInProgress: part.isInProgress
+                    isInProgress: part.isInProgress,
+                    attachment: part.attachment
                 )
             }
         }

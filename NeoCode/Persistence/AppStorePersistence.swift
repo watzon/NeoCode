@@ -18,7 +18,15 @@ struct PersistedProjectsStore {
 
         if let legacyProjects = try? JSONDecoder().decode([PersistedProject].self, from: data) {
             return legacyProjects.map {
-                ProjectSummary(id: $0.id, name: $0.name, path: $0.path)
+                ProjectSummary(
+                    id: $0.id,
+                    name: $0.name,
+                    path: $0.path,
+                    settings: .init(
+                        isCollapsedInSidebar: $0.isCollapsedInSidebar ?? false,
+                        preferredEditorID: $0.preferredEditorID
+                    )
+                )
             }
         }
 
@@ -141,6 +149,8 @@ struct PersistedProject: Codable {
     let id: UUID
     let name: String
     let path: String
+    let isCollapsedInSidebar: Bool?
+    let preferredEditorID: String?
 }
 
 private extension ProjectSummary {
