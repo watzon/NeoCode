@@ -231,10 +231,12 @@ struct GitRepositoryService: Sendable {
             .components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        guard remotes.contains("origin") else { return 0 }
+        guard !remotes.isEmpty else { return 0 }
 
-        if remoteBranchExists(named: currentBranch, in: projectPath) {
-            return try revListCount(range: "origin/\(currentBranch)..HEAD", in: projectPath)
+        for remote in remotes {
+            if remoteBranchExists(named: currentBranch, remote: remote, in: projectPath) {
+                return try revListCount(range: "\(remote)/\(currentBranch)..HEAD", in: projectPath)
+            }
         }
 
         return hasAnyCommits(in: projectPath) ? 1 : 0
@@ -246,8 +248,8 @@ struct GitRepositoryService: Sendable {
         return Int(output) ?? 0
     }
 
-    private nonisolated static func remoteBranchExists(named branch: String, in projectPath: String) -> Bool {
-        (try? runGit(["show-ref", "--verify", "--quiet", "refs/remotes/origin/\(branch)"], in: projectPath)) != nil
+    private nonisolated static func remoteBranchExists(named branch: String, remote: String, in projectPath: String) -> Bool {
+        (try? runGit(["show-ref", "--verify", "--quiet", "refs/remotes/\(remote)/\(branch)"], in: projectPath)) != nil
     }
 
     private nonisolated static func hasAnyCommits(in projectPath: String) -> Bool {

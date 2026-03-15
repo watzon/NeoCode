@@ -765,12 +765,17 @@ final class AppStore {
         let branchService = GitBranchService()
         let status = await repositoryService.status(in: projectPath)
 
+        logger.debug(
+            "Git refresh result path=\(projectPath, privacy: .public) repo=\(status.isRepository, privacy: .public) changes=\(status.hasChanges, privacy: .public) ahead=\(status.aheadCount, privacy: .public)"
+        )
+
         guard selectedProject?.path == projectPath else { return }
 
         if gitStatus != status {
             gitStatus = status
         }
         if !status.isRepository {
+            logger.debug("Git refresh marked project as non-repository: \(projectPath, privacy: .public)")
             if !availableBranches.isEmpty {
                 availableBranches = []
             }
@@ -789,6 +794,10 @@ final class AppStore {
 
         let branches = (try? await branchesTask) ?? []
         let currentBranch = (try? await currentBranchTask) ?? selectedBranch
+
+        logger.debug(
+            "Git branch refresh path=\(projectPath, privacy: .public) current=\(currentBranch, privacy: .public) branches=\(branches.joined(separator: ","), privacy: .public)"
+        )
 
         guard selectedProject?.path == projectPath else { return }
 
@@ -1996,12 +2005,16 @@ final class AppStore {
     private func applyPostCommitState(pushAfterCommit: Bool, for projectPath: String) {
         let aheadCount = pushAfterCommit ? 0 : max(1, gitStatus.aheadCount + 1)
         gitStatus = GitRepositoryStatus(isRepository: true, hasChanges: false, aheadCount: aheadCount)
+        logger.debug(
+            "Applied optimistic post-commit state path=\(projectPath, privacy: .public) changes=false ahead=\(aheadCount, privacy: .public)"
+        )
         cacheCurrentGitState(for: projectPath)
     }
 
     private func scheduleGitRefreshAfterOperation(for projectPath: String) {
         Task { [weak self] in
             guard let self else { return }
+            self.logger.debug("Scheduling post-operation git refresh for path=\(projectPath, privacy: .public)")
             await self.refreshGitStatus()
             await self.refreshGitCommitPreview(showLoadingIndicator: false, projectPathOverride: projectPath)
         }
