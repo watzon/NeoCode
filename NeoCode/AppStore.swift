@@ -2,6 +2,12 @@ import Foundation
 import Observation
 import OSLog
 
+nonisolated struct AppStorePerformanceOptions: Sendable {
+    var projectPersistenceDebounce: Duration = .milliseconds(250)
+    var streamingPersistenceDebounce: Duration = .seconds(2)
+    var deltaFlushDebounce: Duration = .milliseconds(33)
+}
+
 @MainActor
 @Observable
 final class AppStore {
@@ -11,12 +17,31 @@ final class AppStore {
     private let yoloPreferencePersistence = PersistedYoloPreferencesStore()
     private let newSessionTitle = SessionSummary.defaultTitle
     private let autoRespondedPermissionTTL: TimeInterval = 60 * 60
+    private let performanceOptions: AppStorePerformanceOptions
+    private let isPersistenceEnabled: Bool
 
     private struct GitCachedState {
         let status: GitRepositoryStatus
         let commitPreview: GitCommitPreview?
         let branches: [String]
         let selectedBranch: String
+    }
+
+    private enum ProjectPersistenceMode {
+        case standard
+        case streaming
+    }
+
+    private struct BufferedTextDeltaKey: Hashable {
+        let projectID: ProjectSummary.ID
+        let sessionID: String
+        let partID: String
+    }
+
+    private struct BufferedTextDelta {
+        let messageID: String
+        var text: String
+        var updatedAt: Date
     }
 
     enum GitOperationState: Equatable {
@@ -100,6 +125,11 @@ final class AppStore {
     private var yoloSessionKeys: Set<String>
     private var autoRespondedPermissionIDs: [String: Date] = [:]
     private var activeTranscriptLoadKeys = Set<String>()
+    private var bufferedTextDeltas: [BufferedTextDeltaKey: BufferedTextDelta] = [:]
+    private var bufferedTextDeltaOrder: [BufferedTextDeltaKey] = []
+    private var bufferedDeltaFlushTask: Task<Void, Never>?
+    private var hasPendingProjectPersistence = false
+    private var projectPersistenceSaveCount = 0
 
     init() {
         let persistedProjects = Self.normalizedProjects(PersistedProjectsStore().loadProjects())
@@ -108,17 +138,33 @@ final class AppStore {
         self.selectedSessionID = persistedProjects.first?.sessions.first?.id
         self.loadingTranscriptSessionID = persistedProjects.first?.sessions.first?.id
         self.yoloSessionKeys = PersistedYoloPreferencesStore().loadYoloSessionKeys()
+        self.performanceOptions = AppStorePerformanceOptions()
+        self.isPersistenceEnabled = true
         seedComposerDefaults()
     }
 
-    init(projects: [ProjectSummary]) {
+    init(
+        projects: [ProjectSummary],
+        performanceOptions: AppStorePerformanceOptions = AppStorePerformanceOptions(),
+        isPersistenceEnabled: Bool = false
+    ) {
         let normalizedProjects = Self.normalizedProjects(projects)
         self.projects = normalizedProjects
         self.selectedProjectID = normalizedProjects.first?.id
         self.selectedSessionID = normalizedProjects.first?.sessions.first?.id
         self.loadingTranscriptSessionID = normalizedProjects.first?.sessions.first?.id
-        self.yoloSessionKeys = PersistedYoloPreferencesStore().loadYoloSessionKeys()
+        self.yoloSessionKeys = isPersistenceEnabled ? PersistedYoloPreferencesStore().loadYoloSessionKeys() : []
+        self.performanceOptions = performanceOptions
+        self.isPersistenceEnabled = isPersistenceEnabled
         seedComposerDefaults()
+    }
+
+    var debugBufferedTextDeltaCount: Int {
+        bufferedTextDeltas.count
+    }
+
+    var debugProjectPersistenceSaveCount: Int {
+        projectPersistenceSaveCount
     }
 
     var selectedSession: SessionSummary? {
@@ -198,10 +244,26 @@ final class AppStore {
             yoloSessionKeys.remove(key)
         }
 
-        yoloPreferencePersistence.saveYoloSessionKeys(yoloSessionKeys)
+        if isPersistenceEnabled {
+            yoloPreferencePersistence.saveYoloSessionKeys(yoloSessionKeys)
+        }
     }
 
     func preparePrompt(for sessionID: String?) async {
+        guard isPersistenceEnabled else {
+            isPromptReady = true
+            promptLoadingText = nil
+            isHydratingPrompt = true
+            if let sessionID,
+               let promptKey = promptDraftKey(for: sessionID) {
+                draft = promptDraftsByKey[promptKey] ?? ""
+            } else {
+                draft = ""
+            }
+            isHydratingPrompt = false
+            return
+        }
+
         guard let sessionID,
               let promptKey = promptDraftKey(for: sessionID)
         else {
@@ -254,6 +316,7 @@ final class AppStore {
         }
 
         scheduleGitRefreshLoop(for: projectPath(for: destinationProjectID))
+        flushPendingProjectPersistence()
     }
 
     func selectSession(_ sessionID: String) {
@@ -268,6 +331,7 @@ final class AppStore {
         }
         primePromptState(for: sessionID)
         scheduleGitRefreshLoop(for: selectedProject?.path)
+        flushPendingProjectPersistence()
     }
 
     func addProject(directoryURL: URL) {
@@ -1830,6 +1894,7 @@ final class AppStore {
 
     private func apply(part: OpenCodePart, projectID: ProjectSummary.ID) {
         guard let sessionID = part.sessionID else { return }
+        flushBufferedTextDeltas(for: sessionID, projectID: projectID)
         let defaultRole = part.messageID.flatMap { messageRoles[$0] } ?? .assistant
         guard let message = ChatMessage(part: part, defaultRole: defaultRole) ?? streamingPlaceholder(for: part, defaultRole: defaultRole) else {
             return
@@ -1852,30 +1917,26 @@ final class AppStore {
             return
         }
 
-        let messageIndex: Int
-        if let existingIndex = projects[indices.project].sessions[indices.session].transcript.firstIndex(where: { $0.id == delta.partID }) {
-            messageIndex = existingIndex
-        } else if let placeholder = streamingPlaceholder(for: delta, projectID: projectID) {
-            projects[indices.project].sessions[indices.session].transcript.append(placeholder)
-            messageIndex = projects[indices.project].sessions[indices.session].transcript.endIndex - 1
-            logger.debug(
-                "Created streaming placeholder for delta session=\(delta.sessionID, privacy: .public) part=\(delta.partID, privacy: .public)"
-            )
+        let key = BufferedTextDeltaKey(projectID: projectID, sessionID: delta.sessionID, partID: delta.partID)
+        if var buffered = bufferedTextDeltas[key] {
+            buffered.text += delta.delta
+            buffered.updatedAt = .now
+            bufferedTextDeltas[key] = buffered
         } else {
-            logger.debug(
-                "Dropping text delta for missing part session=\(delta.sessionID, privacy: .public) part=\(delta.partID, privacy: .public) field=\(delta.field, privacy: .public)"
+            bufferedTextDeltas[key] = BufferedTextDelta(
+                messageID: delta.messageID,
+                text: delta.delta,
+                updatedAt: .now
             )
-            return
+            bufferedTextDeltaOrder.append(key)
         }
 
-        projects[indices.project].sessions[indices.session].transcript[messageIndex].text += delta.delta
         projects[indices.project].sessions[indices.session].lastUpdatedAt = .now
-        projects[indices.project].sessions[indices.session].status = resolvedSessionStatus(
-            sessionID: delta.sessionID,
-            transcript: projects[indices.project].sessions[indices.session].transcript
-        )
-        applyInferredTitleIfNeeded(sessionIndex: indices.session, projectIndex: indices.project)
-        scheduleProjectPersistence()
+        if projects[indices.project].sessions[indices.session].status == .idle {
+            projects[indices.project].sessions[indices.session].status = .running
+        }
+        scheduleBufferedDeltaFlush()
+        scheduleProjectPersistence(.streaming)
     }
 
     private func reconnectDelay(for attempt: Int) -> Duration {
@@ -2065,6 +2126,7 @@ final class AppStore {
 
     private func replaceTranscript(in sessionID: String, projectID: ProjectSummary.ID, with transcript: [ChatMessage]) {
         guard let indices = indices(for: sessionID, projectID: projectID) else { return }
+        discardBufferedTextDeltas(for: sessionID, projectID: projectID)
         projects[indices.project].sessions[indices.session].transcript = transcript
         applyInferredTitleIfNeeded(sessionIndex: indices.session, projectIndex: indices.project)
         scheduleProjectPersistence()
@@ -2103,6 +2165,7 @@ final class AppStore {
 
     private func removeSession(_ sessionID: String, in projectID: ProjectSummary.ID) {
         guard let projectIndex = projects.firstIndex(where: { $0.id == projectID }) else { return }
+        discardBufferedTextDeltas(for: sessionID, projectID: projectID)
         projects[projectIndex].sessions.removeAll(where: { $0.id == sessionID })
         cancelStreamingRecoveryCheck(for: sessionID)
         liveSessionStatuses.removeValue(forKey: sessionID)
@@ -2136,8 +2199,10 @@ final class AppStore {
         projects[indices.project].sessions[indices.session].status = status
         if status != .running {
             cancelStreamingRecoveryCheck(for: sessionID)
+            flushPendingProjectPersistence()
+            return
         }
-        scheduleProjectPersistence()
+        scheduleProjectPersistence(.streaming)
     }
 
     private func refreshSessionStatus(sessionID: String, projectID: ProjectSummary.ID) {
@@ -2150,8 +2215,10 @@ final class AppStore {
         )
         if projects[indices.project].sessions[indices.session].status != .running {
             cancelStreamingRecoveryCheck(for: sessionID)
+            flushPendingProjectPersistence()
+            return
         }
-        scheduleProjectPersistence()
+        scheduleProjectPersistence(.streaming)
     }
 
     private func transcriptRevision(for sessionID: String, projectID: ProjectSummary.ID) -> String {
@@ -2370,6 +2437,8 @@ final class AppStore {
     }
 
     private func persistDraftIfNeeded() {
+        guard isPersistenceEnabled else { return }
+
         guard !isHydratingPrompt,
               isPromptReady,
               let sessionID = selectedSessionID,
@@ -2424,6 +2493,7 @@ final class AppStore {
     private func storePromptDraft(_ value: String, forKey promptKey: String) async {
         promptDraftsByKey[promptKey] = value
         loadedPromptKeys.insert(promptKey)
+        guard isPersistenceEnabled else { return }
         await promptDraftPersistence.saveDraft(value, forKey: promptKey)
     }
 
@@ -2623,6 +2693,7 @@ final class AppStore {
 
     private func replaceSession(_ sessionID: String, in projectID: ProjectSummary.ID, with session: SessionSummary) {
         guard let projectIndex = projects.firstIndex(where: { $0.id == projectID }) else { return }
+        discardBufferedTextDeltas(for: sessionID, projectID: projectID)
 
         projects[projectIndex].sessions.removeAll(where: { $0.id == session.id && $0.id != sessionID })
 
@@ -2715,13 +2786,140 @@ final class AppStore {
         projects[projectIndex].sessions[sessionIndex].title = inferred.title
     }
 
-    private func scheduleProjectPersistence() {
+    func flushPendingProjectPersistence() {
+        flushBufferedTextDeltas()
+        flushProjectPersistenceNow()
+    }
+
+    private func scheduleBufferedDeltaFlush() {
+        bufferedDeltaFlushTask?.cancel()
+        let delay = performanceOptions.deltaFlushDebounce
+        bufferedDeltaFlushTask = Task { [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            self.flushBufferedTextDeltas()
+        }
+    }
+
+    private func flushBufferedTextDeltas(for sessionID: String? = nil, projectID: ProjectSummary.ID? = nil) {
+        let keysToFlush = bufferedTextDeltaOrder.filter { key in
+            bufferedTextDeltas[key] != nil
+                && (sessionID == nil || key.sessionID == sessionID)
+                && (projectID == nil || key.projectID == projectID)
+        }
+
+        guard !keysToFlush.isEmpty else {
+            if sessionID == nil && projectID == nil {
+                bufferedDeltaFlushTask?.cancel()
+                bufferedDeltaFlushTask = nil
+            }
+            return
+        }
+
+        var changedSessions = Set<String>()
+
+        for key in keysToFlush {
+            guard let buffered = bufferedTextDeltas.removeValue(forKey: key),
+                  let indices = indices(for: key.sessionID, projectID: key.projectID)
+            else {
+                continue
+            }
+
+            let messageIndex: Int
+            if let existingIndex = projects[indices.project].sessions[indices.session].transcript.firstIndex(where: { $0.id == key.partID }) {
+                messageIndex = existingIndex
+            } else {
+                let placeholder = ChatMessage(
+                    id: key.partID,
+                    messageID: buffered.messageID,
+                    role: messageRoles[buffered.messageID] ?? .assistant,
+                    text: "",
+                    timestamp: buffered.updatedAt,
+                    emphasis: .normal,
+                    kind: .plain,
+                    isInProgress: true
+                )
+                projects[indices.project].sessions[indices.session].transcript.append(placeholder)
+                messageIndex = projects[indices.project].sessions[indices.session].transcript.endIndex - 1
+            }
+
+            projects[indices.project].sessions[indices.session].transcript[messageIndex].text += buffered.text
+            projects[indices.project].sessions[indices.session].transcript[messageIndex].timestamp = buffered.updatedAt
+            projects[indices.project].sessions[indices.session].lastUpdatedAt = buffered.updatedAt
+            changedSessions.insert("\(key.projectID.uuidString)|\(key.sessionID)")
+        }
+
+        bufferedTextDeltaOrder.removeAll { bufferedTextDeltas[$0] == nil }
+
+        for changedSession in changedSessions {
+            let components = changedSession.split(separator: "|", maxSplits: 1).map(String.init)
+            guard components.count == 2,
+                  let projectID = UUID(uuidString: components[0]),
+                  let indices = indices(for: components[1], projectID: projectID)
+            else {
+                continue
+            }
+
+            applyInferredTitleIfNeeded(sessionIndex: indices.session, projectIndex: indices.project)
+            let transcript = projects[indices.project].sessions[indices.session].transcript
+            projects[indices.project].sessions[indices.session].status = resolvedSessionStatus(
+                sessionID: components[1],
+                transcript: transcript,
+                fallback: projects[indices.project].sessions[indices.session].status
+            )
+        }
+
+        if sessionID == nil && projectID == nil {
+            bufferedDeltaFlushTask?.cancel()
+            bufferedDeltaFlushTask = nil
+        }
+    }
+
+    private func discardBufferedTextDeltas(for sessionID: String, projectID: ProjectSummary.ID) {
+        bufferedTextDeltas.keys
+            .filter { $0.sessionID == sessionID && $0.projectID == projectID }
+            .forEach { bufferedTextDeltas.removeValue(forKey: $0) }
+        bufferedTextDeltaOrder.removeAll { $0.sessionID == sessionID && $0.projectID == projectID }
+    }
+
+    private func flushProjectPersistenceNow() {
+        guard isPersistenceEnabled else {
+            hasPendingProjectPersistence = false
+            persistTask?.cancel()
+            persistTask = nil
+            return
+        }
+
         persistTask?.cancel()
+        persistTask = nil
+
+        guard hasPendingProjectPersistence else { return }
+
+        hasPendingProjectPersistence = false
+        projectPersistence.saveProjects(projects)
+        projectPersistenceSaveCount += 1
+    }
+
+    private func scheduleProjectPersistence(_ mode: ProjectPersistenceMode = .standard) {
+        guard isPersistenceEnabled else { return }
+
+        hasPendingProjectPersistence = true
+
+        persistTask?.cancel()
+        let delay: Duration
+        switch mode {
+        case .standard:
+            delay = performanceOptions.projectPersistenceDebounce
+        case .streaming:
+            delay = performanceOptions.streamingPersistenceDebounce
+        }
+
         persistTask = Task { [weak self] in
             guard let self else { return }
-            try? await Task.sleep(for: .milliseconds(250))
+            try? await Task.sleep(for: delay)
             guard !Task.isCancelled else { return }
-            projectPersistence.saveProjects(projects)
+            self.flushPendingProjectPersistence()
         }
     }
 }

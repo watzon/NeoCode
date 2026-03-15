@@ -2,87 +2,70 @@ import Foundation
 
 struct GitBranchService: Sendable {
     nonisolated func listBranches(in projectPath: String) async throws -> [String] {
-        try await Task.detached(priority: .utility) {
-            let output = try Self.runGit(["branch", "--format=%(refname:short)"], in: projectPath)
-            return output
-                .components(separatedBy: .newlines)
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-        }.value
+        let output = try await Self.runGit(["branch", "--format=%(refname:short)"], in: projectPath)
+        return output
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
     }
 
     nonisolated func currentBranch(in projectPath: String) async throws -> String {
-        try await Task.detached(priority: .utility) {
-            try Self.currentBranchSync(in: projectPath)
-        }.value
+        try await Self.currentBranch(in: projectPath)
     }
 
     nonisolated func initializeRepository(in projectPath: String) async throws {
-        try await Task.detached(priority: .utility) {
-            do {
-                _ = try Self.runGit(["init", "-b", "main"], in: projectPath)
-            } catch {
-                _ = try Self.runGit(["init"], in: projectPath)
-                _ = try? Self.runGit(["symbolic-ref", "HEAD", "refs/heads/main"], in: projectPath)
-            }
-        }.value
+        do {
+            _ = try await Self.runGit(["init", "-b", "main"], in: projectPath)
+        } catch {
+            _ = try await Self.runGit(["init"], in: projectPath)
+            _ = try? await Self.runGit(["symbolic-ref", "HEAD", "refs/heads/main"], in: projectPath)
+        }
     }
 
     nonisolated func switchBranch(named branch: String, in projectPath: String) async throws {
         let trimmed = branch.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
-        try await Task.detached(priority: .utility) {
-            do {
-                _ = try Self.runGit(["switch", trimmed], in: projectPath)
-            } catch {
-                _ = try Self.runGit(["checkout", trimmed], in: projectPath)
-            }
-        }.value
+        do {
+            _ = try await Self.runGit(["switch", trimmed], in: projectPath)
+        } catch {
+            _ = try await Self.runGit(["checkout", trimmed], in: projectPath)
+        }
     }
 
     nonisolated func createBranch(named branch: String, in projectPath: String) async throws {
         let trimmed = branch.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
-        try await Task.detached(priority: .utility) {
-            do {
-                _ = try Self.runGit(["switch", "-c", trimmed], in: projectPath)
-            } catch {
-                _ = try Self.runGit(["checkout", "-b", trimmed], in: projectPath)
-            }
-        }.value
+        do {
+            _ = try await Self.runGit(["switch", "-c", trimmed], in: projectPath)
+        } catch {
+            _ = try await Self.runGit(["checkout", "-b", trimmed], in: projectPath)
+        }
     }
 
-    private nonisolated static func currentBranchSync(in projectPath: String) throws -> String {
-        let branch = try runGit(["branch", "--show-current"], in: projectPath)
+    private nonisolated static func currentBranch(in projectPath: String) async throws -> String {
+        let branch = try await runGit(["branch", "--show-current"], in: projectPath)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if !branch.isEmpty {
             return branch
         }
 
-        return try runGit(["symbolic-ref", "--short", "HEAD"], in: projectPath)
+        return try await runGit(["symbolic-ref", "--short", "HEAD"], in: projectPath)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private nonisolated static func runGit(_ arguments: [String], in projectPath: String) throws -> String {
+    private nonisolated static func runGit(_ arguments: [String], in projectPath: String) async throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["git"] + arguments
         process.currentDirectoryURL = URL(fileURLWithPath: projectPath)
 
-        let output = Pipe()
-        process.standardOutput = output
-        process.standardError = output
+        let result = try await SubprocessRunner(process: process).run()
+        let string = result.output
 
-        try process.run()
-        process.waitUntilExit()
-
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        let string = String(data: data, encoding: .utf8) ?? ""
-
-        guard process.terminationStatus == 0 else {
-            throw NSError(domain: "GitBranchService", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: string.trimmingCharacters(in: .whitespacesAndNewlines)])
+        guard result.terminationStatus == 0 else {
+            throw NSError(domain: "GitBranchService", code: Int(result.terminationStatus), userInfo: [NSLocalizedDescriptionKey: string.trimmingCharacters(in: .whitespacesAndNewlines)])
         }
 
         return string

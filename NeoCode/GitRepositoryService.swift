@@ -116,74 +116,85 @@ struct GitCommitPreview: Equatable, Sendable {
 
 struct GitRepositoryService: Sendable {
     nonisolated func status(in projectPath: String) async -> GitRepositoryStatus {
-        await Task.detached(priority: .utility) {
-            do {
-                let repositoryFlag = try Self.runGit(["rev-parse", "--is-inside-work-tree"], in: projectPath)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                guard repositoryFlag == "true" else {
-                    return GitRepositoryStatus(isRepository: false, hasChanges: false, aheadCount: 0, hasRemote: false)
-                }
-
-                let output = try Self.runGit(["status", "--porcelain=v1", "--branch"], in: projectPath)
-                let currentBranch = try? Self.currentBranch(in: projectPath)
-                let remotes = try Self.listRemotes(in: projectPath)
-                let hasChanges = Self.parseHasChanges(output)
-                let aheadCount = (try? Self.resolveAheadCount(in: projectPath, currentBranch: currentBranch, statusOutput: output, remotes: remotes)) ?? 0
-                return GitRepositoryStatus(isRepository: true, hasChanges: hasChanges, aheadCount: aheadCount, hasRemote: !remotes.isEmpty)
-            } catch {
+        do {
+            let repositoryFlag = try await Self.runGit(["rev-parse", "--is-inside-work-tree"], in: projectPath)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard repositoryFlag == "true" else {
                 return GitRepositoryStatus(isRepository: false, hasChanges: false, aheadCount: 0, hasRemote: false)
             }
-        }.value
+
+            let output = try await Self.runGit(["status", "--porcelain=v1", "--branch"], in: projectPath)
+            async let currentBranch = try? Self.currentBranch(in: projectPath)
+            async let remotes = Self.listRemotes(in: projectPath)
+
+            let resolvedCurrentBranch = await currentBranch
+            let resolvedRemotes = (try? await remotes) ?? []
+            let hasChanges = Self.parseHasChanges(output)
+            let aheadCount = (try? await Self.resolveAheadCount(
+                in: projectPath,
+                currentBranch: resolvedCurrentBranch,
+                statusOutput: output,
+                remotes: resolvedRemotes
+            )) ?? 0
+
+            return GitRepositoryStatus(
+                isRepository: true,
+                hasChanges: hasChanges,
+                aheadCount: aheadCount,
+                hasRemote: !resolvedRemotes.isEmpty
+            )
+        } catch {
+            return GitRepositoryStatus(isRepository: false, hasChanges: false, aheadCount: 0, hasRemote: false)
+        }
     }
 
     nonisolated func commitPreview(in projectPath: String) async throws -> GitCommitPreview {
-        try await Task.detached(priority: .utility) {
-            let statusOutput = try Self.runGit(["status", "--porcelain=v1", "--branch"], in: projectPath)
-            let currentBranch = try Self.currentBranch(in: projectPath)
-            let stagedStats = try Self.runGit(["diff", "--cached", "--numstat"], in: projectPath)
-            let unstagedStats = try Self.runGit(["diff", "--numstat"], in: projectPath)
+        async let statusOutput = Self.runGit(["status", "--porcelain=v1", "--branch"], in: projectPath)
+        async let currentBranch = Self.currentBranch(in: projectPath)
+        async let stagedStats = Self.runGit(["diff", "--cached", "--numstat"], in: projectPath)
+        async let unstagedStats = Self.runGit(["diff", "--numstat"], in: projectPath)
 
-            return GitCommitPreview(
-                branch: currentBranch,
-                changedFiles: Self.parseChangedFiles(from: statusOutput),
-                stagedAdditions: Self.parseNumstat(stagedStats).additions,
-                stagedDeletions: Self.parseNumstat(stagedStats).deletions,
-                unstagedAdditions: Self.parseNumstat(unstagedStats).additions,
-                unstagedDeletions: Self.parseNumstat(unstagedStats).deletions
-            )
-        }.value
+        let resolvedStatusOutput = try await statusOutput
+        let resolvedCurrentBranch = try await currentBranch
+        let resolvedStagedStats = try await stagedStats
+        let resolvedUnstagedStats = try await unstagedStats
+
+        return GitCommitPreview(
+            branch: resolvedCurrentBranch,
+            changedFiles: Self.parseChangedFiles(from: resolvedStatusOutput),
+            stagedAdditions: Self.parseNumstat(resolvedStagedStats).additions,
+            stagedDeletions: Self.parseNumstat(resolvedStagedStats).deletions,
+            unstagedAdditions: Self.parseNumstat(resolvedUnstagedStats).additions,
+            unstagedDeletions: Self.parseNumstat(resolvedUnstagedStats).deletions
+        )
     }
 
     nonisolated func commit(message: String, includeUnstaged: Bool, in projectPath: String) async throws {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
-        try await Task.detached(priority: .utility) {
-            if includeUnstaged {
-                _ = try Self.runGit(["add", "-A"], in: projectPath)
-            }
+        if includeUnstaged {
+            _ = try await Self.runGit(["add", "-A"], in: projectPath)
+        }
 
-            _ = try Self.runGit(["commit", "-m", trimmed], in: projectPath)
-        }.value
+        _ = try await Self.runGit(["commit", "-m", trimmed], in: projectPath)
     }
 
     nonisolated func push(in projectPath: String) async throws {
-        try await Task.detached(priority: .utility) {
-            do {
-                _ = try Self.runGit(["push"], in: projectPath)
-            } catch {
-                let remotes = try Self.runGit(["remote"], in: projectPath)
-                    .components(separatedBy: .newlines)
-                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .filter { !$0.isEmpty }
-                guard remotes.contains("origin") else {
-                    throw error
-                }
-
-                let branch = try Self.currentBranch(in: projectPath)
-                _ = try Self.runGit(["push", "-u", "origin", branch], in: projectPath)
+        do {
+            _ = try await Self.runGit(["push"], in: projectPath)
+        } catch {
+            let remotes = try await Self.runGit(["remote"], in: projectPath)
+                .components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            guard remotes.contains("origin") else {
+                throw error
             }
-        }.value
+
+            let branch = try await Self.currentBranch(in: projectPath)
+            _ = try await Self.runGit(["push", "-u", "origin", branch], in: projectPath)
+        }
     }
 
     private nonisolated static func parseHasChanges(_ output: String) -> Bool {
@@ -192,10 +203,8 @@ struct GitRepositoryService: Sendable {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
 
-        for line in lines {
-            if !line.hasPrefix("## ") {
-                return true
-            }
+        for line in lines where !line.hasPrefix("## ") {
+            return true
         }
 
         return false
@@ -213,7 +222,7 @@ struct GitRepositoryService: Sendable {
         currentBranch: String?,
         statusOutput: String,
         remotes: [String]
-    ) throws -> Int {
+    ) async throws -> Int {
         if let branchLine = statusOutput
             .components(separatedBy: .newlines)
             .first(where: { $0.hasPrefix("## ") }) {
@@ -223,43 +232,42 @@ struct GitRepositoryService: Sendable {
             }
         }
 
-        if let upstream = try? runGit(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], in: projectPath)
+        if let upstream = try? await runGit(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], in: projectPath)
             .trimmingCharacters(in: .whitespacesAndNewlines), !upstream.isEmpty {
-            return try revListCount(range: "\(upstream)..HEAD", in: projectPath)
+            return try await revListCount(range: "\(upstream)..HEAD", in: projectPath)
         }
 
         guard let currentBranch, !currentBranch.isEmpty else { return 0 }
-
         guard !remotes.isEmpty else { return 0 }
 
         for remote in remotes {
-            if remoteBranchExists(named: currentBranch, remote: remote, in: projectPath) {
-                return try revListCount(range: "\(remote)/\(currentBranch)..HEAD", in: projectPath)
+            if await remoteBranchExists(named: currentBranch, remote: remote, in: projectPath) {
+                return try await revListCount(range: "\(remote)/\(currentBranch)..HEAD", in: projectPath)
             }
         }
 
-        return hasAnyCommits(in: projectPath) ? 1 : 0
+        return await hasAnyCommits(in: projectPath) ? 1 : 0
     }
 
-    private nonisolated static func revListCount(range: String, in projectPath: String) throws -> Int {
-        let output = try runGit(["rev-list", "--count", range], in: projectPath)
+    private nonisolated static func revListCount(range: String, in projectPath: String) async throws -> Int {
+        let output = try await runGit(["rev-list", "--count", range], in: projectPath)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return Int(output) ?? 0
     }
 
-    private nonisolated static func listRemotes(in projectPath: String) throws -> [String] {
-        try runGit(["remote"], in: projectPath)
+    private nonisolated static func listRemotes(in projectPath: String) async throws -> [String] {
+        try await runGit(["remote"], in: projectPath)
             .components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
     }
 
-    private nonisolated static func remoteBranchExists(named branch: String, remote: String, in projectPath: String) -> Bool {
-        (try? runGit(["show-ref", "--verify", "--quiet", "refs/remotes/\(remote)/\(branch)"], in: projectPath)) != nil
+    private nonisolated static func remoteBranchExists(named branch: String, remote: String, in projectPath: String) async -> Bool {
+        (try? await runGit(["show-ref", "--verify", "--quiet", "refs/remotes/\(remote)/\(branch)"], in: projectPath)) != nil
     }
 
-    private nonisolated static func hasAnyCommits(in projectPath: String) -> Bool {
-        (try? runGit(["rev-parse", "--verify", "HEAD"], in: projectPath)) != nil
+    private nonisolated static func hasAnyCommits(in projectPath: String) async -> Bool {
+        (try? await runGit(["rev-parse", "--verify", "HEAD"], in: projectPath)) != nil
     }
 
     private nonisolated static func parseChangedFiles(from output: String) -> [GitFileChange] {
@@ -294,35 +302,28 @@ struct GitRepositoryService: Sendable {
             }
     }
 
-    private nonisolated static func currentBranch(in projectPath: String) throws -> String {
-        let branch = try runGit(["branch", "--show-current"], in: projectPath)
+    private nonisolated static func currentBranch(in projectPath: String) async throws -> String {
+        let branch = try await runGit(["branch", "--show-current"], in: projectPath)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if !branch.isEmpty {
             return branch
         }
 
-        return try runGit(["symbolic-ref", "--short", "HEAD"], in: projectPath)
+        return try await runGit(["symbolic-ref", "--short", "HEAD"], in: projectPath)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private nonisolated static func runGit(_ arguments: [String], in projectPath: String) throws -> String {
+    private nonisolated static func runGit(_ arguments: [String], in projectPath: String) async throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["git"] + arguments
         process.currentDirectoryURL = URL(fileURLWithPath: projectPath)
 
-        let output = Pipe()
-        process.standardOutput = output
-        process.standardError = output
+        let result = try await SubprocessRunner(process: process).run()
+        let string = result.output
 
-        try process.run()
-        process.waitUntilExit()
-
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        let string = String(data: data, encoding: .utf8) ?? ""
-
-        guard process.terminationStatus == 0 else {
-            throw NSError(domain: "GitRepositoryService", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: string.trimmingCharacters(in: .whitespacesAndNewlines)])
+        guard result.terminationStatus == 0 else {
+            throw NSError(domain: "GitRepositoryService", code: Int(result.terminationStatus), userInfo: [NSLocalizedDescriptionKey: string.trimmingCharacters(in: .whitespacesAndNewlines)])
         }
 
         return string

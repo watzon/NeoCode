@@ -259,6 +259,41 @@ struct NeoCodeCoreTests {
         #expect(snippet == "world")
     }
 
+    @Test func subprocessRunnerCancelsProcessTree() async throws {
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+        let childPIDFile = tempDirectory.appendingPathComponent("child.pid")
+        let runner = SubprocessRunner(
+            executableURL: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "sleep 30 & echo $! > \"\(childPIDFile.path)\" && wait"]
+        )
+
+        let task = Task {
+            try await runner.run()
+        }
+
+        let rootPID = try await waitForProcessIdentifier(from: runner)
+        let childPID = try await waitForChildProcessIdentifier(at: childPIDFile)
+
+        task.cancel()
+
+        do {
+            _ = try await task.value
+            Issue.record("Expected subprocess cancellation to throw")
+        } catch is CancellationError {
+        } catch {
+            Issue.record("Expected CancellationError, got \(error.localizedDescription)")
+        }
+
+        try await waitForProcessExit(rootPID)
+        try await waitForProcessExit(childPID)
+        #expect(!ManagedProcessRegistry.isProcessAlive(rootPID))
+        #expect(!ManagedProcessRegistry.isProcessAlive(childPID))
+    }
+
     @MainActor
     @Test func gitRepositoryStatusChoosesPrimaryActionFromChangesAndAheadCount() {
         let changed = GitRepositoryStatus(isRepository: true, hasChanges: true, aheadCount: 0, hasRemote: true)
@@ -303,6 +338,70 @@ struct NeoCodeMainActorTests {
         #expect(store.selectedSession?.transcript.count == 1)
         #expect(store.selectedSession?.transcript.first?.text == "Thinking: streaming")
         #expect(store.selectedSession?.status == .running)
+    }
+
+    @MainActor
+    @Test func appStoreBatchesTextDeltasBeforeUpdatingTranscript() async {
+        let store = AppStore(
+            projects: [
+                ProjectSummary(
+                    name: "NeoCode",
+                    path: "/tmp/NeoCode",
+                    sessions: [
+                        SessionSummary(id: "ses_1", title: "Existing", lastUpdatedAt: .distantPast),
+                    ]
+                ),
+            ],
+            performanceOptions: AppStorePerformanceOptions(
+                projectPersistenceDebounce: .seconds(1),
+                streamingPersistenceDebounce: .seconds(1),
+                deltaFlushDebounce: .milliseconds(40)
+            )
+        )
+        store.selectSession("ses_1")
+
+        store.apply(event: .messagePartDelta(OpenCodePartDelta(sessionID: "ses_1", messageID: "msg_1", partID: "part_1", field: "text", delta: "Hello")))
+        store.apply(event: .messagePartDelta(OpenCodePartDelta(sessionID: "ses_1", messageID: "msg_1", partID: "part_1", field: "text", delta: " world")))
+
+        #expect(store.selectedSession?.transcript.isEmpty == true)
+        #expect(store.debugBufferedTextDeltaCount == 1)
+
+        try? await Task.sleep(for: .milliseconds(80))
+
+        #expect(store.selectedSession?.transcript.count == 1)
+        #expect(store.selectedSession?.transcript.first?.text == "Hello world")
+        #expect(store.debugBufferedTextDeltaCount == 0)
+    }
+
+    @MainActor
+    @Test func appStoreFlushesDeferredPersistenceWhenStreamingSettles() async {
+        let store = AppStore(
+            projects: [
+                ProjectSummary(
+                    name: "NeoCode",
+                    path: "/tmp/NeoCode",
+                    sessions: [
+                        SessionSummary(id: "ses_1", title: "Existing", lastUpdatedAt: .distantPast),
+                    ]
+                ),
+            ],
+            performanceOptions: AppStorePerformanceOptions(
+                projectPersistenceDebounce: .seconds(1),
+                streamingPersistenceDebounce: .seconds(1),
+                deltaFlushDebounce: .milliseconds(200)
+            )
+        )
+        store.selectSession("ses_1")
+
+        store.apply(event: .messagePartDelta(OpenCodePartDelta(sessionID: "ses_1", messageID: "msg_1", partID: "part_1", field: "text", delta: "Buffered text")))
+
+        try? await Task.sleep(for: .milliseconds(120))
+        #expect(store.debugBufferedTextDeltaCount == 1)
+
+        store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .idle))
+
+        #expect(store.selectedSession?.transcript.first?.text == "Buffered text")
+        #expect(store.debugBufferedTextDeltaCount == 0)
     }
 
     @MainActor
@@ -1351,6 +1450,46 @@ private func requestBodyData(from request: URLRequest) throws -> Data? {
     }
 
     return data
+}
+
+private func waitForProcessIdentifier(from runner: SubprocessRunner) async throws -> pid_t {
+    let deadline = Date().addingTimeInterval(5)
+    while Date() < deadline {
+        if let pid = runner.processIdentifier, pid > 0 {
+            return pid
+        }
+
+        try await Task.sleep(for: .milliseconds(50))
+    }
+
+    throw NSError(domain: "NeoCodeTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for root process identifier"])
+}
+
+private func waitForChildProcessIdentifier(at url: URL) async throws -> pid_t {
+    let deadline = Date().addingTimeInterval(5)
+    while Date() < deadline {
+        if let contents = try? String(contentsOf: url, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines),
+           let pid = pid_t(contents), pid > 0 {
+            return pid
+        }
+
+        try await Task.sleep(for: .milliseconds(50))
+    }
+
+    throw NSError(domain: "NeoCodeTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for child process identifier"])
+}
+
+private func waitForProcessExit(_ pid: pid_t) async throws {
+    let deadline = Date().addingTimeInterval(5)
+    while Date() < deadline {
+        if !ManagedProcessRegistry.isProcessAlive(pid) {
+            return
+        }
+
+        try await Task.sleep(for: .milliseconds(50))
+    }
+
+    throw NSError(domain: "NeoCodeTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for process \(pid) to exit"])
 }
 
 private struct QuestionReplyPayload: Decodable {

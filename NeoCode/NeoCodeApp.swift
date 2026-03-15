@@ -5,21 +5,37 @@
 //  Created by Chris W on 3/13/26.
 //
 
+import AppKit
 import SwiftUI
 
 @main
 struct NeoCodeApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
     var body: some Scene {
         WindowGroup {
             if AppTestMode.isUnitTestHost {
                 UnitTestHostView()
             } else {
-                AppSceneView()
+                AppSceneView(appDelegate: appDelegate)
             }
         }
         .defaultSize(width: 1280, height: 900)
         .windowResizability(.contentMinSize)
         .windowStyle(.hiddenTitleBar)
+    }
+}
+
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    var onWillTerminate: (() -> Void)?
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        true
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        onWillTerminate?()
     }
 }
 
@@ -43,6 +59,7 @@ private struct UnitTestHostView: View {
 private struct AppSceneView: View {
     @State private var store = AppStore()
     @State private var runtime = OpenCodeRuntime()
+    let appDelegate: AppDelegate
 
     var body: some View {
         ContentView()
@@ -50,5 +67,12 @@ private struct AppSceneView: View {
             .environment(store)
             .environment(runtime)
             .preferredColorScheme(.dark)
+            .onAppear {
+                appDelegate.onWillTerminate = {
+                    store.flushPendingProjectPersistence()
+                    runtime.stop()
+                    ManagedProcessRegistry.shared.terminateAll()
+                }
+            }
     }
 }

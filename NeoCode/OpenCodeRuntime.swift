@@ -155,6 +155,7 @@ final class OpenCodeRuntime {
             }
 
             try process.run()
+            ManagedProcessRegistry.shared.register(process)
 
             let baseURL = try await waitForBoundURL(entry: entry, timeout: 15)
             let health = try await client.waitUntilHealthy(
@@ -200,7 +201,7 @@ final class OpenCodeRuntime {
         entry.outputPipe?.fileHandleForReading.readabilityHandler = nil
 
         if let process = entry.process, process.isRunning {
-            process.terminate()
+            ManagedProcessRegistry.shared.terminate(process)
         }
 
         entry.process = nil
@@ -258,6 +259,7 @@ final class OpenCodeRuntime {
 
     private func handleTermination(of process: Process, projectPath: String, entry: RuntimeEntry) {
         guard entry.process === process else { return }
+        ManagedProcessRegistry.shared.unregister(process)
         entry.process = nil
         entry.outputPipe?.fileHandleForReading.readabilityHandler = nil
         entry.outputPipe = nil

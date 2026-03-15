@@ -6,6 +6,7 @@ struct PersistedProjectsStore {
     private let fileManager = FileManager.default
     private let cacheDirectoryName = "tech.watzon.NeoCode"
     private let cacheFileName = "projects-cache.json"
+    private let backupFileName = "projects-cache.previous.json"
 
     func loadProjects() -> [ProjectSummary] {
         guard let data = loadPersistedData() else {
@@ -64,6 +65,11 @@ struct PersistedProjectsStore {
                 at: cacheURL.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
+            if let backupURL,
+               let existingData = try? Data(contentsOf: cacheURL),
+               existingData != data {
+                try? existingData.write(to: backupURL, options: .atomic)
+            }
             try data.write(to: cacheURL, options: .atomic)
             defaults.removeObject(forKey: key)
             return true
@@ -80,6 +86,16 @@ struct PersistedProjectsStore {
         return applicationSupportURL
             .appendingPathComponent(cacheDirectoryName, isDirectory: true)
             .appendingPathComponent(cacheFileName, isDirectory: false)
+    }
+
+    private var backupURL: URL? {
+        guard let applicationSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+
+        return applicationSupportURL
+            .appendingPathComponent(cacheDirectoryName, isDirectory: true)
+            .appendingPathComponent(backupFileName, isDirectory: false)
     }
 }
 
