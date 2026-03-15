@@ -1105,6 +1105,29 @@ struct NeoCodeMainActorTests {
         #expect(parts[0]["filename"] as? String == "diagram.png")
     }
 
+    @Test func composerAttachmentImportsPastedImagesAsFiles() async throws {
+        let imageData = Data([0x89, 0x50, 0x4E, 0x47])
+
+        let attachments = await ComposerAttachment.makeAttachments(
+            from: [.imageData(imageData, filename: "Pasted Image.png", mimeType: "image/png")]
+        )
+
+        let attachment = try #require(attachments.first)
+        #expect(attachments.count == 1)
+        #expect(attachment.mimeType == "image/png")
+
+        switch attachment.content {
+        case .file(let path):
+            let fileURL = URL(fileURLWithPath: path)
+            #expect(fileURL.pathExtension == "png")
+            let persistedData = try Data(contentsOf: fileURL)
+            #expect(persistedData == imageData)
+            try? FileManager.default.removeItem(at: fileURL)
+        case .dataURL:
+            Issue.record("Expected pasted images to be stored as files")
+        }
+    }
+
     @MainActor
     @Test func appStoreRoutesMatchingSlashDraftThroughCommandEndpoint() async {
         let projectID = UUID()

@@ -37,9 +37,14 @@ struct ContentView: View {
             guard isRuntimeBootstrappingEnabled else { return }
             await store.connect(to: runtime)
         }
-        .task(id: store.dashboardProjectSignature) {
+        .task(id: dashboardRefreshTaskKey) {
             guard isRuntimeBootstrappingEnabled else { return }
-            await store.startDashboard(using: runtime)
+
+            if store.isDashboardSelected {
+                await store.startDashboard(using: runtime)
+            } else {
+                store.suspendDashboardRefresh()
+            }
         }
         .task(id: store.selectedSessionID) {
             guard isRuntimeBootstrappingEnabled else { return }
@@ -76,6 +81,10 @@ struct ContentView: View {
         let environment = ProcessInfo.processInfo.environment
         return environment[uiTestModeKey] != "1"
             && environment["XCTestConfigurationFilePath"] == nil
+    }
+
+    private var dashboardRefreshTaskKey: String {
+        "\(store.isDashboardSelected)-\(store.dashboardProjectSignature)"
     }
 }
 

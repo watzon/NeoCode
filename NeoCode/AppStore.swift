@@ -175,6 +175,7 @@ final class AppStore {
     private var dashboardRefreshTask: Task<Void, Never>?
     private var dashboardRefreshPending = false
     private var dashboardDirtySessions: [ProjectSummary.ID: Set<String>] = [:]
+    private var isDashboardActive = false
 
     init() {
         let normalizedProjects = Self.normalizedProjects(PersistedProjectsStore().loadProjects())
@@ -516,6 +517,7 @@ final class AppStore {
     }
 
     func startDashboard(using runtime: OpenCodeRuntime) async {
+        isDashboardActive = true
         dashboardSnapshot = await dashboardStatsService.prepare(projects: projects.map(DashboardProjectDescriptor.init(project:)))
 
         guard !projects.isEmpty else {
@@ -557,6 +559,19 @@ final class AppStore {
         startDashboardPolling(using: runtime)
     }
 
+    func suspendDashboardRefresh() {
+        isDashboardActive = false
+        dashboardPollingTask?.cancel()
+        dashboardPollingTask = nil
+        dashboardRefreshTask?.cancel()
+        dashboardRefreshTask = nil
+        dashboardRefreshPending = false
+
+        if dashboardStatus.isVisible {
+            dashboardStatus = .idle
+        }
+    }
+
     private func startDashboardPolling(using runtime: OpenCodeRuntime) {
         dashboardPollingTask?.cancel()
         dashboardPollingTask = Task { [weak self] in
@@ -573,10 +588,13 @@ final class AppStore {
         if let sessionID {
             dashboardDirtySessions[projectID, default: []].insert(sessionID)
         }
+
+        guard isDashboardActive else { return }
         requestDashboardRefresh(using: runtime, delay: .seconds(3))
     }
 
     private func requestDashboardRefresh(using runtime: OpenCodeRuntime, delay: Duration = .zero) {
+        guard isDashboardActive else { return }
         dashboardRefreshPending = true
         guard dashboardRefreshTask == nil else { return }
 
@@ -3505,20 +3523,10 @@ final class AppStore {
         guard hasPendingProjectPersistence else { return }
 
         hasPendingProjectPersistence = false
-        projectPersistence.saveProjects(projectsForPersistence())
+        let projectSnapshot = projects
+        let transcriptStateSnapshot = transcriptStateBySessionID
+        projectPersistence.saveProjects(projectSnapshot, transcriptStatesBySessionID: transcriptStateSnapshot)
         projectPersistenceSaveCount += 1
-    }
-
-    private func projectsForPersistence() -> [ProjectSummary] {
-        projects.map { project in
-            var snapshot = project
-            snapshot.sessions = project.sessions.map { session in
-                var persistedSession = session
-                persistedSession.transcript = transcript(for: session.id)
-                return persistedSession
-            }
-            return snapshot
-        }
     }
 
     private func scheduleProjectPersistence(_ mode: ProjectPersistenceMode = .standard) {

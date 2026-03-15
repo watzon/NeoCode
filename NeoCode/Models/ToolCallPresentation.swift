@@ -17,7 +17,7 @@ struct ToolCallPresentation: Hashable {
     let items: [Item]
 
     init(toolCall: ChatMessage.ToolCall) {
-        items = ToolCallPresentationBuilder.makeItems(for: toolCall)
+        items = ToolCallPresentationCache.items(for: toolCall)
     }
 }
 
@@ -594,5 +594,38 @@ private extension JSONValue {
         case .number, .bool, .null:
             return []
         }
+    }
+}
+
+private final class CachedToolCallPresentationItems: NSObject {
+    let value: [ToolCallPresentation.Item]
+
+    init(_ value: [ToolCallPresentation.Item]) {
+        self.value = value
+    }
+}
+
+private enum ToolCallPresentationCache {
+    private static let cache: NSCache<NSString, CachedToolCallPresentationItems> = {
+        let cache = NSCache<NSString, CachedToolCallPresentationItems>()
+        cache.countLimit = 256
+        return cache
+    }()
+
+    static func items(for toolCall: ChatMessage.ToolCall) -> [ToolCallPresentation.Item] {
+        let key = cacheKey(for: toolCall)
+        if let cached = cache.object(forKey: key) {
+            return cached.value
+        }
+
+        let builtItems = ToolCallPresentationBuilder.makeItems(for: toolCall)
+        cache.setObject(CachedToolCallPresentationItems(builtItems), forKey: key)
+        return builtItems
+    }
+
+    private static func cacheKey(for toolCall: ChatMessage.ToolCall) -> NSString {
+        var hasher = Hasher()
+        hasher.combine(toolCall)
+        return NSString(string: String(hasher.finalize()))
     }
 }

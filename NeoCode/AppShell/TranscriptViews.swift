@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 enum DisplayMessageGroup: Identifiable, Hashable {
@@ -103,6 +104,8 @@ struct AssistantTurnView: View {
     private let contentWidth = ConversationLayout.assistantContentWidth
 
     var body: some View {
+        let turnBlocks = blocks
+
         VStack(alignment: .leading, spacing: 10) {
             MessageMetadataHeaderView(
                 roleLabel: "assistant",
@@ -112,18 +115,18 @@ struct AssistantTurnView: View {
             )
 
             VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(blocks.enumerated()), id: \.element.id) { index, block in
+                ForEach(Array(turnBlocks.enumerated()), id: \.element.id) { index, block in
                     VStack(alignment: .leading, spacing: 0) {
                         switch block {
                         case .thinking(let message):
-                            ThinkingRowView(message: message, showsLabel: showsThinkingLabel(at: index))
+                            ThinkingRowView(message: message, showsLabel: showsThinkingLabel(at: index, in: turnBlocks))
                         case .toolCluster(let toolMessages):
                             ToolCallClusterRowView(messages: toolMessages, contentWidth: contentWidth)
                         case .output(let message):
                             AssistantOutputView(message: message)
                         }
                     }
-                    .padding(.top, topSpacing(at: index))
+                    .padding(.top, topSpacing(at: index, in: turnBlocks))
                 }
             }
         }
@@ -159,7 +162,7 @@ struct AssistantTurnView: View {
         return result
     }
 
-    private func topSpacing(at index: Int) -> CGFloat {
+    private func topSpacing(at index: Int, in blocks: [AssistantTurnBlock]) -> CGFloat {
         guard index > 0 else { return 0 }
         let block = blocks[index]
         let previous = blocks[index - 1]
@@ -171,7 +174,7 @@ struct AssistantTurnView: View {
         return 18
     }
 
-    private func showsThinkingLabel(at index: Int) -> Bool {
+    private func showsThinkingLabel(at index: Int, in blocks: [AssistantTurnBlock]) -> Bool {
         guard case .thinking = blocks[index] else { return false }
         guard index > 0 else { return true }
 
@@ -585,24 +588,69 @@ private struct AttachmentMessageView: View {
 }
 
 private func transcriptAttachmentImage(for attachment: ChatAttachment) -> NSImage? {
-    guard attachment.isImage else { return nil }
+    TranscriptAttachmentImageCache.image(for: attachment) {
+        guard attachment.isImage else { return nil }
 
-    if attachment.url.hasPrefix("data:"),
-       let data = transcriptAttachmentData(from: attachment.url) {
-        return NSImage(data: data)
+        if attachment.url.hasPrefix("data:"),
+           let data = transcriptAttachmentData(from: attachment.url) {
+            return NSImage(data: data)
+        }
+
+        if let url = URL(string: attachment.url), url.isFileURL {
+            return NSImage(contentsOf: url)
+        }
+
+        return nil
     }
-
-    if let url = URL(string: attachment.url), url.isFileURL {
-        return NSImage(contentsOf: url)
-    }
-
-    return nil
 }
 
 private func transcriptAttachmentData(from dataURL: String) -> Data? {
     guard let commaIndex = dataURL.firstIndex(of: ",") else { return nil }
     let encoded = String(dataURL[dataURL.index(after: commaIndex)...])
     return Data(base64Encoded: encoded)
+}
+
+private enum TranscriptAttachmentImageCache {
+    private static let imageCache: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.countLimit = 96
+        return cache
+    }()
+
+    private static let failedLookupCache: NSCache<NSString, NSNumber> = {
+        let cache = NSCache<NSString, NSNumber>()
+        cache.countLimit = 256
+        return cache
+    }()
+
+    static func image(for attachment: ChatAttachment, loader: () -> NSImage?) -> NSImage? {
+        let key = cacheKey(for: attachment)
+
+        if let cached = imageCache.object(forKey: key) {
+            return cached
+        }
+
+        if failedLookupCache.object(forKey: key) != nil {
+            return nil
+        }
+
+        guard let image = loader() else {
+            failedLookupCache.setObject(NSNumber(value: true), forKey: key)
+            return nil
+        }
+
+        imageCache.setObject(image, forKey: key)
+        return image
+    }
+
+    private static func cacheKey(for attachment: ChatAttachment) -> NSString {
+        var hasher = Hasher()
+        hasher.combine(attachment.filename)
+        hasher.combine(attachment.mimeType)
+        hasher.combine(attachment.url)
+        hasher.combine(attachment.sourcePath)
+        return NSString(string: String(hasher.finalize()))
+    }
 }
 
 private struct MessageHoverActionButton: View {

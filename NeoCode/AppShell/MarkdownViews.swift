@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 struct AssistantOutputView: View {
@@ -89,21 +90,7 @@ struct MarkdownMessageView: View {
     }
 
     private var blocks: [MarkdownBlock] {
-        var result: [MarkdownBlock] = []
-        let pieces = markdown.components(separatedBy: "```")
-
-        for (index, piece) in pieces.enumerated() {
-            guard !piece.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
-            if index.isMultiple(of: 2) {
-                result.append(.prose(piece))
-            } else {
-                let code = piece.replacingOccurrences(of: "^\\w+\n", with: "", options: .regularExpression)
-                    .trimmingCharacters(in: .newlines)
-                result.append(.code(code))
-            }
-        }
-
-        return result
+        MarkdownRenderCache.blocks(for: markdown)
     }
 }
 
@@ -172,86 +159,7 @@ struct ProseMarkdownView: View {
     }
 
     private var elements: [MarkdownElement] {
-        let normalized = markdown.replacingOccurrences(of: "\r\n", with: "\n")
-        let lines = normalized.components(separatedBy: .newlines)
-        var results: [MarkdownElement] = []
-        var paragraph: [String] = []
-        var listItems: [MarkdownListItem] = []
-
-        func flushParagraph() {
-            guard !paragraph.isEmpty else { return }
-            results.append(.paragraph(paragraph.joined(separator: "\n")))
-            paragraph.removeAll(keepingCapacity: true)
-        }
-
-        func flushList() {
-            guard !listItems.isEmpty else { return }
-            results.append(.list(listItems))
-            listItems.removeAll(keepingCapacity: true)
-        }
-
-        for rawLine in lines {
-            let line = rawLine.trimmingCharacters(in: .whitespaces)
-
-            if line.isEmpty {
-                flushParagraph()
-                flushList()
-                continue
-            }
-
-            if let heading = parseHeading(line) {
-                flushParagraph()
-                flushList()
-                results.append(heading)
-                continue
-            }
-
-            if let item = parseListItem(rawLine) {
-                flushParagraph()
-                listItems.append(item)
-                continue
-            }
-
-            flushList()
-            paragraph.append(line)
-        }
-
-        flushParagraph()
-        flushList()
-        return results
-    }
-
-    private func parseHeading(_ line: String) -> MarkdownElement? {
-        let hashes = line.prefix { $0 == "#" }
-        guard !hashes.isEmpty, line.dropFirst(hashes.count).first == " " else { return nil }
-        let text = String(line.dropFirst(hashes.count + 1))
-        return .heading(level: min(hashes.count, 3), text: text)
-    }
-
-    private func parseListItem(_ rawLine: String) -> MarkdownListItem? {
-        let leadingSpaces = rawLine.prefix { $0 == " " }.count
-        let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
-        let level = leadingSpaces / 2
-
-        if trimmed.hasPrefix("- [") || trimmed.hasPrefix("* [") {
-            let chars = Array(trimmed)
-            guard chars.count > 5 else { return nil }
-            let checked = chars[3] == "x" || chars[3] == "X"
-            let text = String(chars.dropFirst(6))
-            return MarkdownListItem(level: level, marker: .check(checked), text: text)
-        }
-
-        if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") || trimmed.hasPrefix("+ ") {
-            return MarkdownListItem(level: level, marker: .bullet, text: String(trimmed.dropFirst(2)))
-        }
-
-        if let range = trimmed.range(of: "^\\d+\\.\\s", options: .regularExpression) {
-            let prefix = String(trimmed[range])
-            let number = Int(prefix.replacingOccurrences(of: ".", with: "").trimmingCharacters(in: CharacterSet.whitespaces)) ?? 1
-            return MarkdownListItem(level: level, marker: .ordered(number), text: String(trimmed[range.upperBound...]))
-        }
-
-        return nil
+        MarkdownRenderCache.elements(for: markdown)
     }
 
     private func headingFont(_ level: Int) -> Font {
@@ -338,18 +246,7 @@ struct InlineMarkdownText: View {
     }
 
     private var styledAttributedString: AttributedString? {
-        guard var attributed = try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) else {
-            return nil
-        }
-
-        for run in attributed.runs {
-            if run.inlinePresentationIntent == .code {
-                attributed[run.range].foregroundColor = NeoCodeTheme.accent
-                attributed[run.range].font = .neoMono
-            }
-        }
-
-        return attributed
+        MarkdownRenderCache.inlineAttributedString(for: text)
     }
 }
 
@@ -384,7 +281,159 @@ struct LabeledInlineMarkdownText: View {
     }
 
     private var styledAttributedString: AttributedString? {
-        guard var attributed = try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) else {
+        MarkdownRenderCache.inlineAttributedString(for: text)
+    }
+}
+
+private final class CachedMarkdownBlocks: NSObject {
+    let value: [MarkdownBlock]
+
+    init(_ value: [MarkdownBlock]) {
+        self.value = value
+    }
+}
+
+private final class CachedMarkdownElements: NSObject {
+    let value: [MarkdownElement]
+
+    init(_ value: [MarkdownElement]) {
+        self.value = value
+    }
+}
+
+private final class CachedInlineMarkdown: NSObject {
+    let value: AttributedString?
+
+    init(_ value: AttributedString?) {
+        self.value = value
+    }
+}
+
+private enum MarkdownRenderCache {
+    private static let blockCache: NSCache<NSString, CachedMarkdownBlocks> = {
+        let cache = NSCache<NSString, CachedMarkdownBlocks>()
+        cache.countLimit = 256
+        return cache
+    }()
+
+    private static let elementCache: NSCache<NSString, CachedMarkdownElements> = {
+        let cache = NSCache<NSString, CachedMarkdownElements>()
+        cache.countLimit = 512
+        return cache
+    }()
+
+    private static let inlineAttributedCache: NSCache<NSString, CachedInlineMarkdown> = {
+        let cache = NSCache<NSString, CachedInlineMarkdown>()
+        cache.countLimit = 1024
+        return cache
+    }()
+
+    static func blocks(for markdown: String) -> [MarkdownBlock] {
+        let key = markdown as NSString
+        if let cached = blockCache.object(forKey: key) {
+            return cached.value
+        }
+
+        let parsed = parseBlocks(from: markdown)
+        blockCache.setObject(CachedMarkdownBlocks(parsed), forKey: key)
+        return parsed
+    }
+
+    static func elements(for markdown: String) -> [MarkdownElement] {
+        let key = markdown as NSString
+        if let cached = elementCache.object(forKey: key) {
+            return cached.value
+        }
+
+        let parsed = parseElements(from: markdown)
+        elementCache.setObject(CachedMarkdownElements(parsed), forKey: key)
+        return parsed
+    }
+
+    static func inlineAttributedString(for text: String) -> AttributedString? {
+        let key = text as NSString
+        if let cached = inlineAttributedCache.object(forKey: key) {
+            return cached.value
+        }
+
+        let parsed = parseInlineMarkdown(from: text)
+        inlineAttributedCache.setObject(CachedInlineMarkdown(parsed), forKey: key)
+        return parsed
+    }
+
+    private static func parseBlocks(from markdown: String) -> [MarkdownBlock] {
+        var result: [MarkdownBlock] = []
+        let pieces = markdown.components(separatedBy: "```")
+
+        for (index, piece) in pieces.enumerated() {
+            guard !piece.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+            if index.isMultiple(of: 2) {
+                result.append(.prose(piece))
+            } else {
+                let code = piece.replacingOccurrences(of: "^\\w+\n", with: "", options: .regularExpression)
+                    .trimmingCharacters(in: .newlines)
+                result.append(.code(code))
+            }
+        }
+
+        return result
+    }
+
+    private static func parseElements(from markdown: String) -> [MarkdownElement] {
+        let normalized = markdown.replacingOccurrences(of: "\r\n", with: "\n")
+        let lines = normalized.components(separatedBy: .newlines)
+        var results: [MarkdownElement] = []
+        var paragraph: [String] = []
+        var listItems: [MarkdownListItem] = []
+
+        func flushParagraph() {
+            guard !paragraph.isEmpty else { return }
+            results.append(.paragraph(paragraph.joined(separator: "\n")))
+            paragraph.removeAll(keepingCapacity: true)
+        }
+
+        func flushList() {
+            guard !listItems.isEmpty else { return }
+            results.append(.list(listItems))
+            listItems.removeAll(keepingCapacity: true)
+        }
+
+        for rawLine in lines {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+
+            if line.isEmpty {
+                flushParagraph()
+                flushList()
+                continue
+            }
+
+            if let heading = parseHeading(line) {
+                flushParagraph()
+                flushList()
+                results.append(heading)
+                continue
+            }
+
+            if let item = parseListItem(rawLine) {
+                flushParagraph()
+                listItems.append(item)
+                continue
+            }
+
+            flushList()
+            paragraph.append(line)
+        }
+
+        flushParagraph()
+        flushList()
+        return results
+    }
+
+    private static func parseInlineMarkdown(from text: String) -> AttributedString? {
+        guard var attributed = try? AttributedString(
+            markdown: text,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        ) else {
             return nil
         }
 
@@ -397,5 +446,41 @@ struct LabeledInlineMarkdownText: View {
 
         return attributed
     }
-}
 
+    private static func parseHeading(_ line: String) -> MarkdownElement? {
+        let hashes = line.prefix { $0 == "#" }
+        guard !hashes.isEmpty, line.dropFirst(hashes.count).first == " " else { return nil }
+        let text = String(line.dropFirst(hashes.count + 1))
+        return .heading(level: min(hashes.count, 3), text: text)
+    }
+
+    private static func parseListItem(_ rawLine: String) -> MarkdownListItem? {
+        let leadingSpaces = rawLine.prefix { $0 == " " }.count
+        let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
+        let level = leadingSpaces / 2
+
+        if trimmed.hasPrefix("- [") || trimmed.hasPrefix("* [") {
+            let chars = Array(trimmed)
+            guard chars.count > 5 else { return nil }
+            let checked = chars[3] == "x" || chars[3] == "X"
+            let text = String(chars.dropFirst(6))
+            return MarkdownListItem(level: level, marker: .check(checked), text: text)
+        }
+
+        if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") || trimmed.hasPrefix("+ ") {
+            return MarkdownListItem(level: level, marker: .bullet, text: String(trimmed.dropFirst(2)))
+        }
+
+        if let range = trimmed.range(of: "^\\d+\\.\\s", options: .regularExpression) {
+            let prefix = String(trimmed[range])
+            let number = Int(
+                prefix
+                    .replacingOccurrences(of: ".", with: "")
+                    .trimmingCharacters(in: CharacterSet.whitespaces)
+            ) ?? 1
+            return MarkdownListItem(level: level, marker: .ordered(number), text: String(trimmed[range.upperBound...]))
+        }
+
+        return nil
+    }
+}

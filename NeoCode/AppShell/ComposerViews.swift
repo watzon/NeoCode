@@ -1133,12 +1133,14 @@ private struct ComposerImageAttachmentChip: View {
 }
 
 private func composerAttachmentImage(for attachment: ComposerAttachment) -> NSImage? {
-    switch attachment.content {
-    case .file(let path):
-        return NSImage(contentsOfFile: path)
-    case .dataURL(let dataURL):
-        guard let data = data(fromDataURL: dataURL) else { return nil }
-        return NSImage(data: data)
+    ComposerAttachmentImageCache.image(for: attachment) {
+        switch attachment.content {
+        case .file(let path):
+            return NSImage(contentsOfFile: path)
+        case .dataURL(let dataURL):
+            guard let data = data(fromDataURL: dataURL) else { return nil }
+            return NSImage(data: data)
+        }
     }
 }
 
@@ -1146,6 +1148,48 @@ private func data(fromDataURL dataURL: String) -> Data? {
     guard let commaIndex = dataURL.firstIndex(of: ",") else { return nil }
     let encoded = String(dataURL[dataURL.index(after: commaIndex)...])
     return Data(base64Encoded: encoded)
+}
+
+private enum ComposerAttachmentImageCache {
+    private static let imageCache: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.countLimit = 32
+        return cache
+    }()
+
+    private static let failedLookupCache: NSCache<NSString, NSNumber> = {
+        let cache = NSCache<NSString, NSNumber>()
+        cache.countLimit = 128
+        return cache
+    }()
+
+    static func image(for attachment: ComposerAttachment, loader: () -> NSImage?) -> NSImage? {
+        let key = cacheKey(for: attachment)
+
+        if let cached = imageCache.object(forKey: key) {
+            return cached
+        }
+
+        if failedLookupCache.object(forKey: key) != nil {
+            return nil
+        }
+
+        guard let image = loader() else {
+            failedLookupCache.setObject(NSNumber(value: true), forKey: key)
+            return nil
+        }
+
+        imageCache.setObject(image, forKey: key)
+        return image
+    }
+
+    private static func cacheKey(for attachment: ComposerAttachment) -> NSString {
+        var hasher = Hasher()
+        hasher.combine(attachment.name)
+        hasher.combine(attachment.mimeType)
+        hasher.combine(attachment.deduplicationKey)
+        return NSString(string: String(hasher.finalize()))
+    }
 }
 
 struct InlineStatusView: View {

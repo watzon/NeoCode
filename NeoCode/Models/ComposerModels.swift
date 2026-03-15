@@ -84,11 +84,6 @@ struct ComposerAttachment: Identifiable, Hashable {
                 ?? UTType(filenameExtension: resolvedURL.pathExtension)?.preferredMIMEType
                 ?? "application/octet-stream"
 
-            if mimeType.lowercased().hasPrefix("image/"),
-               let data = try? Data(contentsOf: resolvedURL) {
-                return (name, mimeType, .dataURL("data:\(mimeType);base64,\(data.base64EncodedString())"))
-            }
-
             return (name, mimeType, .file(path: resolvedURL.path))
         }.value
 
@@ -98,11 +93,67 @@ struct ComposerAttachment: Identifiable, Hashable {
 
     private static func makeImageAttachment(data: Data, filename: String, mimeType: String) -> ComposerAttachment? {
         guard mimeType.lowercased().hasPrefix("image/") else { return nil }
+
+        guard let fileURL = persistImportedImageData(data: data, filename: filename, mimeType: mimeType) else {
+            return nil
+        }
+
         return ComposerAttachment(
             name: filename,
             mimeType: mimeType,
-            content: .dataURL("data:\(mimeType);base64,\(data.base64EncodedString())")
+            content: .file(path: fileURL.path)
         )
+    }
+
+    private static func persistImportedImageData(data: Data, filename: String, mimeType: String) -> URL? {
+        let fileManager = FileManager.default
+
+        guard let applicationSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+
+        let directoryURL = applicationSupportURL
+            .appendingPathComponent("tech.watzon.NeoCode", isDirectory: true)
+            .appendingPathComponent("ImportedAttachments", isDirectory: true)
+
+        let sanitizedBaseName = sanitizedAttachmentBaseName(from: filename)
+        let fileExtension = inferredAttachmentExtension(filename: filename, mimeType: mimeType)
+        let fileURL = directoryURL.appendingPathComponent(
+            "\(sanitizedBaseName)-\(UUID().uuidString).\(fileExtension)",
+            isDirectory: false
+        )
+
+        do {
+            try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+            try data.write(to: fileURL, options: .atomic)
+            return fileURL
+        } catch {
+            return nil
+        }
+    }
+
+    private static func sanitizedAttachmentBaseName(from filename: String) -> String {
+        let baseName = URL(fileURLWithPath: filename).deletingPathExtension().lastPathComponent
+        let sanitized = baseName.replacingOccurrences(
+            of: "[^A-Za-z0-9_-]",
+            with: "-",
+            options: .regularExpression
+        )
+        return sanitized.isEmpty ? "attachment" : sanitized
+    }
+
+    private static func inferredAttachmentExtension(filename: String, mimeType: String) -> String {
+        let pathExtension = URL(fileURLWithPath: filename).pathExtension
+        if !pathExtension.isEmpty {
+            return pathExtension
+        }
+
+        if let extensionForMimeType = UTType(mimeType: mimeType)?.preferredFilenameExtension,
+           !extensionForMimeType.isEmpty {
+            return extensionForMimeType
+        }
+
+        return "bin"
     }
 }
 
