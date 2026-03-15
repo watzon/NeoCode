@@ -266,23 +266,25 @@ struct ComposerView: View {
                     store.selectedAgent = option.id
                 }
 
-                NeoCodeSelect(
-                    title: store.selectedThinkingLevel ?? "Reasoning",
-                    selectedID: store.selectedThinkingLevel,
-                    items: store.availableThinkingLevels.map { ComposerDropdownOption(id: $0, title: $0) },
-                    emptyMessage: "No variants available.",
-                    placeholder: "Search reasoning",
-                    isSearchable: false,
-                    direction: .up,
-                    menuWidth: 220
-                ) { option in
-                    Text(option.title)
-                        .font(.neoBody)
-                        .foregroundStyle(NeoCodeTheme.textPrimary)
-                } searchableText: { option in
-                    [option.title]
-                } onSelect: { option in
-                    store.selectedThinkingLevel = option.id
+                if !store.availableThinkingLevels.isEmpty {
+                    NeoCodeSelect(
+                        title: store.selectedThinkingLevel ?? "Reasoning",
+                        selectedID: store.selectedThinkingLevel,
+                        items: store.availableThinkingLevels.map { ComposerDropdownOption(id: $0, title: $0) },
+                        emptyMessage: "No variants available.",
+                        placeholder: "Search reasoning",
+                        isSearchable: false,
+                        direction: .up,
+                        menuWidth: 220
+                    ) { option in
+                        Text(option.title)
+                            .font(.neoBody)
+                            .foregroundStyle(NeoCodeTheme.textPrimary)
+                    } searchableText: { option in
+                        [option.title]
+                    } onSelect: { option in
+                        store.selectedThinkingLevel = option.id
+                    }
                 }
 
                 Spacer(minLength: 12)
