@@ -50,6 +50,7 @@ struct SessionHeaderView: View {
                     if store.gitStatus.isRepository {
                         GitActionsSplitButton(
                             gitStatus: store.gitStatus,
+                            operationState: store.currentGitOperationState,
                             isBusy: store.isPerformingGitOperation,
                             isMenuOpen: openMenu == .gitActions,
                             onPrimaryAction: handlePrimaryGitAction,
@@ -245,6 +246,7 @@ private struct WorkspaceToolSplitButton: View {
 
 private struct GitActionsSplitButton: View {
     let gitStatus: GitRepositoryStatus
+    let operationState: AppStore.GitOperationState?
     let isBusy: Bool
     let isMenuOpen: Bool
     let onPrimaryAction: () -> Void
@@ -255,7 +257,7 @@ private struct GitActionsSplitButton: View {
 
     var body: some View {
         HeaderSplitControl(
-            title: gitStatus.primaryAction.title,
+            title: operationState.map { "\($0.title)..." } ?? gitStatus.primaryAction.title,
             systemImage: gitStatus.primaryAction.systemImage,
             icon: { EmptyView() },
             primaryAction: onPrimaryAction,

@@ -884,7 +884,11 @@ final class AppStore {
         guard let projectPath = selectedProject?.path else { return }
 
         isPerformingGitOperation = true
-        defer { isPerformingGitOperation = false }
+        setGitOperationState(.initializingRepository, for: projectPath)
+        defer {
+            isPerformingGitOperation = false
+            clearGitOperationState(for: projectPath)
+        }
 
         do {
             try await GitBranchService().initializeRepository(in: projectPath)
@@ -908,7 +912,11 @@ final class AppStore {
         }
 
         isPerformingGitOperation = true
-        defer { isPerformingGitOperation = false }
+        setGitOperationState(.switchingBranch, for: projectPath)
+        defer {
+            isPerformingGitOperation = false
+            clearGitOperationState(for: projectPath)
+        }
 
         do {
             try await GitBranchService().switchBranch(named: trimmed, in: projectPath)
@@ -927,7 +935,11 @@ final class AppStore {
         else { return }
 
         isPerformingGitOperation = true
-        defer { isPerformingGitOperation = false }
+        setGitOperationState(.creatingBranch, for: projectPath)
+        defer {
+            isPerformingGitOperation = false
+            clearGitOperationState(for: projectPath)
+        }
 
         do {
             try await GitBranchService().createBranch(named: trimmed, in: projectPath)
@@ -947,18 +959,26 @@ final class AppStore {
         }
 
         isPerformingGitOperation = true
-        defer { isPerformingGitOperation = false }
+        setGitOperationState(.committing, for: projectPath)
+        logger.info("Starting git commit for project: \(projectPath, privacy: .public)")
+        defer {
+            isPerformingGitOperation = false
+            clearGitOperationState(for: projectPath)
+        }
 
         do {
             try await GitRepositoryService().commit(message: resolvedMessage, includeUnstaged: includeUnstaged, in: projectPath)
             if pushAfterCommit {
+                setGitOperationState(.pushing, for: projectPath)
                 try await GitRepositoryService().push(in: projectPath)
             }
             lastError = nil
             await refreshGitStatus()
             gitCommitPreview = nil
+            logger.info("Git commit finished for project: \(projectPath, privacy: .public)")
             return true
         } catch {
+            logger.error("Git commit failed for project: \(projectPath, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
             lastError = error.localizedDescription
             await refreshGitStatus()
             return false
@@ -970,7 +990,11 @@ final class AppStore {
         guard let projectPath = selectedProject?.path, gitStatus.isRepository else { return false }
 
         isPerformingGitOperation = true
-        defer { isPerformingGitOperation = false }
+        setGitOperationState(.pushing, for: projectPath)
+        defer {
+            isPerformingGitOperation = false
+            clearGitOperationState(for: projectPath)
+        }
 
         do {
             try await GitRepositoryService().push(in: projectPath)
@@ -1967,6 +1991,14 @@ final class AppStore {
             branches: availableBranches,
             selectedBranch: selectedBranch
         )
+    }
+
+    private func setGitOperationState(_ state: GitOperationState, for projectPath: String) {
+        gitOperationStateByProjectPath[projectPath] = state
+    }
+
+    private func clearGitOperationState(for projectPath: String) {
+        gitOperationStateByProjectPath.removeValue(forKey: projectPath)
     }
 
     private func resetGitState() {
