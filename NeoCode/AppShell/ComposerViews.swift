@@ -657,6 +657,8 @@ struct GrowingTextView: NSViewRepresentable {
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
         scrollView.documentView = textView
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.widthTracksTextView = true
 
         DispatchQueue.main.async {
             context.coordinator.recalculateHeight(for: textView)
