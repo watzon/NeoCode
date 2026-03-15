@@ -12,35 +12,57 @@ nonisolated final class ManagedProcessRegistry {
 
     private let lock = NSLock()
     private var processes: [ObjectIdentifier: Process] = [:]
+    private var processGroups: [ObjectIdentifier: pid_t] = [:]
 
     private nonisolated init() {}
 
     nonisolated func register(_ process: Process) {
+        let identifier = ObjectIdentifier(process)
+        let processIdentifier = process.processIdentifier
+        let processGroup = Self.processGroupIdentifier(of: processIdentifier) ?? processIdentifier
+
         lock.withLock {
-            processes[ObjectIdentifier(process)] = process
+            processes[identifier] = process
+            if processGroup > 0 {
+                processGroups[identifier] = processGroup
+            }
         }
     }
 
     nonisolated func unregister(_ process: Process) {
         lock.withLock {
-            _ = processes.removeValue(forKey: ObjectIdentifier(process))
+            let identifier = ObjectIdentifier(process)
+            _ = processes.removeValue(forKey: identifier)
+            _ = processGroups.removeValue(forKey: identifier)
         }
     }
 
     nonisolated func terminate(_ process: Process) {
-        unregister(process)
-        Self.terminateProcessTree(rootPID: process.processIdentifier)
+        let (rootPID, processGroupID) = lock.withLock { () -> (pid_t, pid_t) in
+            let identifier = ObjectIdentifier(process)
+            let groupID = processGroups[identifier] ?? process.processIdentifier
+            _ = processes.removeValue(forKey: identifier)
+            _ = processGroups.removeValue(forKey: identifier)
+            return (process.processIdentifier, groupID)
+        }
+
+        Self.terminateProcessTree(rootPID: rootPID, processGroupID: processGroupID)
     }
 
     nonisolated func terminateAll() {
         let runningProcesses = lock.withLock {
-            let snapshot = Array(processes.values)
+            let snapshot = processes.values.map { process in
+                let identifier = ObjectIdentifier(process)
+                let groupID = processGroups[identifier] ?? process.processIdentifier
+                return (process.processIdentifier, groupID)
+            }
             processes.removeAll()
+            processGroups.removeAll()
             return snapshot
         }
 
-        for process in runningProcesses {
-            Self.terminateProcessTree(rootPID: process.processIdentifier)
+        for (rootPID, processGroupID) in runningProcesses {
+            Self.terminateProcessTree(rootPID: rootPID, processGroupID: processGroupID)
         }
     }
 
@@ -53,19 +75,36 @@ nonisolated final class ManagedProcessRegistry {
         return errno == EPERM
     }
 
-    private nonisolated static func terminateProcessTree(rootPID: pid_t) {
-        guard rootPID > 0 else { return }
+    private nonisolated static func terminateProcessTree(rootPID: pid_t, processGroupID: pid_t) {
+        guard rootPID > 0 || processGroupID > 0 else { return }
 
-        let descendants = descendantProcessIdentifiers(of: rootPID)
-        let orderedPIDs = descendants + [rootPID]
+        let descendants = rootPID > 0 ? descendantProcessIdentifiers(of: rootPID) : []
+        let orderedPIDs = descendants + (rootPID > 0 ? [rootPID] : [])
 
+        send(signal: SIGTERM, toProcessGroup: processGroupID)
         send(signal: SIGTERM, to: orderedPIDs)
-        waitForExit(of: orderedPIDs, timeout: 0.75)
+        waitForExit(of: orderedPIDs, processGroupID: processGroupID, timeout: 0.75)
 
         let remainingPIDs = orderedPIDs.filter(isProcessAlive)
-        guard !remainingPIDs.isEmpty else { return }
+        guard !remainingPIDs.isEmpty || isProcessGroupAlive(processGroupID) else { return }
 
+        send(signal: SIGKILL, toProcessGroup: processGroupID)
         send(signal: SIGKILL, to: remainingPIDs)
+    }
+
+    private nonisolated static func processGroupIdentifier(of pid: pid_t) -> pid_t? {
+        guard pid > 0 else { return nil }
+        let groupID = getpgid(pid)
+        return groupID > 0 ? groupID : nil
+    }
+
+    private nonisolated static func isProcessGroupAlive(_ processGroupID: pid_t) -> Bool {
+        guard processGroupID > 0 else { return false }
+        if kill(-processGroupID, 0) == 0 {
+            return true
+        }
+
+        return errno == EPERM
     }
 
     private nonisolated static func send(signal: Int32, to processIdentifiers: [pid_t]) {
@@ -74,10 +113,16 @@ nonisolated final class ManagedProcessRegistry {
         }
     }
 
-    private nonisolated static func waitForExit(of processIdentifiers: [pid_t], timeout: TimeInterval) {
+    private nonisolated static func send(signal: Int32, toProcessGroup processGroupID: pid_t) {
+        guard processGroupID > 0 else { return }
+        _ = Darwin.kill(-processGroupID, signal)
+    }
+
+    private nonisolated static func waitForExit(of processIdentifiers: [pid_t], processGroupID: pid_t, timeout: TimeInterval) {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            if processIdentifiers.allSatisfy({ !isProcessAlive($0) }) {
+            if processIdentifiers.allSatisfy({ !isProcessAlive($0) })
+                && !isProcessGroupAlive(processGroupID) {
                 return
             }
 

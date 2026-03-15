@@ -200,7 +200,7 @@ final class OpenCodeRuntime {
         entry.process?.terminationHandler = nil
         entry.outputPipe?.fileHandleForReading.readabilityHandler = nil
 
-        if let process = entry.process, process.isRunning {
+        if let process = entry.process {
             ManagedProcessRegistry.shared.terminate(process)
         }
 

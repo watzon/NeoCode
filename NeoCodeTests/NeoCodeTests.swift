@@ -340,6 +340,31 @@ struct NeoCodeCoreTests {
         #expect(!ManagedProcessRegistry.isProcessAlive(childPID))
     }
 
+    @Test func managedProcessRegistryKillsOrphanedProcessGroup() async throws {
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+        let childPIDFile = tempDirectory.appendingPathComponent("child.pid")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", "sleep 30 & echo $! > \"\(childPIDFile.path)\" && sleep 0.2"]
+
+        try process.run()
+        ManagedProcessRegistry.shared.register(process)
+
+        let rootPID = process.processIdentifier
+        let childPID = try await waitForChildProcessIdentifier(at: childPIDFile)
+
+        try await waitForProcessToStop(process)
+        ManagedProcessRegistry.shared.terminate(process)
+
+        try await waitForProcessExit(childPID)
+        #expect(!ManagedProcessRegistry.isProcessAlive(rootPID))
+        #expect(!ManagedProcessRegistry.isProcessAlive(childPID))
+    }
+
     @MainActor
     @Test func gitRepositoryStatusChoosesPrimaryActionFromChangesAndAheadCount() {
         let changed = GitRepositoryStatus(isRepository: true, hasChanges: true, aheadCount: 0, hasRemote: true)
@@ -1618,6 +1643,19 @@ private func waitForProcessExit(_ pid: pid_t) async throws {
     }
 
     throw NSError(domain: "NeoCodeTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for process \(pid) to exit"])
+}
+
+private func waitForProcessToStop(_ process: Process) async throws {
+    let deadline = Date().addingTimeInterval(5)
+    while Date() < deadline {
+        if !process.isRunning {
+            return
+        }
+
+        try await Task.sleep(for: .milliseconds(50))
+    }
+
+    throw NSError(domain: "NeoCodeTests", code: 4, userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for process \(process.processIdentifier) to stop"])
 }
 
 private struct QuestionReplyPayload: Decodable {
