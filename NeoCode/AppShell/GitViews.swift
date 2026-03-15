@@ -122,6 +122,9 @@ struct GitCommitSheet: View {
                 .foregroundStyle(NeoCodeTheme.textPrimary)
 
             ZStack(alignment: .topLeading) {
+                let editorHorizontalInset: CGFloat = 11
+                let editorTopInset: CGFloat = 10
+
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(NeoCodeTheme.panelRaised)
                     .overlay(
@@ -134,16 +137,18 @@ struct GitCommitSheet: View {
                     .foregroundStyle(NeoCodeTheme.textPrimary)
                     .scrollContentBackground(.hidden)
                     .scrollIndicators(.hidden)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 2)
+                    .padding(.leading, editorHorizontalInset - 4)
+                    .padding(.trailing, editorHorizontalInset - 4)
+                    .padding(.top, editorTopInset - 2)
+                    .padding(.bottom, 2)
                     .frame(height: 68)
 
                 if commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text("Leave blank to autogenerate a commit message.")
+                    Text("Enter a commit message")
                         .font(.neoBody)
                         .foregroundStyle(NeoCodeTheme.textMuted)
-                        .padding(.leading, 11)
-                        .padding(.top, 8)
+                        .padding(.leading, editorHorizontalInset)
+                        .padding(.top, editorTopInset)
                         .allowsHitTesting(false)
                 }
             }
@@ -200,7 +205,9 @@ struct GitCommitSheet: View {
     }
 
     private var canContinue: Bool {
-        guard let preview = store.gitCommitPreview else { return false }
+        guard let preview = store.gitCommitPreview,
+              commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).nonEmptyTrimmed != nil
+        else { return false }
         if includeUnstaged {
             return preview.fileCount > 0
         }

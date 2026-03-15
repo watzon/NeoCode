@@ -181,41 +181,6 @@ struct GitRepositoryService: Sendable {
         }.value
     }
 
-    nonisolated func suggestedCommitMessage(from preview: GitCommitPreview, includeUnstaged: Bool) -> String {
-        let relevantFiles = preview.changedFiles.filter { includeUnstaged ? true : $0.isStaged }
-        guard !relevantFiles.isEmpty else {
-            return "Update project files"
-        }
-
-        let paths = relevantFiles.map(\.path)
-        let addedOnly = relevantFiles.allSatisfy { $0.statusLabel == "Added" || $0.statusLabel == "New" }
-        let deletedOnly = relevantFiles.allSatisfy { $0.statusLabel == "Deleted" }
-        let verb = addedOnly ? "Add" : (deletedOnly ? "Remove" : "Update")
-
-        if paths.allSatisfy({ $0.hasSuffix("Tests.swift") || $0.contains("Tests/") }) {
-            return "\(verb) test coverage"
-        }
-
-        if paths.allSatisfy({ $0.hasSuffix(".md") }) {
-            return "\(verb) documentation"
-        }
-
-        if paths.count == 1, let path = paths.first {
-            let name = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
-            return "\(verb) \(prettifyPathComponent(name))"
-        }
-
-        let topLevelFolders = Set(paths.map { path in
-            let components = path.split(separator: "/")
-            return components.first.map(String.init) ?? path
-        })
-        if topLevelFolders.count == 1, let scope = topLevelFolders.first {
-            return "\(verb) \(prettifyPathComponent(scope))"
-        }
-
-        return "\(verb) project files"
-    }
-
     private nonisolated static func parseStatus(_ output: String) -> GitRepositoryStatus {
         let lines = output
             .components(separatedBy: .newlines)
@@ -274,12 +239,6 @@ struct GitRepositoryService: Sendable {
                 totals.additions += Int(parts[0]) ?? 0
                 totals.deletions += Int(parts[1]) ?? 0
             }
-    }
-
-    private nonisolated func prettifyPathComponent(_ value: String) -> String {
-        value
-            .replacingOccurrences(of: "-", with: " ")
-            .replacingOccurrences(of: "_", with: " ")
     }
 
     private nonisolated static func currentBranch(in projectPath: String) throws -> String {

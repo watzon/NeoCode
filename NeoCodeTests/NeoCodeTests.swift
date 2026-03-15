@@ -273,24 +273,6 @@ struct NeoCodeCoreTests {
         #expect(clean.isPrimaryActionEnabled == false)
     }
 
-    @MainActor
-    @Test func gitRepositoryServiceSuggestsCommitMessagesFromChangedFiles() {
-        let preview = GitCommitPreview(
-            branch: "main",
-            changedFiles: [
-                GitFileChange(path: "NeoCode/AppShell/ComposerViews.swift", stagedStatus: "M", unstagedStatus: " "),
-                GitFileChange(path: "NeoCode/AppShell/GitViews.swift", stagedStatus: "A", unstagedStatus: " "),
-            ],
-            stagedAdditions: 12,
-            stagedDeletions: 3,
-            unstagedAdditions: 0,
-            unstagedDeletions: 0
-        )
-
-        let message = GitRepositoryService().suggestedCommitMessage(from: preview, includeUnstaged: false)
-
-        #expect(message == "Update NeoCode")
-    }
 }
 
 @Suite(.serialized)
