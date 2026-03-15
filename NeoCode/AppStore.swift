@@ -12,6 +12,13 @@ final class AppStore {
     private let newSessionTitle = SessionSummary.defaultTitle
     private let autoRespondedPermissionTTL: TimeInterval = 60 * 60
 
+    private struct GitCachedState {
+        let status: GitRepositoryStatus
+        let commitPreview: GitCommitPreview?
+        let branches: [String]
+        let selectedBranch: String
+    }
+
     var projects: [ProjectSummary]
     var selectedProjectID: ProjectSummary.ID?
     var selectedSessionID: String?
@@ -31,6 +38,11 @@ final class AppStore {
     var selectedThinkingLevel: String?
     var selectedBranch = "main"
     var availableBranches: [String] = []
+    var gitStatus = GitRepositoryStatus.notRepository
+    var gitCommitPreview: GitCommitPreview?
+    var isRefreshingGitStatus = false
+    var isLoadingGitCommitPreview = false
+    var isPerformingGitOperation = false
     var isLoadingSessions = false
     var loadingTranscriptSessionID: String?
     var isSending = false
@@ -41,14 +53,17 @@ final class AppStore {
 
     private var composerOptionsProjectPath: String?
     private let runtimeIdleTTL: Duration = .seconds(60)
+    private var isRefreshingGitCommitPreview = false
     private var liveServices: [ProjectSummary.ID: any OpenCodeServicing] = [:]
     private var serviceConnectionIdentifiers: [ProjectSummary.ID: String] = [:]
     private var eventTasks: [ProjectSummary.ID: Task<Void, Never>] = [:]
     private var eventSubscriptionTokens: [ProjectSummary.ID: UUID] = [:]
     private var refreshTask: Task<Void, Never>?
+    private var gitRefreshTask: Task<Void, Never>?
     private var persistTask: Task<Void, Never>?
     private var subscribedConnectionIdentifiers: [ProjectSummary.ID: String] = [:]
     private var runtimeIdleTasks: [ProjectSummary.ID: Task<Void, Never>] = [:]
+    private var gitStateByProjectPath: [String: GitCachedState] = [:]
     private var streamingRecoveryTasks: [String: Task<Void, Never>] = [:]
     private var messageRoles: [String: ChatMessage.Role] = [:]
     private var liveSessionStatuses: [String: OpenCodeSessionActivity] = [:]
@@ -208,6 +223,8 @@ final class AppStore {
             self.selectedSessionID = nil
             primePromptState(for: nil)
         }
+
+        scheduleGitRefreshLoop(for: projectPath(for: destinationProjectID))
     }
 
     func selectSession(_ sessionID: String) {
@@ -221,6 +238,7 @@ final class AppStore {
             loadingTranscriptSessionID = sessionID
         }
         primePromptState(for: sessionID)
+        scheduleGitRefreshLoop(for: selectedProject?.path)
     }
 
     func addProject(directoryURL: URL) {
@@ -244,6 +262,7 @@ final class AppStore {
         selectedSessionID = nil
         primePromptState(for: nil)
         lastError = nil
+        scheduleGitRefreshLoop(for: project.path)
     }
 
     func toggleProjectCollapsed(_ projectID: ProjectSummary.ID) {
@@ -257,11 +276,13 @@ final class AppStore {
     func connect(to runtime: OpenCodeRuntime) async {
         guard let project = selectedProject else {
             logger.debug("Disconnecting all live state because no project is selected")
+            cancelGitRefreshLoop()
             disconnectLiveState()
             runtime.stop()
             return
         }
 
+        scheduleGitRefreshLoop(for: project.path)
         _ = await connectProject(project.id, using: runtime, includeComposerOptions: true)
         reevaluateRuntimeRetention(using: runtime)
     }
@@ -700,13 +721,246 @@ final class AppStore {
         attachedFiles.removeAll(where: { $0.id == id })
     }
 
-    func createBranch(named name: String) {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        selectedBranch = trimmed
-        if !availableBranches.contains(trimmed) {
-            availableBranches.insert(trimmed, at: 0)
+    func refreshGitStatus() async {
+        guard !isRefreshingGitStatus else { return }
+        guard let project = selectedProject else {
+            resetGitState()
+            return
         }
+
+        let projectPath = project.path
+        isRefreshingGitStatus = true
+        defer { isRefreshingGitStatus = false }
+
+        let repositoryService = GitRepositoryService()
+        let branchService = GitBranchService()
+        let status = await repositoryService.status(in: projectPath)
+
+        guard selectedProject?.path == projectPath else { return }
+
+        if gitStatus != status {
+            gitStatus = status
+        }
+        if !status.isRepository {
+            if !availableBranches.isEmpty {
+                availableBranches = []
+            }
+            if selectedBranch != "main" {
+                selectedBranch = "main"
+            }
+            if gitCommitPreview != nil {
+                gitCommitPreview = nil
+            }
+            cacheCurrentGitState(for: projectPath)
+            return
+        }
+
+        async let branchesTask = branchService.listBranches(in: projectPath)
+        async let currentBranchTask = branchService.currentBranch(in: projectPath)
+
+        let branches = (try? await branchesTask) ?? []
+        let currentBranch = (try? await currentBranchTask) ?? selectedBranch
+
+        guard selectedProject?.path == projectPath else { return }
+
+        if availableBranches != branches {
+            availableBranches = branches
+        }
+        if !currentBranch.isEmpty {
+            if selectedBranch != currentBranch {
+                selectedBranch = currentBranch
+            }
+            if !availableBranches.contains(currentBranch) {
+                availableBranches.insert(currentBranch, at: 0)
+            }
+        }
+
+        cacheCurrentGitState(for: projectPath)
+
+        if status.hasChanges,
+           gitStateByProjectPath[projectPath]?.commitPreview == nil,
+           !isLoadingGitCommitPreview {
+            Task { [weak self] in
+                await self?.refreshGitCommitPreview(showLoadingIndicator: false, projectPathOverride: projectPath)
+            }
+        }
+    }
+
+    private func scheduleGitRefreshLoop(for projectPath: String?) {
+        guard let projectPath else {
+            cancelGitRefreshLoop()
+            applyCachedGitState(for: nil)
+            return
+        }
+
+        applyCachedGitState(for: projectPath)
+        gitRefreshTask?.cancel()
+        gitRefreshTask = Task { [weak self] in
+            guard let self else { return }
+
+            await self.refreshGitStatus()
+
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(15))
+                guard !Task.isCancelled else { return }
+                guard self.selectedProject?.path == projectPath else { return }
+                await self.refreshGitStatus()
+            }
+        }
+    }
+
+    private func cancelGitRefreshLoop() {
+        gitRefreshTask?.cancel()
+        gitRefreshTask = nil
+    }
+
+    func refreshGitCommitPreview(
+        showLoadingIndicator: Bool = true,
+        projectPathOverride: String? = nil
+    ) async {
+        guard !isRefreshingGitCommitPreview else { return }
+
+        let projectPath = projectPathOverride ?? selectedProject?.path
+        guard let projectPath,
+              (projectPathOverride != nil || gitStatus.isRepository)
+        else {
+            gitCommitPreview = nil
+            return
+        }
+
+        isRefreshingGitCommitPreview = true
+        if showLoadingIndicator {
+            isLoadingGitCommitPreview = true
+        }
+        defer {
+            isRefreshingGitCommitPreview = false
+            isLoadingGitCommitPreview = false
+        }
+
+        do {
+            let preview = try await GitRepositoryService().commitPreview(in: projectPath)
+            guard selectedProject?.path == projectPath || projectPathOverride != nil else { return }
+            gitCommitPreview = preview
+            cacheCurrentGitState(for: projectPath)
+            lastError = nil
+        } catch {
+            guard selectedProject?.path == projectPath || projectPathOverride != nil else { return }
+            gitCommitPreview = nil
+            cacheCurrentGitState(for: projectPath)
+            lastError = error.localizedDescription
+        }
+    }
+
+    func initializeGitRepository() async {
+        guard let projectPath = selectedProject?.path else { return }
+
+        isPerformingGitOperation = true
+        defer { isPerformingGitOperation = false }
+
+        do {
+            try await GitBranchService().initializeRepository(in: projectPath)
+            lastError = nil
+            await refreshGitStatus()
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    func switchBranch(named name: String) async {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let projectPath = selectedProject?.path,
+              gitStatus.isRepository
+        else { return }
+
+        if trimmed == selectedBranch {
+            await refreshGitStatus()
+            return
+        }
+
+        isPerformingGitOperation = true
+        defer { isPerformingGitOperation = false }
+
+        do {
+            try await GitBranchService().switchBranch(named: trimmed, in: projectPath)
+            lastError = nil
+            await refreshGitStatus()
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    func createBranch(named name: String) async {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let projectPath = selectedProject?.path,
+              gitStatus.isRepository
+        else { return }
+
+        isPerformingGitOperation = true
+        defer { isPerformingGitOperation = false }
+
+        do {
+            try await GitBranchService().createBranch(named: trimmed, in: projectPath)
+            lastError = nil
+            await refreshGitStatus()
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    @discardableResult
+    func commitChanges(message: String, includeUnstaged: Bool, pushAfterCommit: Bool) async -> Bool {
+        guard let projectPath = selectedProject?.path, gitStatus.isRepository else { return false }
+
+        let resolvedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines).nonEmptyTrimmed
+            ?? autogeneratedCommitMessage(includeUnstaged: includeUnstaged)
+        guard !resolvedMessage.isEmpty else { return false }
+
+        isPerformingGitOperation = true
+        defer { isPerformingGitOperation = false }
+
+        do {
+            try await GitRepositoryService().commit(message: resolvedMessage, includeUnstaged: includeUnstaged, in: projectPath)
+            if pushAfterCommit {
+                try await GitRepositoryService().push(in: projectPath)
+            }
+            lastError = nil
+            await refreshGitStatus()
+            gitCommitPreview = nil
+            return true
+        } catch {
+            lastError = error.localizedDescription
+            await refreshGitStatus()
+            return false
+        }
+    }
+
+    @discardableResult
+    func pushChanges() async -> Bool {
+        guard let projectPath = selectedProject?.path, gitStatus.isRepository else { return false }
+
+        isPerformingGitOperation = true
+        defer { isPerformingGitOperation = false }
+
+        do {
+            try await GitRepositoryService().push(in: projectPath)
+            lastError = nil
+            await refreshGitStatus()
+            return true
+        } catch {
+            lastError = error.localizedDescription
+            await refreshGitStatus()
+            return false
+        }
+    }
+
+    func autogeneratedCommitMessage(includeUnstaged: Bool) -> String {
+        guard let gitCommitPreview else {
+            return "Update project files"
+        }
+
+        return GitRepositoryService().suggestedCommitMessage(from: gitCommitPreview, includeUnstaged: includeUnstaged)
     }
 
     func apply(event: OpenCodeEvent) {
@@ -832,6 +1086,8 @@ final class AppStore {
     }
 
     func disconnectLiveState() {
+        cancelGitRefreshLoop()
+
         for projectID in Set(liveServices.keys)
             .union(eventTasks.keys)
             .union(runtimeIdleTasks.keys) {
@@ -883,15 +1139,11 @@ final class AppStore {
         async let providersTask = service.listProviders()
         async let agentsTask = service.listAgents()
         async let commandsTask = service.listCommands()
-        async let branchesTask = GitBranchService().listBranches(in: projectPath)
-        async let currentBranchTask = GitBranchService().currentBranch(in: projectPath)
 
         do {
             let providersResponse = try await providersTask
             let agents = try await agentsTask
             let commands = (try? await commandsTask) ?? []
-            let branches = (try? await branchesTask) ?? []
-            let currentBranch = (try? await currentBranchTask) ?? selectedBranch
 
             let models = providersResponse.providers
                 .flatMap { provider in
@@ -930,13 +1182,6 @@ final class AppStore {
 
             refreshThinkingLevels()
 
-            availableBranches = branches
-            if !currentBranch.isEmpty {
-                selectedBranch = currentBranch
-                if !availableBranches.contains(currentBranch) {
-                    availableBranches.insert(currentBranch, at: 0)
-                }
-            }
             composerOptionsProjectPath = projectPath
         } catch {
             logger.error("Failed to load composer options: \(error.localizedDescription, privacy: .public)")
@@ -1137,7 +1382,8 @@ final class AppStore {
                 lastError = "No branch matches '\(query)'."
                 return false
             }
-            selectedBranch = match
+            await switchBranch(named: match)
+            guard lastError == nil else { return false }
             draft = ""
             return true
 
@@ -1671,6 +1917,42 @@ final class AppStore {
 
     private func projectPath(for projectID: ProjectSummary.ID) -> String? {
         projects.first(where: { $0.id == projectID })?.path
+    }
+
+    private func applyCachedGitState(for projectPath: String?) {
+        guard let projectPath, let cached = gitStateByProjectPath[projectPath] else {
+            resetGitState()
+            return
+        }
+
+        if gitStatus != cached.status {
+            gitStatus = cached.status
+        }
+        if gitCommitPreview != cached.commitPreview {
+            gitCommitPreview = cached.commitPreview
+        }
+        if availableBranches != cached.branches {
+            availableBranches = cached.branches
+        }
+        if selectedBranch != cached.selectedBranch {
+            selectedBranch = cached.selectedBranch
+        }
+    }
+
+    private func cacheCurrentGitState(for projectPath: String) {
+        gitStateByProjectPath[projectPath] = GitCachedState(
+            status: gitStatus,
+            commitPreview: gitCommitPreview,
+            branches: availableBranches,
+            selectedBranch: selectedBranch
+        )
+    }
+
+    private func resetGitState() {
+        gitStatus = .notRepository
+        gitCommitPreview = nil
+        availableBranches = []
+        selectedBranch = "main"
     }
 
     private static func connectionIdentifier(for connection: OpenCodeRuntime.Connection) -> String {

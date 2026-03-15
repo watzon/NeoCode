@@ -258,6 +258,39 @@ struct NeoCodeCoreTests {
 
         #expect(snippet == "world")
     }
+
+    @MainActor
+    @Test func gitRepositoryStatusChoosesPrimaryActionFromChangesAndAheadCount() {
+        let changed = GitRepositoryStatus(isRepository: true, hasChanges: true, aheadCount: 0)
+        let ahead = GitRepositoryStatus(isRepository: true, hasChanges: false, aheadCount: 2)
+        let clean = GitRepositoryStatus(isRepository: true, hasChanges: false, aheadCount: 0)
+
+        #expect(changed.primaryAction == .commit)
+        #expect(changed.isPrimaryActionEnabled == true)
+        #expect(ahead.primaryAction == .push)
+        #expect(ahead.isPrimaryActionEnabled == true)
+        #expect(clean.primaryAction == .commit)
+        #expect(clean.isPrimaryActionEnabled == false)
+    }
+
+    @MainActor
+    @Test func gitRepositoryServiceSuggestsCommitMessagesFromChangedFiles() {
+        let preview = GitCommitPreview(
+            branch: "main",
+            changedFiles: [
+                GitFileChange(path: "NeoCode/AppShell/ComposerViews.swift", stagedStatus: "M", unstagedStatus: " "),
+                GitFileChange(path: "NeoCode/AppShell/GitViews.swift", stagedStatus: "A", unstagedStatus: " "),
+            ],
+            stagedAdditions: 12,
+            stagedDeletions: 3,
+            unstagedAdditions: 0,
+            unstagedDeletions: 0
+        )
+
+        let message = GitRepositoryService().suggestedCommitMessage(from: preview, includeUnstaged: false)
+
+        #expect(message == "Update NeoCode")
+    }
 }
 
 @Suite(.serialized)

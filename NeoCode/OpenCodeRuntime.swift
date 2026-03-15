@@ -156,12 +156,12 @@ final class OpenCodeRuntime {
 
             try process.run()
 
-            let baseURL = try await waitForBoundURL(entry: entry, timeout: 8)
+            let baseURL = try await waitForBoundURL(entry: entry, timeout: 15)
             let health = try await client.waitUntilHealthy(
                 baseURL: baseURL,
                 username: configuration.username,
                 password: configuration.password,
-                timeout: 8
+                timeout: 12
             )
             logger.info("Runtime healthy on \(baseURL.absoluteString, privacy: .public)")
 

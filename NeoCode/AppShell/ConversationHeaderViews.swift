@@ -4,8 +4,8 @@ import SwiftUI
 struct SessionHeaderView: View {
     @Environment(AppStore.self) private var store
     @Environment(OpenCodeRuntime.self) private var runtime
-    @State private var gitStatus = GitRepositoryStatus.notRepository
     @State private var isRenaming = false
+    @State private var isCommitSheetPresented = false
     @State private var renameTitle = ""
     @State private var workspaceTools: [WorkspaceTool] = []
     @State private var openMenu: HeaderMenu?
@@ -47,10 +47,20 @@ struct SessionHeaderView: View {
                         )
                     }
 
-                    if gitStatus.isRepository {
+                    if store.gitStatus.isRepository {
                         GitActionsSplitButton(
-                            gitStatus: gitStatus,
+                            gitStatus: store.gitStatus,
+                            isBusy: store.isPerformingGitOperation,
                             isMenuOpen: openMenu == .gitActions,
+                            onPrimaryAction: handlePrimaryGitAction,
+                            onCommit: {
+                                isCommitSheetPresented = true
+                            },
+                            onPush: {
+                                Task {
+                                    _ = await store.pushChanges()
+                                }
+                            },
                             onToggleMenu: {
                                 openMenu = openMenu == .gitActions ? nil : .gitActions
                             },
@@ -68,6 +78,11 @@ struct SessionHeaderView: View {
         .padding(.vertical, 16)
         .task(id: projectPath) {
             await refreshHeaderState()
+        }
+        .sheet(isPresented: $isCommitSheetPresented) {
+            GitCommitSheet(isPresented: $isCommitSheetPresented)
+                .environment(store)
+                .environment(runtime)
         }
         .alert("Rename Thread", isPresented: $isRenaming) {
             TextField("Thread name", text: $renameTitle)
@@ -137,7 +152,6 @@ struct SessionHeaderView: View {
 
     private func refreshHeaderState() async {
         guard !projectPath.isEmpty else {
-            gitStatus = .notRepository
             workspaceTools = []
             return
         }
@@ -151,14 +165,23 @@ struct SessionHeaderView: View {
            discoveredTools.contains(where: { $0.id == defaultToolID }) {
             store.setPreferredEditorID(defaultToolID, for: projectID)
         }
-
-        gitStatus = await GitRepositoryService().status(in: projectPath)
     }
 
     private func selectWorkspaceTool(_ tool: WorkspaceTool) {
         guard let projectID else { return }
         store.setPreferredEditorID(tool.id, for: projectID)
         workspaceToolService.openProject(at: projectPath, with: tool)
+    }
+
+    private func handlePrimaryGitAction() {
+        switch store.gitStatus.primaryAction {
+        case .commit:
+            isCommitSheetPresented = true
+        case .push:
+            Task {
+                _ = await store.pushChanges()
+            }
+        }
     }
 }
 
@@ -193,6 +216,7 @@ private struct WorkspaceToolSplitButton: View {
             primaryAction: {
                 service.openProject(at: projectPath, with: tool)
             },
+            isPrimaryDisabled: false,
             isMenuOpen: isMenuOpen,
             onToggleMenu: onToggleMenu,
             onDismissMenu: onDismissMenu,
@@ -221,7 +245,11 @@ private struct WorkspaceToolSplitButton: View {
 
 private struct GitActionsSplitButton: View {
     let gitStatus: GitRepositoryStatus
+    let isBusy: Bool
     let isMenuOpen: Bool
+    let onPrimaryAction: () -> Void
+    let onCommit: () -> Void
+    let onPush: () -> Void
     let onToggleMenu: () -> Void
     let onDismissMenu: () -> Void
 
@@ -230,7 +258,8 @@ private struct GitActionsSplitButton: View {
             title: gitStatus.primaryAction.title,
             systemImage: gitStatus.primaryAction.systemImage,
             icon: { EmptyView() },
-            primaryAction: {},
+            primaryAction: onPrimaryAction,
+            isPrimaryDisabled: isBusy || !gitStatus.isPrimaryActionEnabled,
             isMenuOpen: isMenuOpen,
             onToggleMenu: onToggleMenu,
             onDismissMenu: onDismissMenu,
@@ -239,17 +268,25 @@ private struct GitActionsSplitButton: View {
                     HeaderPopoverMenuButton(
                         title: "Commit",
                         systemImage: "point.bottomleft.forward.to.point.topright.scurvepath",
-                        isDisabled: !gitStatus.hasChanges,
-                        action: dismiss
+                        isDisabled: isBusy || !gitStatus.hasChanges,
+                        action: {
+                            onCommit()
+                            dismiss()
+                        }
                     )
                     HeaderPopoverMenuButton(
                         title: "Push",
                         systemImage: "arrow.up.circle",
-                        action: dismiss
+                        isDisabled: isBusy || gitStatus.aheadCount == 0,
+                        action: {
+                            onPush()
+                            dismiss()
+                        }
                     )
                     HeaderPopoverMenuButton(
                         title: "Create PR",
                         systemImage: "arrow.triangle.pull",
+                        isDisabled: true,
                         action: dismiss
                     )
                 }
@@ -263,6 +300,7 @@ private struct HeaderSplitControl<Icon: View, MenuContent: View>: View {
     let systemImage: String?
     @ViewBuilder let icon: () -> Icon
     let primaryAction: () -> Void
+    let isPrimaryDisabled: Bool
     let isMenuOpen: Bool
     let onToggleMenu: () -> Void
     let onDismissMenu: () -> Void
@@ -275,19 +313,20 @@ private struct HeaderSplitControl<Icon: View, MenuContent: View>: View {
                     if let systemImage {
                         Image(systemName: systemImage)
                             .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(NeoCodeTheme.textPrimary)
+                            .foregroundStyle(primaryForegroundColor)
                     }
 
                     icon()
 
                     Text(title)
                         .font(.neoAction)
-                        .foregroundStyle(NeoCodeTheme.textPrimary)
+                        .foregroundStyle(primaryForegroundColor)
                 }
                 .padding(.horizontal, 12)
                 .frame(height: 32)
             }
             .buttonStyle(.plain)
+            .disabled(isPrimaryDisabled)
 
             Rectangle()
                 .fill(NeoCodeTheme.line)
@@ -317,6 +356,10 @@ private struct HeaderSplitControl<Icon: View, MenuContent: View>: View {
             })
         }
         .zIndex(isMenuOpen ? 10 : 0)
+    }
+
+    private var primaryForegroundColor: Color {
+        isPrimaryDisabled ? NeoCodeTheme.textMuted : NeoCodeTheme.textPrimary
     }
 }
 

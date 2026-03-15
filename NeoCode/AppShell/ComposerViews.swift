@@ -45,38 +45,64 @@ struct ComposerView: View {
                         .frame(width: 8)
                 }
 
-                SearchableComposerDropdown(
-                    title: store.selectedBranch,
-                    items: store.availableBranches.map { ComposerDropdownOption(id: $0, title: $0) },
-                    emptyMessage: "No branches found.",
-                    placeholder: "Search branches",
-                    isSearchable: false,
-                    rowContent: { option in
-                        Text(option.title)
-                            .font(.neoBody)
-                            .foregroundStyle(NeoCodeTheme.textPrimary)
-                    },
-                    searchableText: { option in
-                        [option.title]
-                    },
-                    onSelect: { option in
-                        store.selectedBranch = option.id
-                    },
-                    footer: {
-                        AnyView(
-                            VStack(spacing: 8) {
-                                Divider()
-
-                                Button("Create Branch...") {
-                                    newBranchName = ""
-                                    isCreatingBranch = true
+                if store.selectedProject != nil {
+                    if store.gitStatus.isRepository {
+                        SearchableComposerDropdown(
+                            title: store.selectedBranch,
+                            items: store.availableBranches.map { ComposerDropdownOption(id: $0, title: $0) },
+                            emptyMessage: "No branches found.",
+                            placeholder: "Search branches",
+                            isSearchable: false,
+                            rowContent: { option in
+                                Text(option.title)
+                                    .font(.neoBody)
+                                    .foregroundStyle(NeoCodeTheme.textPrimary)
+                            },
+                            searchableText: { option in
+                                [option.title]
+                            },
+                            onSelect: { option in
+                                Task {
+                                    await store.switchBranch(named: option.id)
                                 }
-                                .buttonStyle(.plain)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                            },
+                            footer: {
+                                AnyView(
+                                    VStack(spacing: 8) {
+                                        Divider()
+
+                                        Button("Create Branch...") {
+                                            newBranchName = ""
+                                            isCreatingBranch = true
+                                        }
+                                        .buttonStyle(.plain)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                )
                             }
                         )
+                        .disabled(store.isPerformingGitOperation)
+                    } else {
+                        Button(action: {
+                            Task {
+                                await store.initializeGitRepository()
+                            }
+                        }) {
+                            Text("Create Git Repository")
+                                .font(.neoMonoSmall)
+                                .foregroundStyle(NeoCodeTheme.textPrimary)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 7)
+                                .background(
+                                    Capsule()
+                                        .fill(NeoCodeTheme.panelSoft)
+                                        .overlay(Capsule().stroke(NeoCodeTheme.line, lineWidth: 1))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(store.isPerformingGitOperation)
                     }
-                )
+                }
             }
             .animation(.spring(response: 0.32, dampingFraction: 0.82), value: activityState)
         }
@@ -98,7 +124,9 @@ struct ComposerView: View {
                 newBranchName = ""
             }
             Button("Create") {
-                store.createBranch(named: newBranchName)
+                Task {
+                    await store.createBranch(named: newBranchName)
+                }
             }
         } message: {
             Text("Create a new branch for this session.")

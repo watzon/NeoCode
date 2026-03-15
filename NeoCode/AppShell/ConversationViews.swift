@@ -346,7 +346,9 @@ struct ConversationView: View {
                 guard !isAwaitingInitialScroll else { return }
 
                 if metrics.contentOffsetY <= olderMessagesLoadThreshold {
-                    loadOlderMessages(using: proxy)
+                    DispatchQueue.main.async {
+                        loadOlderMessages(using: proxy)
+                    }
                 }
 
                 let nextPinnedState: Bool
@@ -356,7 +358,9 @@ struct ConversationView: View {
                     let distanceToBottom = max(0, metrics.contentHeight - metrics.visibleMaxY)
                     nextPinnedState = distanceToBottom <= autoScrollThreshold
                 }
-                schedulePinnedStateUpdate(nextPinnedState)
+                DispatchQueue.main.async {
+                    schedulePinnedStateUpdate(nextPinnedState)
+                }
             }
 
             if showsNewSessionEmptyState {
@@ -481,7 +485,10 @@ struct ConversationView: View {
             )
         )
         .frame(maxWidth: .infinity, alignment: .center)
-        .readHeight { promptOverlayHeight = $0 }
+        .readHeight {
+            guard abs(promptOverlayHeight - $0) > 0.5 else { return }
+            promptOverlayHeight = $0
+        }
         .animation(.easeOut(duration: 0.16), value: showsSlashPopover)
     }
 
