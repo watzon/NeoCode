@@ -3257,12 +3257,18 @@ final class AppStore {
         guard let ephemeralSession = session(for: ephemeralSessionID) else { return }
 
         let ephemeralPromptKey = promptDraftKey(for: ephemeralSessionID)
+        let wasYoloEnabled = isYoloModeEnabled(for: ephemeralSessionID)
+
         replaceSession(
             ephemeralSessionID,
             in: projectID,
             with: SessionSummary(session: created, fallbackTitle: ephemeralSession.title)
         )
         selectedSessionID = created.id
+
+        if wasYoloEnabled {
+            setYoloMode(true, for: created.id)
+        }
 
         if let ephemeralPromptKey {
             promptPersistTask?.cancel()
