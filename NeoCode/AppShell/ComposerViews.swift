@@ -47,12 +47,15 @@ struct ComposerView: View {
 
                 if store.selectedProject != nil {
                     if store.gitStatus.isRepository {
-                        SearchableComposerDropdown(
+                        NeoCodeSelect(
                             title: store.selectedBranch,
+                            selectedID: store.selectedBranch,
                             items: store.availableBranches.map { ComposerDropdownOption(id: $0, title: $0) },
                             emptyMessage: "No branches found.",
                             placeholder: "Search branches",
                             isSearchable: false,
+                            direction: .up,
+                            menuWidth: 240,
                             rowContent: { option in
                                 Text(option.title)
                                     .font(.neoBody)
@@ -166,25 +169,47 @@ struct ComposerView: View {
             .frame(height: textViewHeight)
 
             HStack(alignment: .center, spacing: 8) {
-                Menu {
-                    Button("Attach Files...") {
-                        isImportingFiles = true
-                    }
-                } label: {
+                NeoCodeMenuButton(direction: .up) { isPresented in
                     Image(systemName: "plus")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(NeoCodeTheme.textSecondary)
-                        .frame(width: 28, height: 28)
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
+                        .frame(width: 32, height: 32)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(isPresented ? NeoCodeTheme.panelSoft : NeoCodeTheme.panelRaised)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .stroke(isPresented ? NeoCodeTheme.lineStrong : NeoCodeTheme.line, lineWidth: 1)
+                                )
+                        )
+                        .animation(.easeOut(duration: 0.16), value: isPresented)
+                } menuContent: { dismiss in
+                    DropdownMenuSurface(width: 176) {
+                        DropdownMenuRow(action: {
+                            isImportingFiles = true
+                            dismiss()
+                        }) {
+                            Image(systemName: "paperclip")
+                                .font(.system(size: 14, weight: .medium))
+                                .frame(width: 16, height: 16)
 
-                SearchableComposerDropdown(
+                            Text("Attach Files...")
+                                .font(.neoAction)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                .accessibilityLabel("More actions")
+
+                NeoCodeSelect(
                     title: store.selectedModel?.title ?? "Select model",
+                    selectedID: store.selectedModelID,
                     items: store.availableModels,
                     emptyMessage: "No models found.",
                     placeholder: "Search models",
-                    isSearchable: true
+                    isSearchable: true,
+                    direction: .up,
+                    menuWidth: 320
                 ) { model in
                     VStack(alignment: .leading, spacing: 2) {
                         Text(model.title)
@@ -201,12 +226,15 @@ struct ComposerView: View {
                     store.refreshThinkingLevels()
                 }
 
-                SearchableComposerDropdown(
+                NeoCodeSelect(
                     title: store.selectedAgent.isEmpty ? "Agent" : store.displayAgentName(store.selectedAgent),
+                    selectedID: store.selectedAgent.isEmpty ? nil : store.selectedAgent,
                     items: store.availableAgents.map { ComposerDropdownOption(id: $0, title: store.displayAgentName($0)) },
                     emptyMessage: "No agents available.",
                     placeholder: "Search agents",
-                    isSearchable: false
+                    isSearchable: false,
+                    direction: .up,
+                    menuWidth: 220
                 ) { option in
                     Text(option.title)
                         .font(.neoBody)
@@ -217,12 +245,15 @@ struct ComposerView: View {
                     store.selectedAgent = option.id
                 }
 
-                SearchableComposerDropdown(
+                NeoCodeSelect(
                     title: store.selectedThinkingLevel ?? "Reasoning",
+                    selectedID: store.selectedThinkingLevel,
                     items: store.availableThinkingLevels.map { ComposerDropdownOption(id: $0, title: $0) },
                     emptyMessage: "No variants available.",
                     placeholder: "Search reasoning",
-                    isSearchable: false
+                    isSearchable: false,
+                    direction: .up,
+                    menuWidth: 220
                 ) { option in
                     Text(option.title)
                         .font(.neoBody)
@@ -526,13 +557,13 @@ private struct YoloModeToggleButton: View {
                     .font(.neoMonoSmall)
             }
             .foregroundStyle(isEnabled ? NeoCodeTheme.canvas : NeoCodeTheme.warning)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .padding(.horizontal, 12)
+            .frame(height: 32)
             .background(
-                Capsule()
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(isEnabled ? NeoCodeTheme.warning : NeoCodeTheme.panel)
                     .overlay(
-                        Capsule()
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
                             .stroke(isEnabled ? NeoCodeTheme.warning.opacity(0.75) : NeoCodeTheme.line, lineWidth: 1)
                     )
             )
@@ -944,138 +975,6 @@ extension View {
             }
         )
         .onPreferenceChange(HeightPreferenceKey.self, perform: onChange)
-    }
-}
-
-struct ComposerPillLabel: View {
-    let title: String
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Text(title)
-                .font(.neoMonoSmall)
-            Image(systemName: "chevron.down")
-                .font(.system(size: 9, weight: .semibold))
-        }
-        .foregroundStyle(NeoCodeTheme.textSecondary)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(
-            Capsule()
-                .fill(NeoCodeTheme.panelSoft)
-                .overlay(Capsule().stroke(NeoCodeTheme.line, lineWidth: 1))
-        )
-    }
-}
-
-struct SearchableComposerDropdown<Item: Identifiable, RowContent: View>: View where Item.ID == String {
-    let title: String
-    let items: [Item]
-    let emptyMessage: String
-    let placeholder: String
-    let isSearchable: Bool
-    @ViewBuilder let rowContent: (Item) -> RowContent
-    let searchableText: (Item) -> [String]
-    let onSelect: (Item) -> Void
-    let footer: (() -> AnyView)?
-
-    @State private var isOpen = false
-    @State private var query = ""
-
-    init(
-        title: String,
-        items: [Item],
-        emptyMessage: String,
-        placeholder: String,
-        isSearchable: Bool,
-        @ViewBuilder rowContent: @escaping (Item) -> RowContent,
-        searchableText: @escaping (Item) -> [String],
-        onSelect: @escaping (Item) -> Void,
-        footer: (() -> AnyView)? = nil
-    ) {
-        self.title = title
-        self.items = items
-        self.emptyMessage = emptyMessage
-        self.placeholder = placeholder
-        self.isSearchable = isSearchable
-        self.rowContent = rowContent
-        self.searchableText = searchableText
-        self.onSelect = onSelect
-        self.footer = footer
-    }
-
-    var body: some View {
-        Button {
-            isOpen.toggle()
-        } label: {
-            ComposerPillLabel(title: title)
-        }
-        .buttonStyle(.plain)
-        .popover(isPresented: $isOpen, arrowEdge: .top) {
-            VStack(alignment: .leading, spacing: 10) {
-                if isSearchable {
-                    TextField(placeholder, text: $query)
-                        .textFieldStyle(.plain)
-                        .font(.neoBody)
-                        .foregroundStyle(NeoCodeTheme.textPrimary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(NeoCodeTheme.panelSoft)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 10)
-                                        .stroke(NeoCodeTheme.line, lineWidth: 1)
-                                )
-                        )
-                }
-
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        if filteredItems.isEmpty {
-                            Text(emptyMessage)
-                                .font(.neoBody)
-                                .foregroundStyle(NeoCodeTheme.textMuted)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 10)
-                        } else {
-                            ForEach(filteredItems, id: \.id) { item in
-                                Button {
-                                    onSelect(item)
-                                    query = ""
-                                    isOpen = false
-                                } label: {
-                                    rowContent(item)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 9)
-                                        .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                }
-                .frame(width: 280, height: 260)
-
-                if let footer {
-                    footer()
-                }
-            }
-            .padding(12)
-            .background(NeoCodeTheme.panel)
-        }
-    }
-
-    private var filteredItems: [Item] {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return items }
-        return items.filter { item in
-            searchableText(item).contains { value in
-                value.localizedCaseInsensitiveContains(trimmed)
-            }
-        }
     }
 }
 

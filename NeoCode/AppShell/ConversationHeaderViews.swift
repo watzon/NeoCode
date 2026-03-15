@@ -222,21 +222,22 @@ private struct WorkspaceToolSplitButton: View {
             onToggleMenu: onToggleMenu,
             onDismissMenu: onDismissMenu,
             menuContent: { dismiss in
-                HeaderPopoverMenu(width: 176) {
+                DropdownMenuSurface(width: 176) {
                     ForEach(allTools) { candidate in
                         let available = service.isAvailable(candidate)
-                        HeaderPopoverMenuButton(
-                            title: candidate.label,
-                            isSelected: candidate.id == tool.id,
-                            isDisabled: !available,
-                            icon: {
+                        DropdownMenuRow(isSelected: candidate.id == tool.id, isDisabled: !available, action: {
+                            onSelectTool(candidate)
+                            dismiss()
+                        }) {
+                            HStack(spacing: 10) {
                                 WorkspaceToolIconView(tool: candidate)
-                            },
-                            action: {
-                                onSelectTool(candidate)
-                                dismiss()
+                                    .frame(width: 16, height: 16)
+
+                                Text(candidate.label)
+                                    .font(.neoAction)
+                                    .lineLimit(1)
                             }
-                        )
+                        }
                     }
                 }
             }
@@ -266,31 +267,40 @@ private struct GitActionsSplitButton: View {
             onToggleMenu: onToggleMenu,
             onDismissMenu: onDismissMenu,
             menuContent: { dismiss in
-                HeaderPopoverMenu(width: 148) {
-                    HeaderPopoverMenuButton(
-                        title: "Commit",
-                        systemImage: "point.bottomleft.forward.to.point.topright.scurvepath",
-                        isDisabled: isBusy || !gitStatus.hasChanges,
-                        action: {
-                            onCommit()
-                            dismiss()
-                        }
-                    )
-                    HeaderPopoverMenuButton(
-                        title: "Push",
-                        systemImage: "arrow.up.circle",
-                        isDisabled: isBusy || gitStatus.aheadCount == 0,
-                        action: {
-                            onPush()
-                            dismiss()
-                        }
-                    )
-                    HeaderPopoverMenuButton(
-                        title: "Create PR",
-                        systemImage: "arrow.triangle.pull",
-                        isDisabled: true,
-                        action: dismiss
-                    )
+                DropdownMenuSurface(width: 148) {
+                    DropdownMenuRow(isDisabled: isBusy || !gitStatus.hasChanges, action: {
+                        onCommit()
+                        dismiss()
+                    }) {
+                        Image(systemName: "point.bottomleft.forward.to.point.topright.scurvepath")
+                            .font(.system(size: 14, weight: .medium))
+                            .frame(width: 16, height: 16)
+
+                        Text("Commit")
+                            .font(.neoAction)
+                            .lineLimit(1)
+                    }
+                    DropdownMenuRow(isDisabled: isBusy || gitStatus.aheadCount == 0, action: {
+                        onPush()
+                        dismiss()
+                    }) {
+                        Image(systemName: "arrow.up.circle")
+                            .font(.system(size: 14, weight: .medium))
+                            .frame(width: 16, height: 16)
+
+                        Text("Push")
+                            .font(.neoAction)
+                            .lineLimit(1)
+                    }
+                    DropdownMenuRow(isDisabled: true, action: dismiss) {
+                        Image(systemName: "arrow.triangle.pull")
+                            .font(.system(size: 14, weight: .medium))
+                            .frame(width: 16, height: 16)
+
+                        Text("Create PR")
+                            .font(.neoAction)
+                            .lineLimit(1)
+                    }
                 }
             }
         )
@@ -353,7 +363,7 @@ private struct HeaderSplitControl<Icon: View, MenuContent: View>: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .background {
-            FloatingMenuPresenter(isPresented: isMenuOpen, onDismiss: onDismissMenu, content: {
+            AnchoredFloatingPanelPresenter(isPresented: isMenuOpen, direction: .down, onDismiss: onDismissMenu, content: {
                 menuContent(onToggleMenu)
             })
         }
@@ -362,226 +372,6 @@ private struct HeaderSplitControl<Icon: View, MenuContent: View>: View {
 
     private var primaryForegroundColor: Color {
         isPrimaryDisabled ? NeoCodeTheme.textMuted : NeoCodeTheme.textPrimary
-    }
-}
-
-private struct FloatingMenuPresenter<Content: View>: NSViewRepresentable {
-    let isPresented: Bool
-    let onDismiss: () -> Void
-    @ViewBuilder let content: () -> Content
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
-    }
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView(frame: .zero)
-        context.coordinator.anchorView = view
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        context.coordinator.anchorView = nsView
-        context.coordinator.update(
-            isPresented: isPresented,
-            onDismiss: onDismiss,
-            content: AnyView(content())
-        )
-    }
-
-    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
-        coordinator.dismiss()
-    }
-
-    final class Coordinator {
-        weak var anchorView: NSView?
-        private let hostingController = NSHostingController(rootView: AnyView(EmptyView()))
-        private var panel: NSPanel?
-        private var localMonitor: Any?
-        private var onDismiss: (() -> Void)?
-
-        func update(isPresented: Bool, onDismiss: @escaping () -> Void, content: AnyView) {
-            guard let anchorView else {
-                dismiss()
-                return
-            }
-
-            self.onDismiss = onDismiss
-            if isPresented {
-                hostingController.rootView = content
-                presentIfNeeded(from: anchorView)
-                updateFrame(from: anchorView)
-            } else {
-                dismiss()
-            }
-        }
-
-        func dismiss() {
-            removeMonitor()
-            if let parent = panel?.parent {
-                parent.removeChildWindow(panel!)
-            }
-            panel?.orderOut(nil)
-            panel = nil
-        }
-
-        private func presentIfNeeded(from anchorView: NSView) {
-            if panel == nil {
-                let panel = NSPanel(
-                    contentRect: CGRect(x: 0, y: 0, width: 10, height: 10),
-                    styleMask: [.borderless, .nonactivatingPanel],
-                    backing: .buffered,
-                    defer: true
-                )
-                panel.isOpaque = false
-                panel.backgroundColor = .clear
-                panel.hasShadow = false
-                panel.level = .floating
-                panel.collectionBehavior = [.transient, .moveToActiveSpace, .fullScreenAuxiliary]
-                panel.hidesOnDeactivate = true
-                panel.ignoresMouseEvents = false
-                panel.contentView = hostingController.view
-                self.panel = panel
-                installMonitor()
-            }
-
-            if let panel,
-               let window = anchorView.window,
-               panel.parent !== window {
-                window.addChildWindow(panel, ordered: .above)
-            }
-
-            panel?.orderFrontRegardless()
-        }
-
-        private func installMonitor() {
-            guard localMonitor == nil else { return }
-
-            localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
-                guard let self, let panel else { return event }
-                if event.window !== panel {
-                    dismiss()
-                    onDismiss?()
-                }
-                return event
-            }
-        }
-
-        private func removeMonitor() {
-            guard let localMonitor else { return }
-            NSEvent.removeMonitor(localMonitor)
-            self.localMonitor = nil
-        }
-
-        private func updateFrame(from anchorView: NSView) {
-            guard let panel,
-                  let window = anchorView.window
-            else { return }
-
-            hostingController.view.layoutSubtreeIfNeeded()
-            let fittingSize = hostingController.view.fittingSize
-            hostingController.view.frame = CGRect(origin: .zero, size: fittingSize)
-
-            let anchorFrameInWindow = anchorView.convert(anchorView.bounds, to: nil)
-            let anchorFrameOnScreen = window.convertToScreen(anchorFrameInWindow)
-            let panelOrigin = CGPoint(x: anchorFrameOnScreen.minX, y: anchorFrameOnScreen.minY - 6 - fittingSize.height)
-
-            panel.setFrame(CGRect(origin: panelOrigin, size: fittingSize), display: true)
-        }
-    }
-}
-
-private struct HeaderPopoverMenu<Content: View>: View {
-    let width: CGFloat
-    @ViewBuilder let content: () -> Content
-
-    init(width: CGFloat = 220, @ViewBuilder content: @escaping () -> Content) {
-        self.width = width
-        self.content = content
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            content()
-        }
-        .padding(8)
-        .frame(width: width, alignment: .leading)
-        .background(NeoCodeTheme.panelRaised)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(NeoCodeTheme.lineStrong, lineWidth: 1)
-        )
-        .shadow(color: NeoCodeTheme.canvas.opacity(0.34), radius: 18, x: 0, y: 10)
-    }
-}
-
-private struct HeaderPopoverMenuButton<Icon: View>: View {
-    @State private var isHovering = false
-
-    let title: String
-    var systemImage: String?
-    var isSelected = false
-    var isDisabled = false
-    @ViewBuilder var icon: () -> Icon
-    let action: () -> Void
-
-    init(
-        title: String,
-        systemImage: String? = nil,
-        isSelected: Bool = false,
-        isDisabled: Bool = false,
-        @ViewBuilder icon: @escaping () -> Icon = { EmptyView() },
-        action: @escaping () -> Void
-    ) {
-        self.title = title
-        self.systemImage = systemImage
-        self.isSelected = isSelected
-        self.isDisabled = isDisabled
-        self.icon = icon
-        self.action = action
-    }
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                if let systemImage {
-                    Image(systemName: systemImage)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(foregroundColor)
-                        .frame(width: 16, height: 16)
-                } else {
-                    icon()
-                        .frame(width: 16, height: 16)
-                }
-
-                Text(title)
-                    .font(.neoAction)
-                    .foregroundStyle(foregroundColor)
-                    .lineLimit(1)
-
-                Spacer(minLength: 8)
-
-                if isSelected {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(NeoCodeTheme.accent)
-                }
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(isHovering ? NeoCodeTheme.panelSoft : .clear)
-            )
-        }
-        .buttonStyle(.plain)
-        .disabled(isDisabled)
-        .onHover { isHovering = $0 }
-    }
-
-    private var foregroundColor: Color {
-        isDisabled ? NeoCodeTheme.textMuted : NeoCodeTheme.textPrimary
     }
 }
 
