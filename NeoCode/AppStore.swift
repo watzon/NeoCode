@@ -15,6 +15,7 @@ final class AppStore {
     private let projectPersistence = PersistedProjectsStore()
     private let promptDraftPersistence = PersistedPromptDraftsStore()
     private let yoloPreferencePersistence = PersistedYoloPreferencesStore()
+    private let dashboardStatsService = DashboardStatsService()
     private let newSessionTitle = SessionSummary.defaultTitle
     private let autoRespondedPermissionTTL: TimeInterval = 60 * 60
     private let performanceOptions: AppStorePerformanceOptions
@@ -44,6 +45,11 @@ final class AppStore {
         var updatedAt: Date
     }
 
+    private struct DashboardRuntimeService {
+        let service: any OpenCodeServicing
+        let shouldStopAfterUse: Bool
+    }
+
     enum GitOperationState: Equatable {
         case initializingRepository
         case switchingBranch
@@ -69,7 +75,7 @@ final class AppStore {
 
     var projects: [ProjectSummary]
     var selectedProjectID: ProjectSummary.ID?
-    var selectedSessionID: String?
+    var selectedContent: AppContentSelection
     var draft = "" {
         didSet {
             persistDraftIfNeeded()
@@ -97,6 +103,8 @@ final class AppStore {
     var isRespondingToPrompt = false
     var isPromptReady = true
     var promptLoadingText: String?
+    var dashboardSnapshot: DashboardSnapshot?
+    var dashboardStatus: DashboardRefreshStatus = .idle
     var lastError: String?
 
     private var composerOptionsProjectPath: String?
@@ -136,6 +144,10 @@ final class AppStore {
     private var bufferedDeltaFlushTask: Task<Void, Never>?
     private var hasPendingProjectPersistence = false
     private var projectPersistenceSaveCount = 0
+    private var dashboardPollingTask: Task<Void, Never>?
+    private var dashboardRefreshTask: Task<Void, Never>?
+    private var dashboardRefreshPending = false
+    private var dashboardDirtySessions: [ProjectSummary.ID: Set<String>] = [:]
 
     init() {
         let normalizedProjects = Self.normalizedProjects(PersistedProjectsStore().loadProjects())
@@ -143,8 +155,8 @@ final class AppStore {
         self.projects = extractedState.projects
         self.transcriptStateBySessionID = extractedState.transcripts
         self.selectedProjectID = extractedState.projects.first?.id
-        self.selectedSessionID = extractedState.projects.first?.sessions.first?.id
-        self.loadingTranscriptSessionID = extractedState.projects.first?.sessions.first?.id
+        self.selectedContent = .dashboard
+        self.loadingTranscriptSessionID = nil
         self.yoloSessionKeys = PersistedYoloPreferencesStore().loadYoloSessionKeys()
         self.performanceOptions = AppStorePerformanceOptions()
         self.isPersistenceEnabled = true
@@ -161,12 +173,40 @@ final class AppStore {
         self.projects = extractedState.projects
         self.transcriptStateBySessionID = extractedState.transcripts
         self.selectedProjectID = extractedState.projects.first?.id
-        self.selectedSessionID = extractedState.projects.first?.sessions.first?.id
-        self.loadingTranscriptSessionID = extractedState.projects.first?.sessions.first?.id
+        self.selectedContent = .dashboard
+        self.loadingTranscriptSessionID = nil
         self.yoloSessionKeys = isPersistenceEnabled ? PersistedYoloPreferencesStore().loadYoloSessionKeys() : []
         self.performanceOptions = performanceOptions
         self.isPersistenceEnabled = isPersistenceEnabled
         seedComposerDefaults()
+    }
+
+    var selectedSessionID: String? {
+        get {
+            guard case .session(let sessionID) = selectedContent else { return nil }
+            return sessionID
+        }
+        set {
+            if let newValue {
+                selectedContent = .session(newValue)
+            } else {
+                selectedContent = .dashboard
+            }
+        }
+    }
+
+    var isDashboardSelected: Bool {
+        if case .dashboard = selectedContent {
+            return true
+        }
+        return false
+    }
+
+    var dashboardProjectSignature: String {
+        projects
+            .map(\.path)
+            .sorted()
+            .joined(separator: "|")
     }
 
     var debugBufferedTextDeltaCount: Int {
@@ -351,6 +391,15 @@ final class AppStore {
         flushPendingProjectPersistence()
     }
 
+    func selectDashboard() {
+        discardSelectedEphemeralSessionIfNeeded()
+        selectedSessionID = nil
+        loadingTranscriptSessionID = nil
+        primePromptState(for: nil)
+        scheduleGitRefreshLoop(for: selectedProject?.path)
+        flushPendingProjectPersistence()
+    }
+
     func selectSession(_ sessionID: String) {
         guard selectedSessionID != sessionID else { return }
         discardSelectedEphemeralSessionIfNeeded(excluding: sessionID)
@@ -435,6 +484,261 @@ final class AppStore {
         await loadPendingPermissions(using: service, for: projectID)
         await loadPendingQuestions(using: service, for: projectID)
         reevaluateRuntimeRetention(using: runtime)
+    }
+
+    func startDashboard(using runtime: OpenCodeRuntime) async {
+        dashboardSnapshot = await dashboardStatsService.prepare(projects: projects.map(DashboardProjectDescriptor.init(project:)))
+
+        guard !projects.isEmpty else {
+            dashboardStatus = .idle
+            dashboardPollingTask?.cancel()
+            dashboardPollingTask = nil
+            dashboardRefreshTask?.cancel()
+            dashboardRefreshTask = nil
+            dashboardRefreshPending = false
+            dashboardDirtySessions = [:]
+            return
+        }
+
+        if dashboardSnapshot?.indexedSessionCount ?? 0 > 0 {
+            dashboardStatus = DashboardRefreshStatus(
+                phase: .refreshing,
+                title: "Loaded cached usage",
+                detail: "Checking your tracked projects for changed sessions in the background.",
+                processedSessions: 0,
+                totalSessions: 0,
+                currentProjectName: nil,
+                currentSessionTitle: nil,
+                lastUpdatedAt: dashboardSnapshot?.generatedAt
+            )
+        } else {
+            dashboardStatus = DashboardRefreshStatus(
+                phase: .priming,
+                title: "Building usage cache",
+                detail: "Scanning tracked projects, reading session history, and caching per-session summaries.",
+                processedSessions: 0,
+                totalSessions: 0,
+                currentProjectName: nil,
+                currentSessionTitle: nil,
+                lastUpdatedAt: nil
+            )
+        }
+
+        requestDashboardRefresh(using: runtime)
+        startDashboardPolling(using: runtime)
+    }
+
+    private func startDashboardPolling(using runtime: OpenCodeRuntime) {
+        dashboardPollingTask?.cancel()
+        dashboardPollingTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(120))
+                guard !Task.isCancelled else { return }
+                self.requestDashboardRefresh(using: runtime, delay: .zero)
+            }
+        }
+    }
+
+    private func noteDashboardChange(projectID: ProjectSummary.ID, sessionID: String?, using runtime: OpenCodeRuntime) {
+        if let sessionID {
+            dashboardDirtySessions[projectID, default: []].insert(sessionID)
+        }
+        requestDashboardRefresh(using: runtime, delay: .seconds(3))
+    }
+
+    private func requestDashboardRefresh(using runtime: OpenCodeRuntime, delay: Duration = .zero) {
+        dashboardRefreshPending = true
+        guard dashboardRefreshTask == nil else { return }
+
+        dashboardRefreshTask = Task { [weak self] in
+            guard let self else { return }
+
+            if delay > .zero {
+                try? await Task.sleep(for: delay)
+            }
+
+            while !Task.isCancelled, self.dashboardRefreshPending {
+                self.dashboardRefreshPending = false
+                let forcedSessions = self.dashboardDirtySessions
+                self.dashboardDirtySessions = [:]
+                await self.performDashboardRefresh(using: runtime, forcedSessions: forcedSessions)
+            }
+
+            self.dashboardRefreshTask = nil
+
+            if self.dashboardRefreshPending {
+                self.requestDashboardRefresh(using: runtime)
+            }
+        }
+    }
+
+    private func performDashboardRefresh(
+        using runtime: OpenCodeRuntime,
+        forcedSessions: [ProjectSummary.ID: Set<String>]
+    ) async {
+        let activeProjects = projects
+        guard !activeProjects.isEmpty else {
+            dashboardStatus = .idle
+            return
+        }
+
+        let hasCachedSnapshot = (dashboardSnapshot?.indexedSessionCount ?? 0) > 0
+        if hasCachedSnapshot {
+            dashboardStatus = DashboardRefreshStatus(
+                phase: .refreshing,
+                title: "Refreshing usage cache",
+                detail: "Checking tracked projects for sessions that changed since the last refresh.",
+                processedSessions: 0,
+                totalSessions: 0,
+                currentProjectName: nil,
+                currentSessionTitle: nil,
+                lastUpdatedAt: dashboardSnapshot?.generatedAt
+            )
+        }
+
+        var refreshWork: [(project: ProjectSummary, descriptor: DashboardProjectDescriptor, session: DashboardRemoteSessionDescriptor)] = []
+        var services: [ProjectSummary.ID: DashboardRuntimeService] = [:]
+        var failedProjects: [String] = []
+
+        for project in activeProjects {
+            let descriptor = DashboardProjectDescriptor(project: project)
+
+            guard let runtimeService = await dashboardService(for: project, runtime: runtime) else {
+                failedProjects.append(project.name)
+                continue
+            }
+
+            services[project.id] = runtimeService
+
+            do {
+                let sessions = try await runtimeService.service.listSessions()
+                    .filter(\.isRootVisible)
+                    .sorted { $0.updatedAt > $1.updatedAt }
+                let remoteSessions = sessions.map { session in
+                    DashboardRemoteSessionDescriptor(
+                        session: session,
+                        fallbackTitle: sessionSummary(for: session.id, projectID: project.id)?.title ?? SessionSummary.defaultTitle
+                    )
+                }
+                let plan = await dashboardStatsService.planRefresh(
+                    for: descriptor,
+                    sessions: remoteSessions,
+                    forceSessionIDs: forcedSessions[project.id] ?? []
+                )
+                dashboardSnapshot = plan.snapshot
+                refreshWork.append(contentsOf: plan.changedSessions.map { (project, descriptor, $0) })
+            } catch {
+                logger.error("Failed to scan dashboard sessions for project \(project.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                failedProjects.append(project.name)
+            }
+        }
+
+        refreshWork.sort { $0.session.updatedAt > $1.session.updatedAt }
+
+        let initialPhase: DashboardRefreshStatus.Phase = hasCachedSnapshot ? .refreshing : .priming
+        dashboardStatus = DashboardRefreshStatus(
+            phase: initialPhase,
+            title: hasCachedSnapshot ? "Refreshing usage cache" : "Building usage cache",
+            detail: refreshWork.isEmpty
+                ? "Your cached statistics are already current."
+                : "Summarizing model, token, and tool usage one session at a time so the dashboard stays responsive.",
+            processedSessions: 0,
+            totalSessions: refreshWork.count,
+            currentProjectName: nil,
+            currentSessionTitle: nil,
+            lastUpdatedAt: dashboardSnapshot?.generatedAt
+        )
+
+        if refreshWork.isEmpty {
+            dashboardSnapshot = await dashboardStatsService.currentSnapshot()
+            dashboardStatus = failedProjects.isEmpty ? .idle : DashboardRefreshStatus(
+                phase: .failed,
+                title: "Some projects were skipped",
+                detail: "NeoCode kept your cached dashboard, but couldn't refresh \(failedProjects.joined(separator: ", ")).",
+                processedSessions: 0,
+                totalSessions: 0,
+                currentProjectName: nil,
+                currentSessionTitle: nil,
+                lastUpdatedAt: dashboardSnapshot?.generatedAt
+            )
+            stopDashboardOnlyRuntimes(services, runtime: runtime)
+            return
+        }
+
+        let batchSize = hasCachedSnapshot ? 2 : 4
+        var processedSessions = 0
+        var cursor = 0
+
+        while cursor < refreshWork.count, !Task.isCancelled {
+            let nextCursor = min(cursor + batchSize, refreshWork.count)
+            let batch = Array(refreshWork[cursor..<nextCursor])
+            cursor = nextCursor
+
+            var ingestions: [DashboardSessionIngress] = []
+            for item in batch {
+                guard let runtimeService = services[item.project.id] else { continue }
+                dashboardStatus = DashboardRefreshStatus(
+                    phase: initialPhase,
+                    title: hasCachedSnapshot ? "Refreshing usage cache" : "Building usage cache",
+                    detail: hasCachedSnapshot
+                        ? "Updating only the sessions that changed since the cached snapshot was written."
+                        : "Reading historical session data and caching it so future launches can load instantly.",
+                    processedSessions: processedSessions,
+                    totalSessions: refreshWork.count,
+                    currentProjectName: item.project.name,
+                    currentSessionTitle: item.session.title,
+                    lastUpdatedAt: dashboardSnapshot?.generatedAt
+                )
+
+                do {
+                    let messages = try await runtimeService.service.listMessages(sessionID: item.session.id)
+                    ingestions.append(DashboardSessionIngress(project: item.descriptor, session: item.session, messages: messages))
+                } catch {
+                    logger.error("Failed to fetch dashboard messages for session \(item.session.id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                }
+            }
+
+            if !ingestions.isEmpty {
+                dashboardSnapshot = await dashboardStatsService.ingest(ingestions)
+                processedSessions += ingestions.count
+            }
+
+            await Task.yield()
+        }
+
+        dashboardSnapshot = await dashboardStatsService.currentSnapshot()
+        dashboardStatus = failedProjects.isEmpty ? .idle : DashboardRefreshStatus(
+            phase: .failed,
+            title: "Usage cache updated with gaps",
+            detail: "NeoCode refreshed what it could, but skipped \(failedProjects.joined(separator: ", ")).",
+            processedSessions: processedSessions,
+            totalSessions: refreshWork.count,
+            currentProjectName: nil,
+            currentSessionTitle: nil,
+            lastUpdatedAt: dashboardSnapshot?.generatedAt
+        )
+        stopDashboardOnlyRuntimes(services, runtime: runtime)
+    }
+
+    private func stopDashboardOnlyRuntimes(_ services: [ProjectSummary.ID: DashboardRuntimeService], runtime: OpenCodeRuntime) {
+        for (projectID, runtimeService) in services where runtimeService.shouldStopAfterUse {
+            runtime.stop(projectPath: projectPath(for: projectID))
+        }
+    }
+
+    private func dashboardService(for project: ProjectSummary, runtime: OpenCodeRuntime) async -> DashboardRuntimeService? {
+        let hadConnection = runtime.connection(for: project.path) != nil
+        await runtime.ensureRunning(for: project.path)
+
+        guard let connection = runtime.connection(for: project.path) else {
+            logger.error("Dashboard refresh could not start runtime for project: \(project.path, privacy: .public)")
+            return nil
+        }
+
+        runtime.markUsed(for: project.path)
+        let shouldStopAfterUse = !hadConnection && liveServices[project.id] == nil
+        return DashboardRuntimeService(service: OpenCodeClient(connection: connection), shouldStopAfterUse: shouldStopAfterUse)
     }
 
     func syncSelectedSession(using runtime: OpenCodeRuntime) async {
@@ -1766,10 +2070,6 @@ final class AppStore {
                 }
             )
 
-            if selectedProjectID == projectID, selectedSessionID == nil {
-                selectedSessionID = sessions.first?.id
-            }
-
             if let selectedSessionID,
                self.projectID(for: selectedSessionID) == projectID,
                session(for: selectedSessionID)?.isEphemeral != true {
@@ -1894,6 +2194,29 @@ final class AppStore {
                         }
 
                         self.apply(event: event, projectID: projectID)
+                        switch event {
+                        case .sessionCreated(let session):
+                            self.noteDashboardChange(projectID: projectID, sessionID: session.id, using: runtime)
+                        case .sessionUpdated(let session):
+                            self.noteDashboardChange(projectID: projectID, sessionID: session.id, using: runtime)
+                        case .sessionDeleted(let sessionID):
+                            self.noteDashboardChange(projectID: projectID, sessionID: sessionID, using: runtime)
+                        case .messageUpdated(let info):
+                            self.noteDashboardChange(projectID: projectID, sessionID: info.sessionID, using: runtime)
+                        case .messagePartUpdated(let part):
+                            self.noteDashboardChange(projectID: projectID, sessionID: part.sessionID, using: runtime)
+                        case .messagePartDelta(let delta):
+                            self.noteDashboardChange(projectID: projectID, sessionID: delta.sessionID, using: runtime)
+                        case .connected,
+                                .sessionStatusChanged,
+                                .permissionAsked,
+                                .permissionReplied,
+                                .questionAsked,
+                                .questionReplied,
+                                .questionRejected,
+                                .ignored:
+                            break
+                        }
                         self.reevaluateRuntimeRetention(using: runtime)
                     }
 
@@ -2276,8 +2599,9 @@ final class AppStore {
             removeTranscript(for: sessionID)
         }
         if selectedProjectID == projectID,
-           (selectedSessionID == nil || !mergedSessions.contains(where: { $0.id == selectedSessionID })) {
-            self.selectedSessionID = mergedSessions.first?.id
+           let selectedSessionID,
+           !mergedSessions.contains(where: { $0.id == selectedSessionID }) {
+            self.selectedSessionID = nil
         }
         scheduleProjectPersistence()
     }
@@ -2317,9 +2641,6 @@ final class AppStore {
             projects[projectIndex].sessions.append(inserted)
         }
 
-        if selectedProjectID == projectID, selectedSessionID == nil {
-            selectedSessionID = session.id
-        }
         scheduleProjectPersistence()
     }
 
@@ -2334,7 +2655,7 @@ final class AppStore {
         pendingPermissionsBySession.removeValue(forKey: sessionID)
         pendingQuestionsBySession.removeValue(forKey: sessionID)
         if selectedSessionID == sessionID {
-            selectedSessionID = projects[projectIndex].sessions.first?.id
+            selectedSessionID = nil
         }
         scheduleProjectPersistence()
     }

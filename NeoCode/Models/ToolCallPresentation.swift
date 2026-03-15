@@ -30,7 +30,7 @@ private enum ToolCallPresentationBuilder {
                     title: diffTitle(for: file),
                     subtitle: diffSubtitle(for: file),
                     content: .diff(file),
-                    defaultExpanded: true
+                    defaultExpanded: false
                 )
             }
         }

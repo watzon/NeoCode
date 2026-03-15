@@ -10,8 +10,9 @@ struct AppSidebarView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             SidebarActionBar(
-                onNewThread: {
-                    Task { await store.createSession(using: runtime) }
+                isDashboardSelected: store.isDashboardSelected,
+                onDashboard: {
+                    store.selectDashboard()
                 },
                 onSettings: {}
             )
@@ -82,12 +83,18 @@ struct EmptyProjectsSidebarView: View {
 }
 
 struct SidebarActionBar: View {
-    let onNewThread: () -> Void
+    let isDashboardSelected: Bool
+    let onDashboard: () -> Void
     let onSettings: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            SidebarActionButton(label: "New thread", systemImage: "square.and.pencil", action: onNewThread)
+            SidebarActionButton(
+                label: "Dashboard",
+                systemImage: "rectangle.grid.2x2",
+                isSelected: isDashboardSelected,
+                action: onDashboard
+            )
             SidebarActionButton(label: "Settings", systemImage: "gearshape", action: onSettings)
         }
         .padding(.horizontal, 18)
@@ -98,16 +105,21 @@ struct SidebarActionBar: View {
 struct SidebarActionButton: View {
     let label: String
     let systemImage: String
+    var isSelected = false
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Label(label, systemImage: systemImage)
                 .font(.neoAction)
-                .foregroundStyle(NeoCodeTheme.textPrimary)
+                .foregroundStyle(isSelected ? NeoCodeTheme.accent : NeoCodeTheme.textPrimary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(isSelected ? NeoCodeTheme.panelSoft : Color.clear)
+                )
         }
         .buttonStyle(.plain)
     }

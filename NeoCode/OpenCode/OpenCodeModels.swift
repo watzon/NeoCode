@@ -1,24 +1,24 @@
 import Foundation
 
-struct OpenCodeProviderResponse: Decodable, Equatable {
+struct OpenCodeProviderResponse: Decodable, Equatable, Sendable {
     let providers: [OpenCodeProvider]
     let `default`: [String: String]?
 }
 
-struct OpenCodeProvider: Decodable, Equatable, Identifiable {
+struct OpenCodeProvider: Decodable, Equatable, Identifiable, Sendable {
     let id: String
     let name: String
     let models: [String: OpenCodeModel]
 }
 
-struct OpenCodeModel: Decodable, Equatable {
+struct OpenCodeModel: Decodable, Equatable, Sendable {
     let id: String
     let providerID: String
     let name: String
     let variants: [String: JSONValue]?
 }
 
-struct OpenCodeAgent: Decodable, Equatable, Identifiable {
+struct OpenCodeAgent: Decodable, Equatable, Identifiable, Sendable {
     let id = UUID()
     let name: String
     let description: String?
@@ -33,7 +33,7 @@ struct OpenCodeAgent: Decodable, Equatable, Identifiable {
     }
 }
 
-struct OpenCodeCommand: Decodable, Equatable, Identifiable, Hashable {
+struct OpenCodeCommand: Decodable, Equatable, Identifiable, Hashable, Sendable {
     let name: String
     let description: String?
     let agent: String?
@@ -93,29 +93,29 @@ struct OpenCodeCommand: Decodable, Equatable, Identifiable, Hashable {
 
     var id: String { name }
 
-    var trimmedDescription: String? {
+    nonisolated var trimmedDescription: String? {
         description?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmptyTrimmed
     }
 }
 
-struct OpenCodePromptOptions {
+struct OpenCodePromptOptions: Sendable {
     let model: ComposerModelOption?
     let agentName: String?
     let variant: String?
 }
 
-struct OpenCodeSession: Decodable, Identifiable, Equatable {
+struct OpenCodeSession: Decodable, Identifiable, Equatable, Sendable {
     let id: String
     let title: String?
     let parentID: String?
     let time: OpenCodeTimeContainer?
 
-    var createdAt: Date { time?.created ?? .distantPast }
-    var updatedAt: Date { time?.updated ?? time?.created ?? .distantPast }
-    var isRootVisible: Bool { parentID == nil }
+    nonisolated var createdAt: Date { time?.created ?? .distantPast }
+    nonisolated var updatedAt: Date { time?.updated ?? time?.created ?? .distantPast }
+    nonisolated var isRootVisible: Bool { parentID == nil }
 }
 
-enum OpenCodeSessionActivity: Decodable, Equatable {
+enum OpenCodeSessionActivity: Decodable, Equatable, Sendable {
     case idle
     case busy
     case retry(attempt: Int, message: String, next: TimeInterval)
@@ -146,23 +146,39 @@ enum OpenCodeSessionActivity: Decodable, Equatable {
     }
 }
 
-struct OpenCodeMessageEnvelope: Decodable, Equatable {
+struct OpenCodeTokenCacheUsage: Decodable, Equatable, Sendable {
+    let read: Int
+    let write: Int
+}
+
+struct OpenCodeTokenUsage: Decodable, Equatable, Sendable {
+    let total: Int?
+    let input: Int
+    let output: Int
+    let reasoning: Int
+    let cache: OpenCodeTokenCacheUsage?
+}
+
+struct OpenCodeMessageEnvelope: Decodable, Equatable, Sendable {
     let info: OpenCodeMessageInfo
     let parts: [OpenCodePart]
 }
 
-struct OpenCodeMessageInfo: Decodable, Equatable {
+struct OpenCodeMessageInfo: Decodable, Equatable, Sendable {
     let id: String
     let sessionID: String?
     let role: String
     let agent: String?
+    let providerID: String?
     let modelID: String?
+    let cost: Double?
+    let tokens: OpenCodeTokenUsage?
     let time: OpenCodeTimeContainer?
 
-    var createdAt: Date? { time?.created }
-    var updatedAt: Date? { time?.completed ?? time?.updated ?? time?.created }
+    nonisolated var createdAt: Date? { time?.created }
+    nonisolated var updatedAt: Date? { time?.completed ?? time?.updated ?? time?.created }
 
-    var chatRole: ChatMessage.Role {
+    nonisolated var chatRole: ChatMessage.Role {
         switch role {
         case "user": .user
         case "assistant": .assistant
@@ -174,14 +190,14 @@ struct OpenCodeMessageInfo: Decodable, Equatable {
 
 typealias OpenCodeQuestionAnswer = [String]
 
-enum OpenCodePermissionReply: String, Codable, Equatable, Hashable {
+enum OpenCodePermissionReply: String, Codable, Equatable, Hashable, Sendable {
     case once
     case always
     case reject
 }
 
-struct OpenCodePermissionRequest: Codable, Equatable, Identifiable {
-    struct ToolReference: Codable, Equatable {
+struct OpenCodePermissionRequest: Codable, Equatable, Identifiable, Sendable {
+    struct ToolReference: Codable, Equatable, Sendable {
         let messageID: String
         let callID: String
     }
@@ -195,30 +211,30 @@ struct OpenCodePermissionRequest: Codable, Equatable, Identifiable {
     let tool: ToolReference?
 }
 
-struct OpenCodePermissionReplyEvent: Codable, Equatable {
+struct OpenCodePermissionReplyEvent: Codable, Equatable, Sendable {
     let sessionID: String
     let requestID: String
     let reply: OpenCodePermissionReply
 }
 
-struct OpenCodeQuestionOption: Codable, Equatable, Hashable {
+struct OpenCodeQuestionOption: Codable, Equatable, Hashable, Sendable {
     let label: String
     let description: String
 }
 
-struct OpenCodeQuestionInfo: Codable, Equatable, Hashable {
+struct OpenCodeQuestionInfo: Codable, Equatable, Hashable, Sendable {
     let question: String
     let header: String
     let options: [OpenCodeQuestionOption]
     let multiple: Bool?
     let custom: Bool?
 
-    var allowsMultipleSelections: Bool { multiple == true }
-    var allowsCustomAnswer: Bool { custom != false }
+    nonisolated var allowsMultipleSelections: Bool { multiple == true }
+    nonisolated var allowsCustomAnswer: Bool { custom != false }
 }
 
-struct OpenCodeQuestionRequest: Codable, Equatable, Hashable, Identifiable {
-    struct ToolReference: Codable, Equatable, Hashable {
+struct OpenCodeQuestionRequest: Codable, Equatable, Hashable, Identifiable, Sendable {
+    struct ToolReference: Codable, Equatable, Hashable, Sendable {
         let messageID: String
         let callID: String
     }
@@ -229,29 +245,29 @@ struct OpenCodeQuestionRequest: Codable, Equatable, Hashable, Identifiable {
     let tool: ToolReference?
 }
 
-struct OpenCodeQuestionReplyEvent: Codable, Equatable, Hashable {
+struct OpenCodeQuestionReplyEvent: Codable, Equatable, Hashable, Sendable {
     let sessionID: String
     let requestID: String
     let answers: [OpenCodeQuestionAnswer]
 }
 
-struct OpenCodeQuestionRejectEvent: Codable, Equatable, Hashable {
+struct OpenCodeQuestionRejectEvent: Codable, Equatable, Hashable, Sendable {
     let sessionID: String
     let requestID: String
 }
 
-struct OpenCodeFileSourceText: Decodable, Equatable {
+struct OpenCodeFileSourceText: Decodable, Equatable, Sendable {
     let value: String
     let start: Int?
     let end: Int?
 }
 
-struct OpenCodeFileSourceRange: Decodable, Equatable {
+struct OpenCodeFileSourceRange: Decodable, Equatable, Sendable {
     let start: Int?
     let end: Int?
 }
 
-struct OpenCodeFileSource: Decodable, Equatable {
+struct OpenCodeFileSource: Decodable, Equatable, Sendable {
     let text: OpenCodeFileSourceText?
     let path: String?
     let range: OpenCodeFileSourceRange?
@@ -259,8 +275,8 @@ struct OpenCodeFileSource: Decodable, Equatable {
     let uri: String?
 }
 
-struct OpenCodePart: Decodable, Equatable {
-    enum Kind: String, Decodable {
+struct OpenCodePart: Decodable, Equatable, Sendable {
+    enum Kind: String, Decodable, Sendable {
         case text
         case reasoning
         case tool
@@ -287,10 +303,10 @@ struct OpenCodePart: Decodable, Equatable {
     let state: OpenCodeToolState?
     let time: OpenCodeTimeContainer?
 
-    var updatedAt: Date? { time?.completed ?? time?.updated ?? time?.created }
-    var toolStatus: OpenCodeToolState.Status? { state?.status }
-    var trimmedText: String { (text ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
-    var attachment: ChatAttachment? {
+    nonisolated var updatedAt: Date? { time?.completed ?? time?.updated ?? time?.created }
+    nonisolated var toolStatus: OpenCodeToolState.Status? { state?.status }
+    nonisolated var trimmedText: String { (text ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
+    nonisolated var attachment: ChatAttachment? {
         guard type == .file,
               let mime,
               let url
@@ -301,7 +317,7 @@ struct OpenCodePart: Decodable, Equatable {
         return ChatAttachment(filename: filename, mimeType: mime, url: url, sourcePath: source?.path)
     }
 
-    var isInProgress: Bool {
+    nonisolated var isInProgress: Bool {
         switch type {
         case .tool:
             switch toolStatus {
@@ -315,7 +331,7 @@ struct OpenCodePart: Decodable, Equatable {
         }
     }
 
-    var shouldDisplay: Bool {
+    nonisolated var shouldDisplay: Bool {
         switch type {
         case .file:
             return attachment != nil || !trimmedText.isEmpty
@@ -333,7 +349,7 @@ struct OpenCodePart: Decodable, Equatable {
         }
     }
 
-    var renderedText: String {
+    nonisolated var renderedText: String {
         switch type {
         case .text, .reasoning:
             return text ?? ""
@@ -354,9 +370,9 @@ struct OpenCodePart: Decodable, Equatable {
         }
     }
 
-    var chatRole: ChatMessage.Role { chatRole(defaultRole: .assistant) }
+    nonisolated var chatRole: ChatMessage.Role { chatRole(defaultRole: .assistant) }
 
-    func chatRole(defaultRole: ChatMessage.Role) -> ChatMessage.Role {
+    nonisolated func chatRole(defaultRole: ChatMessage.Role) -> ChatMessage.Role {
         switch type {
         case .tool:
             return .tool
@@ -367,7 +383,7 @@ struct OpenCodePart: Decodable, Equatable {
         }
     }
 
-    var chatEmphasis: ChatMessage.Emphasis {
+    nonisolated var chatEmphasis: ChatMessage.Emphasis {
         switch type {
         case .reasoning:
             return .strong
@@ -378,7 +394,7 @@ struct OpenCodePart: Decodable, Equatable {
         }
     }
 
-    var chatMessageKind: ChatMessage.Kind {
+    nonisolated var chatMessageKind: ChatMessage.Kind {
         if type == .tool {
             let status = ChatMessage.ToolCallStatus(rawValue: toolStatus?.rawValue ?? "running") ?? .running
             return .toolCall(
@@ -396,8 +412,8 @@ struct OpenCodePart: Decodable, Equatable {
     }
 }
 
-struct OpenCodeToolState: Decodable, Equatable {
-    enum Status: String, Decodable {
+struct OpenCodeToolState: Decodable, Equatable, Sendable {
+    enum Status: String, Decodable, Sendable {
         case pending
         case running
         case completed
@@ -409,17 +425,17 @@ struct OpenCodeToolState: Decodable, Equatable {
     let output: JSONValue?
     let error: String?
 
-    var rawInput: String? { input?.displayString }
-    var rawOutput: String? { output?.displayString }
+    nonisolated var rawInput: String? { input?.displayString }
+    nonisolated var rawOutput: String? { output?.displayString }
 }
 
-struct OpenCodeTimeContainer: Decodable, Equatable {
+struct OpenCodeTimeContainer: Decodable, Equatable, Sendable {
     let created: Date?
     let updated: Date?
     let completed: Date?
 }
 
-enum OpenCodeEvent: Equatable {
+enum OpenCodeEvent: Equatable, Sendable {
     case connected
     case sessionCreated(OpenCodeSession)
     case sessionUpdated(OpenCodeSession)
@@ -474,7 +490,7 @@ enum OpenCodeEvent: Equatable {
     }
 }
 
-struct OpenCodePartDelta: Decodable, Equatable {
+struct OpenCodePartDelta: Decodable, Equatable, Sendable {
     let sessionID: String
     let messageID: String
     let partID: String

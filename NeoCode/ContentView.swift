@@ -19,7 +19,7 @@ struct ContentView: View {
             AppSidebarView()
                 .frame(width: 318)
 
-            ConversationScreen(selectedSessionID: store.selectedSessionID)
+            PrimaryContentScreen()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .ignoresSafeArea(.container, edges: .top)
@@ -36,6 +36,10 @@ struct ContentView: View {
         .task(id: store.selectedProject?.id) {
             guard isRuntimeBootstrappingEnabled else { return }
             await store.connect(to: runtime)
+        }
+        .task(id: store.dashboardProjectSignature) {
+            guard isRuntimeBootstrappingEnabled else { return }
+            await store.startDashboard(using: runtime)
         }
         .task(id: store.selectedSessionID) {
             guard isRuntimeBootstrappingEnabled else { return }

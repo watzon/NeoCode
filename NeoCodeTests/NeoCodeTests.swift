@@ -116,6 +116,52 @@ struct NeoCodeCoreTests {
         }
     }
 
+    @Test func decodesAssistantUsageMetadataFromMessages() throws {
+        let envelopes: [OpenCodeMessageEnvelope] = try decode(
+            """
+            [
+              {
+                "info": {
+                  "id": "msg_usage",
+                  "sessionID": "ses_usage",
+                  "role": "assistant",
+                  "agent": "builder",
+                  "providerID": "openai",
+                  "modelID": "gpt-5.4",
+                  "cost": 1.25,
+                  "tokens": {
+                    "total": 420,
+                    "input": 120,
+                    "output": 240,
+                    "reasoning": 40,
+                    "cache": {
+                      "read": 12,
+                      "write": 8
+                    }
+                  },
+                  "time": {
+                    "created": "2026-03-13T10:06:00Z",
+                    "updated": "2026-03-13T10:06:10Z",
+                    "completed": "2026-03-13T10:06:10Z"
+                  }
+                },
+                "parts": []
+              }
+            ]
+            """
+        )
+
+        let message = try #require(envelopes.first)
+        #expect(message.info.providerID == "openai")
+        #expect(message.info.modelID == "gpt-5.4")
+        #expect(message.info.cost == 1.25)
+        #expect(message.info.tokens?.input == 120)
+        #expect(message.info.tokens?.output == 240)
+        #expect(message.info.tokens?.reasoning == 40)
+        #expect(message.info.tokens?.cache?.read == 12)
+        #expect(message.info.tokens?.cache?.write == 8)
+    }
+
     @Test func parsesMultiLineSSEPayloadsBeforeFlushing() throws {
         var parser = OpenCodeSSEParser()
 
@@ -710,7 +756,10 @@ struct NeoCodeMainActorTests {
                     sessionID: "ses_1",
                     role: "user",
                     agent: nil,
+                    providerID: nil,
                     modelID: nil,
+                    cost: nil,
+                    tokens: nil,
                     time: OpenCodeTimeContainer(created: now, updated: now, completed: nil)
                 )
             )
@@ -1288,6 +1337,23 @@ struct NeoCodeMainActorTests {
         store.selectProject(secondProject.id)
 
         #expect(store.selectedProjectID == secondProject.id)
+        #expect(store.selectedSessionID == nil)
+    }
+
+    @MainActor
+    @Test func appStoreStartsOnDashboardWithoutSelectingInitialThread() async {
+        let store = AppStore(projects: [
+            ProjectSummary(
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(id: "ses_existing", title: "Existing", lastUpdatedAt: .distantPast),
+                ]
+            ),
+        ])
+
+        #expect(store.isDashboardSelected == true)
+        #expect(store.selectedProjectID == store.projects.first?.id)
         #expect(store.selectedSessionID == nil)
     }
 
