@@ -167,14 +167,14 @@ struct GitCommitSheet: View {
                     title: "Commit",
                     systemImage: "point.bottomleft.forward.to.point.topright.scurvepath",
                     isSelected: selectedAction == .commit,
-                    isDisabled: false,
+                    isDisabled: store.isPerformingGitOperation,
                     action: { selectedAction = .commit }
                 )
                 GitCommitActionButton(
                     title: "Commit and push",
                     systemImage: "arrow.up.circle",
                     isSelected: selectedAction == .commitAndPush,
-                    isDisabled: false,
+                    isDisabled: store.isPerformingGitOperation,
                     action: { selectedAction = .commitAndPush }
                 )
                 GitCommitActionButton(
@@ -190,7 +190,7 @@ struct GitCommitSheet: View {
 
     private var continueButton: some View {
         Button(action: runPrimaryAction) {
-            Text("Continue")
+            Text(primaryButtonTitle)
                 .font(.neoAction)
                 .foregroundStyle(NeoCodeTheme.canvas)
                 .frame(maxWidth: .infinity)
@@ -202,6 +202,14 @@ struct GitCommitSheet: View {
         }
         .buttonStyle(.plain)
         .disabled(!canContinue || store.isPerformingGitOperation)
+    }
+
+    private var primaryButtonTitle: String {
+        if let operationState = store.currentGitOperationState {
+            return "\(operationState.title)..."
+        }
+
+        return "Continue"
     }
 
     private var canContinue: Bool {

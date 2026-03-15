@@ -973,9 +973,9 @@ final class AppStore {
                 try await GitRepositoryService().push(in: projectPath)
             }
             lastError = nil
-            await refreshGitStatus()
-            gitCommitPreview = nil
             logger.info("Git commit finished for project: \(projectPath, privacy: .public)")
+            applyPostCommitState(pushAfterCommit: pushAfterCommit, for: projectPath)
+            scheduleGitRefreshAfterOperation(for: projectPath)
             return true
         } catch {
             logger.error("Git commit failed for project: \(projectPath, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
@@ -1991,6 +1991,20 @@ final class AppStore {
             branches: availableBranches,
             selectedBranch: selectedBranch
         )
+    }
+
+    private func applyPostCommitState(pushAfterCommit: Bool, for projectPath: String) {
+        let aheadCount = pushAfterCommit ? 0 : max(1, gitStatus.aheadCount + 1)
+        gitStatus = GitRepositoryStatus(isRepository: true, hasChanges: false, aheadCount: aheadCount)
+        cacheCurrentGitState(for: projectPath)
+    }
+
+    private func scheduleGitRefreshAfterOperation(for projectPath: String) {
+        Task { [weak self] in
+            guard let self else { return }
+            await self.refreshGitStatus()
+            await self.refreshGitCommitPreview(showLoadingIndicator: false, projectPathOverride: projectPath)
+        }
     }
 
     private func setGitOperationState(_ state: GitOperationState, for projectPath: String) {
