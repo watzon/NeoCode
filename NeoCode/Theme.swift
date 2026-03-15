@@ -17,6 +17,15 @@ enum NeoCodeTheme {
     static let accentDim = Color(red: 0.45, green: 0.34, blue: 0.18)
     static let success = Color(red: 0.35, green: 0.71, blue: 0.51)
     static let warning = Color(red: 0.80, green: 0.52, blue: 0.22)
+    static let diffContextBackground = Color(red: 0.08, green: 0.09, blue: 0.11)
+    static let diffContextText = Color(red: 0.83, green: 0.84, blue: 0.86)
+    static let diffLineNumber = Color.white.opacity(0.36)
+    static let diffAddedBackground = Color(red: 0.07, green: 0.20, blue: 0.14)
+    static let diffAddedText = Color(red: 0.66, green: 0.95, blue: 0.76)
+    static let diffRemovedBackground = Color(red: 0.22, green: 0.08, blue: 0.11)
+    static let diffRemovedText = Color(red: 0.98, green: 0.69, blue: 0.72)
+    static let diffHunkBackground = Color(red: 0.10, green: 0.16, blue: 0.23)
+    static let diffHunkText = Color(red: 0.61, green: 0.80, blue: 1.0)
 }
 
 extension Font {

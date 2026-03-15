@@ -1299,7 +1299,15 @@ struct NeoCodeMainActorTests {
             text: "read completed",
             timestamp: Date(timeIntervalSince1970: 100),
             emphasis: .subtle,
-            kind: .toolCall(name: "read", status: .completed, detail: "ok"),
+            kind: .toolCall(
+                ChatMessage.ToolCall(
+                    name: "read",
+                    status: .completed,
+                    detail: "ok",
+                    input: .object(["path": .string("README.md")]),
+                    output: .object(["ok": .bool(true)])
+                )
+            ),
             isInProgress: false
         )
 

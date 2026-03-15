@@ -2448,9 +2448,8 @@ final class AppStore {
             return .running
         }
 
-        if let lastMessage = transcript.last,
-           case .toolCall(_, let toolStatus, _) = lastMessage.kind,
-           toolStatus == .error {
+        if let toolCall = transcript.last?.kind.toolCall,
+           toolCall.status == .error {
             return .attention
         }
 

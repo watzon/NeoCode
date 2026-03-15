@@ -256,108 +256,29 @@ enum AssistantTurnBlock: Identifiable, Hashable {
 
 struct ToolCallRowView: View {
     let contentWidth: CGFloat
-    let toolName: String
-    let toolStatus: ChatMessage.ToolCallStatus
-    let toolDetail: String?
-    @State private var isExpanded: Bool
+    let toolCall: ChatMessage.ToolCall
+    let presentation: ToolCallPresentation
 
     init(message: ChatMessage, contentWidth: CGFloat) {
         self.contentWidth = contentWidth
-        if case .toolCall(let name, let status, let detail) = message.kind {
-            self.toolName = name
-            self.toolStatus = status
-            self.toolDetail = detail
+        let resolvedToolCall: ChatMessage.ToolCall
+        if let toolCall = message.kind.toolCall {
+            resolvedToolCall = toolCall
         } else {
-            self.toolName = "tool"
-            self.toolStatus = .running
-            self.toolDetail = message.text
+            resolvedToolCall = ChatMessage.ToolCall(name: "tool", status: .running, detail: message.text)
         }
-        _isExpanded = State(initialValue: toolStatus == .pending || toolStatus == .running)
+        self.toolCall = resolvedToolCall
+        self.presentation = ToolCallPresentation(toolCall: resolvedToolCall)
     }
 
     var body: some View {
-        ToolCallCardView(
-            isExpanded: isExpanded,
-            toolName: toolName,
-            toolStatus: toolStatus,
-            toolDetail: toolDetail,
-            contentWidth: contentWidth,
-            statusColor: statusColor(toolStatus)
-        ) {
-            withAnimation(.easeOut(duration: 0.16)) {
-                isExpanded.toggle()
-            }
-        }
-        .onChange(of: toolStatus) { _, status in
-            withAnimation(.easeOut(duration: 0.16)) {
-                isExpanded = status == .pending || status == .running
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(presentation.items) { item in
+                ToolCallItemCardView(item: item, toolStatus: toolCall.status, contentWidth: contentWidth)
             }
         }
     }
 
-    private func statusColor(_ status: ChatMessage.ToolCallStatus) -> Color {
-        switch status {
-        case .pending, .running:
-            return NeoCodeTheme.accent
-        case .completed:
-            return NeoCodeTheme.success
-        case .error:
-            return NeoCodeTheme.warning
-        }
-    }
-
-}
-
-private struct ToolCallCardView: View {
-    let isExpanded: Bool
-    let toolName: String
-    let toolStatus: ChatMessage.ToolCallStatus
-    let toolDetail: String?
-    let contentWidth: CGFloat
-    let statusColor: Color
-    let onToggle: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(NeoCodeTheme.textMuted)
-
-                Text(toolName)
-                    .font(.neoMonoSmall)
-                    .foregroundStyle(NeoCodeTheme.textSecondary)
-
-                Spacer(minLength: 8)
-
-                Text(toolStatus.label)
-                    .font(.neoMonoSmall)
-                    .foregroundStyle(statusColor)
-            }
-            .contentShape(Rectangle())
-            .onTapGesture(perform: onToggle)
-
-            if isExpanded, let toolDetail, !toolDetail.isEmpty {
-                Text(toolDetail)
-                    .font(.neoMonoSmall)
-                    .foregroundStyle(NeoCodeTheme.textSecondary)
-                    .textSelection(.enabled)
-                    .padding(.leading, 21)
-                    .frame(maxWidth: contentWidth, alignment: .leading)
-            }
-        }
-        .frame(maxWidth: contentWidth, alignment: .leading)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(NeoCodeTheme.panelSoft)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(NeoCodeTheme.line, lineWidth: 1)
-                )
-        )
-    }
 }
 
 struct ToolCallClusterRowView: View {

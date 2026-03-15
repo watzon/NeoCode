@@ -212,15 +212,43 @@ struct ChatMessage: Codable, Identifiable, Hashable {
         case strong
     }
 
+    struct ToolCall: Codable, Hashable {
+        let name: String
+        let status: ToolCallStatus
+        let detail: String?
+        let input: JSONValue?
+        let output: JSONValue?
+        let error: String?
+
+        init(
+            name: String,
+            status: ToolCallStatus,
+            detail: String? = nil,
+            input: JSONValue? = nil,
+            output: JSONValue? = nil,
+            error: String? = nil
+        ) {
+            self.name = name
+            self.status = status
+            self.detail = detail
+            self.input = input
+            self.output = output
+            self.error = error
+        }
+    }
+
     enum Kind: Codable, Hashable {
         case plain
-        case toolCall(name: String, status: ToolCallStatus, detail: String?)
+        case toolCall(ToolCall)
 
         private enum CodingKeys: String, CodingKey {
             case type
             case name
             case status
             case detail
+            case input
+            case output
+            case error
         }
 
         private enum PayloadType: String, Codable {
@@ -235,9 +263,14 @@ struct ChatMessage: Codable, Identifiable, Hashable {
                 self = .plain
             case .toolCall:
                 self = .toolCall(
-                    name: try container.decode(String.self, forKey: .name),
-                    status: try container.decode(ToolCallStatus.self, forKey: .status),
-                    detail: try container.decodeIfPresent(String.self, forKey: .detail)
+                    ToolCall(
+                        name: try container.decode(String.self, forKey: .name),
+                        status: try container.decode(ToolCallStatus.self, forKey: .status),
+                        detail: try container.decodeIfPresent(String.self, forKey: .detail),
+                        input: try container.decodeIfPresent(JSONValue.self, forKey: .input),
+                        output: try container.decodeIfPresent(JSONValue.self, forKey: .output),
+                        error: try container.decodeIfPresent(String.self, forKey: .error)
+                    )
                 )
             }
         }
@@ -247,12 +280,20 @@ struct ChatMessage: Codable, Identifiable, Hashable {
             switch self {
             case .plain:
                 try container.encode(PayloadType.plain, forKey: .type)
-            case .toolCall(let name, let status, let detail):
+            case .toolCall(let toolCall):
                 try container.encode(PayloadType.toolCall, forKey: .type)
-                try container.encode(name, forKey: .name)
-                try container.encode(status, forKey: .status)
-                try container.encodeIfPresent(detail, forKey: .detail)
+                try container.encode(toolCall.name, forKey: .name)
+                try container.encode(toolCall.status, forKey: .status)
+                try container.encodeIfPresent(toolCall.detail, forKey: .detail)
+                try container.encodeIfPresent(toolCall.input, forKey: .input)
+                try container.encodeIfPresent(toolCall.output, forKey: .output)
+                try container.encodeIfPresent(toolCall.error, forKey: .error)
             }
+        }
+
+        var toolCall: ToolCall? {
+            guard case .toolCall(let toolCall) = self else { return nil }
+            return toolCall
         }
     }
 

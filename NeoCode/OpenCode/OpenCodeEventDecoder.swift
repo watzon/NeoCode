@@ -1,6 +1,6 @@
 import Foundation
 
-enum JSONValue: Codable, Equatable {
+enum JSONValue: Codable, Equatable, Hashable {
     case string(String)
     case number(Double)
     case bool(Bool)
@@ -182,4 +182,3 @@ enum OpenCodeClientError: LocalizedError {
         }
     }
 }
-

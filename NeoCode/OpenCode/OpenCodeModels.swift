@@ -381,7 +381,16 @@ struct OpenCodePart: Decodable, Equatable {
     var chatMessageKind: ChatMessage.Kind {
         if type == .tool {
             let status = ChatMessage.ToolCallStatus(rawValue: toolStatus?.rawValue ?? "running") ?? .running
-            return .toolCall(name: tool ?? "tool", status: status, detail: renderedText)
+            return .toolCall(
+                ChatMessage.ToolCall(
+                    name: tool ?? "tool",
+                    status: status,
+                    detail: renderedText,
+                    input: state?.input,
+                    output: state?.output,
+                    error: state?.error
+                )
+            )
         }
         return .plain
     }
