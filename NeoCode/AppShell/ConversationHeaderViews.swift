@@ -336,6 +336,7 @@ private struct HeaderSplitControl<Icon: View, MenuContent: View>: View {
                 }
                 .padding(.horizontal, 12)
                 .frame(height: 32)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .disabled(isPrimaryDisabled)
