@@ -101,6 +101,7 @@ final class AppStore {
 
     private var composerOptionsProjectPath: String?
     private let runtimeIdleTTL: Duration = .seconds(60)
+    private let gitRefreshFallbackInterval: Duration = .seconds(90)
     private var isRefreshingGitCommitPreview = false
     private var liveServices: [ProjectSummary.ID: any OpenCodeServicing] = [:]
     private var serviceConnectionIdentifiers: [ProjectSummary.ID: String] = [:]
@@ -108,11 +109,14 @@ final class AppStore {
     private var eventSubscriptionTokens: [ProjectSummary.ID: UUID] = [:]
     private var refreshTask: Task<Void, Never>?
     private var gitRefreshTask: Task<Void, Never>?
+    private var gitRefreshDebounceTask: Task<Void, Never>?
+    private var gitMonitorSetupTask: Task<Void, Never>?
     private var persistTask: Task<Void, Never>?
     private var subscribedConnectionIdentifiers: [ProjectSummary.ID: String] = [:]
     private var runtimeIdleTasks: [ProjectSummary.ID: Task<Void, Never>] = [:]
     private var gitStateByProjectPath: [String: GitCachedState] = [:]
     private var gitOperationStateByProjectPath: [String: GitOperationState] = [:]
+    private var gitRepositoryMonitor: GitRepositoryMonitor?
     private var streamingRecoveryTasks: [String: Task<Void, Never>] = [:]
     private var messageRoles: [String: ChatMessage.Role] = [:]
     private var liveSessionStatuses: [String: OpenCodeSessionActivity] = [:]
@@ -896,24 +900,109 @@ final class AppStore {
         }
 
         applyCachedGitState(for: projectPath)
-        gitRefreshTask?.cancel()
-        gitRefreshTask = Task { [weak self] in
-            guard let self else { return }
-
-            await self.refreshGitStatus()
-
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(15))
-                guard !Task.isCancelled else { return }
-                guard self.selectedProject?.path == projectPath else { return }
-                await self.refreshGitStatus()
-            }
-        }
+        startGitRepositoryMonitor(for: projectPath)
+        scheduleGitFallbackRefresh(for: projectPath)
+        scheduleGitRefresh(reason: "project-selected", projectPath: projectPath, refreshCommitPreviewIfLoaded: false, delay: .milliseconds(0))
     }
 
     private func cancelGitRefreshLoop() {
         gitRefreshTask?.cancel()
         gitRefreshTask = nil
+        gitRefreshDebounceTask?.cancel()
+        gitRefreshDebounceTask = nil
+        gitMonitorSetupTask?.cancel()
+        gitMonitorSetupTask = nil
+        gitRepositoryMonitor?.stop()
+        gitRepositoryMonitor = nil
+    }
+
+    func handleApplicationDidBecomeActive() {
+        guard let projectPath = selectedProject?.path else { return }
+        scheduleGitRefresh(
+            reason: "application-active",
+            projectPath: projectPath,
+            refreshCommitPreviewIfLoaded: gitCommitPreview != nil,
+            delay: .milliseconds(100)
+        )
+    }
+
+    private func startGitRepositoryMonitor(for projectPath: String) {
+        gitMonitorSetupTask?.cancel()
+        gitRepositoryMonitor?.stop()
+
+        let monitor = GitRepositoryMonitor { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.scheduleGitRefresh(
+                    reason: "git-metadata-changed",
+                    projectPath: projectPath,
+                    refreshCommitPreviewIfLoaded: self.gitCommitPreview != nil,
+                    delay: .milliseconds(200)
+                )
+            }
+        }
+        gitRepositoryMonitor = monitor
+
+        gitMonitorSetupTask = Task { [weak self, weak monitor] in
+            guard let self, let monitor else { return }
+            let watchURLs = await GitRepositoryService().metadataWatchURLs(in: projectPath)
+            guard !Task.isCancelled else { return }
+            guard self.selectedProject?.path == projectPath else { return }
+
+            monitor.watch(urls: watchURLs)
+            self.logger.debug(
+                "Started git metadata monitor path=\(projectPath, privacy: .public) watched=\(watchURLs.count, privacy: .public)"
+            )
+        }
+    }
+
+    private func scheduleGitFallbackRefresh(for projectPath: String) {
+        gitRefreshTask?.cancel()
+        gitRefreshTask = Task { [weak self] in
+            guard let self else { return }
+
+            while !Task.isCancelled {
+                try? await Task.sleep(for: gitRefreshFallbackInterval)
+                guard !Task.isCancelled else { return }
+                guard self.selectedProject?.path == projectPath else { return }
+                await self.refreshVisibleGitState(for: projectPath, refreshCommitPreviewIfLoaded: false)
+            }
+        }
+    }
+
+    private func scheduleGitRefresh(
+        reason: String,
+        projectPath: String,
+        refreshCommitPreviewIfLoaded: Bool,
+        delay: Duration
+    ) {
+        gitRefreshDebounceTask?.cancel()
+        gitRefreshDebounceTask = Task { [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            guard self.selectedProject?.path == projectPath else { return }
+
+            self.logger.debug(
+                "Scheduling git refresh path=\(projectPath, privacy: .public) reason=\(reason, privacy: .public)"
+            )
+            await self.refreshVisibleGitState(for: projectPath, refreshCommitPreviewIfLoaded: refreshCommitPreviewIfLoaded)
+        }
+    }
+
+    private func refreshVisibleGitState(for projectPath: String, refreshCommitPreviewIfLoaded: Bool) async {
+        guard selectedProject?.path == projectPath else { return }
+
+        await refreshGitStatus()
+
+        guard refreshCommitPreviewIfLoaded,
+              selectedProject?.path == projectPath,
+              gitCommitPreview != nil
+        else {
+            return
+        }
+
+        await refreshGitCommitPreview(showLoadingIndicator: false, projectPathOverride: projectPath)
     }
 
     func refreshGitCommitPreview(

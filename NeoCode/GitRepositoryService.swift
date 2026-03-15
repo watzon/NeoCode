@@ -115,6 +115,33 @@ struct GitCommitPreview: Equatable, Sendable {
 }
 
 struct GitRepositoryService: Sendable {
+    nonisolated func metadataWatchURLs(in projectPath: String) async -> [URL] {
+        do {
+            let repositoryFlag = try await Self.runGit(["rev-parse", "--is-inside-work-tree"], in: projectPath)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard repositoryFlag == "true" else {
+                return []
+            }
+
+            let gitDirectoryPath = try await Self.runGit(["rev-parse", "--absolute-git-dir"], in: projectPath)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !gitDirectoryPath.isEmpty else {
+                return []
+            }
+
+            let gitDirectoryURL = URL(fileURLWithPath: gitDirectoryPath, isDirectory: true)
+            return [
+                gitDirectoryURL.appendingPathComponent("HEAD", isDirectory: false),
+                gitDirectoryURL.appendingPathComponent("index", isDirectory: false),
+                gitDirectoryURL.appendingPathComponent("refs/heads", isDirectory: true),
+                gitDirectoryURL.appendingPathComponent("FETCH_HEAD", isDirectory: false),
+                gitDirectoryURL.appendingPathComponent("packed-refs", isDirectory: false),
+            ]
+        } catch {
+            return []
+        }
+    }
+
     nonisolated func status(in projectPath: String) async -> GitRepositoryStatus {
         do {
             let repositoryFlag = try await Self.runGit(["rev-parse", "--is-inside-work-tree"], in: projectPath)

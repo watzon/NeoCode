@@ -28,10 +28,15 @@ struct NeoCodeApp: App {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    var onDidBecomeActive: (() -> Void)?
     var onWillTerminate: (() -> Void)?
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        onDidBecomeActive?()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -68,6 +73,9 @@ private struct AppSceneView: View {
             .environment(runtime)
             .preferredColorScheme(.dark)
             .onAppear {
+                appDelegate.onDidBecomeActive = {
+                    store.handleApplicationDidBecomeActive()
+                }
                 appDelegate.onWillTerminate = {
                     store.flushPendingProjectPersistence()
                     runtime.stop()
