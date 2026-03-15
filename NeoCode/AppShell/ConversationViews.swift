@@ -744,12 +744,10 @@ struct ConversationView: View {
 
 private struct NewSessionEmptyStateView: View {
     var body: some View {
-        VStack(spacing: 18) {
-            Image(systemName: "square.dashed")
-                .font(.system(size: 42, weight: .light))
-                .foregroundStyle(NeoCodeTheme.textSecondary)
+        VStack(spacing: 24) {
+            MetaballOrb(size: 100)
 
-            VStack(spacing: 8) {
+            VStack(spacing: 10) {
                 Text("Build something cool")
                     .font(.system(size: 28, weight: .semibold, design: .default))
                     .foregroundStyle(NeoCodeTheme.textPrimary)

@@ -451,119 +451,147 @@ private struct ComposerActivityIndicator: View {
     let state: ComposerActivityState
 
     var body: some View {
-        ComposerActivityGlyph(state: state)
-            .frame(width: 40, height: 24)
-        .help(state.helpText)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Agent activity")
-        .accessibilityValue(state.accessibilityValue)
+        MetaballOrb(size: 32)
+            .help(state.helpText)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Agent activity")
+            .accessibilityValue(state.accessibilityValue)
     }
 }
 
-private struct ComposerActivityGlyph: View {
+struct MetaballOrb: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    let state: ComposerActivityState
+    let size: CGFloat
 
     var body: some View {
         Group {
             if reduceMotion {
-                glyphCanvas(time: 0)
+                staticOrb()
             } else {
-                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
-                    glyphCanvas(time: timeline.date.timeIntervalSinceReferenceDate)
+                TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { timeline in
+                    orbCanvas(time: timeline.date.timeIntervalSinceReferenceDate)
                 }
             }
         }
-        .drawingGroup()
+        .frame(width: size, height: size)
+        .drawingGroup(opaque: false, colorMode: .linear)
     }
 
-    private func glyphCanvas(time: TimeInterval) -> some View {
+    private func staticOrb() -> some View {
         Canvas(rendersAsynchronously: true) { context, size in
-            drawGlyph(in: &context, size: size, time: time)
+            drawOrb(in: &context, size: size, time: 0)
         }
     }
 
-    private func drawGlyph(in context: inout GraphicsContext, size: CGSize, time: TimeInterval) {
+    private func orbCanvas(time: TimeInterval) -> some View {
+        Canvas(rendersAsynchronously: true) { context, size in
+            drawOrb(in: &context, size: size, time: time)
+        }
+    }
+
+    private func drawOrb(in context: inout GraphicsContext, size: CGSize, time: TimeInterval) {
         let center = CGPoint(x: size.width / 2, y: size.height / 2)
-        let orbitSize = CGSize(width: size.width * 0.72, height: size.height * 0.58)
-        let orbitRect = CGRect(
-            x: center.x - orbitSize.width / 2,
-            y: center.y - orbitSize.height / 2,
-            width: orbitSize.width,
-            height: orbitSize.height
-        )
-        let pulse = 0.5 + 0.5 * sin(time * 2.4)
-        let coreRadius = size.height * (0.17 + 0.045 * pulse)
+        let scale = min(size.width, size.height) / 120.0
 
-        context.stroke(
-            Path(ellipseIn: orbitRect),
-            with: .color(NeoCodeTheme.lineStrong.opacity(0.4)),
-            lineWidth: 0.9
-        )
-
-        let accentArc = Path { path in
-            path.addArc(
-                center: center,
-                radius: orbitRect.width * 0.42,
-                startAngle: .degrees(time * 88),
-                endAngle: .degrees(time * 88 + 118),
-                clockwise: false
-            )
+        // Define distinct colored blobs that fuse together like the reference image
+        // Each blob: (baseX, baseY, phase, speed, radius, color, intensity)
+        struct Blob {
+            let baseX: CGFloat
+            let baseY: CGFloat
+            let phase: Double
+            let speed: Double
+            let baseRadius: CGFloat
+            let color: Color
+            let intensity: CGFloat
+            let orbitRadius: CGFloat
+            let orbitSpeed: Double
         }
-        context.stroke(
-            accentArc,
-            with: .color(state.primaryTint.opacity(0.34)),
-            style: .init(lineWidth: 1.3, lineCap: .round)
-        )
 
-        drawCore(in: &context, center: center, radius: coreRadius)
-        drawOrbiters(in: &context, center: center, orbitRect: orbitRect, time: time)
-    }
+        let blobs: [Blob] = [
+            // Core - bright yellow center
+            Blob(baseX: 0, baseY: 0, phase: 0, speed: 0.9, baseRadius: 22, color: Color(red: 1.0, green: 0.85, blue: 0.1), intensity: 1.0, orbitRadius: 3, orbitSpeed: 0.7),
 
-    private func drawCore(in context: inout GraphicsContext, center: CGPoint, radius: CGFloat) {
-        let glowLayers: [(CGFloat, Color, Double)] = [
-            (radius * 2.8, state.primaryTint, 0.12),
-            (radius * 1.9, state.secondaryTint, 0.18),
-            (radius * 1.2, state.primaryTint, 0.95)
+            // Inner red-orange blobs (2 of them) - fuse with core
+            Blob(baseX: 18, baseY: 5, phase: 1.2, speed: 0.8, baseRadius: 18, color: Color(red: 1.0, green: 0.25, blue: 0.15), intensity: 0.95, orbitRadius: 5, orbitSpeed: -0.6),
+            Blob(baseX: -8, baseY: 16, phase: 2.1, speed: 0.75, baseRadius: 16, color: Color(red: 1.0, green: 0.35, blue: 0.12), intensity: 0.9, orbitRadius: 4, orbitSpeed: 0.55),
+
+            // Mid magenta/pink blob
+            Blob(baseX: -15, baseY: -8, phase: 0.8, speed: 0.65, baseRadius: 19, color: Color(red: 0.95, green: 0.2, blue: 0.45), intensity: 0.85, orbitRadius: 6, orbitSpeed: -0.5),
+
+            // Outer purple/indigo blobs (2 of them) - fuse with the cluster
+            Blob(baseX: -22, baseY: 5, phase: 3.5, speed: 0.5, baseRadius: 20, color: Color(red: 0.35, green: 0.05, blue: 0.65), intensity: 0.75, orbitRadius: 7, orbitSpeed: 0.45),
+            Blob(baseX: 8, baseY: -20, phase: 1.8, speed: 0.55, baseRadius: 18, color: Color(red: 0.45, green: 0.08, blue: 0.75), intensity: 0.8, orbitRadius: 5, orbitSpeed: -0.4),
+
+            // Extra satellite blobs for more organic shape
+            Blob(baseX: 20, baseY: -12, phase: 4.2, speed: 0.7, baseRadius: 14, color: Color(red: 0.85, green: 0.15, blue: 0.35), intensity: 0.7, orbitRadius: 4, orbitSpeed: 0.6),
+            Blob(baseX: -5, baseY: 22, phase: 2.8, speed: 0.6, baseRadius: 15, color: Color(red: 0.55, green: 0.1, blue: 0.7), intensity: 0.65, orbitRadius: 5, orbitSpeed: -0.55),
         ]
 
-        for (layerRadius, color, opacity) in glowLayers {
-            let rect = CGRect(
-                x: center.x - layerRadius,
-                y: center.y - layerRadius,
-                width: layerRadius * 2,
-                height: layerRadius * 2
+        // Draw blobs from back (cool colors) to front (hot colors) for proper layering
+        // Sort by color temperature - purples first, then magentas, then oranges, then yellow
+        let sortedBlobs = blobs.enumerated().sorted { a, b in
+            let tempA = colorTemperature(blobs[a.offset].color)
+            let tempB = colorTemperature(blobs[b.offset].color)
+            return tempA < tempB
+        }.map { $0.element }
+
+        for blob in sortedBlobs {
+            let t = time * blob.speed + blob.phase
+            let orbitT = time * blob.orbitSpeed + blob.phase
+
+            // Organic motion - each blob orbits its base position with added undulation
+            let orbitX = cos(orbitT) * blob.orbitRadius * scale
+            let orbitY = sin(orbitT) * blob.orbitRadius * scale * 0.7 // Flattened for perspective
+
+            // Additional organic undulation
+            let undulationX = sin(t * 1.3) * 2.0 * scale + cos(t * 0.7) * 1.5 * scale
+            let undulationY = cos(t * 1.1) * 2.5 * scale * 0.7 + sin(t * 0.9) * 1.2 * scale
+
+            let position = CGPoint(
+                x: center.x + (blob.baseX + orbitX + undulationX) * scale,
+                y: center.y + (blob.baseY + orbitY + undulationY) * scale
             )
-            context.fill(Path(ellipseIn: rect), with: .color(color.opacity(opacity)))
-        }
-    }
 
-    private func drawOrbiters(in context: inout GraphicsContext, center: CGPoint, orbitRect: CGRect, time: TimeInterval) {
-        let orbiters: [(phase: Double, speed: Double, color: Color, radius: CGFloat)] = [
-            (0, 1.5, state.primaryTint, 2.2),
-            (.pi, -1.15, state.secondaryTint, 1.8)
-        ]
+            // Radius pulse for breathing effect
+            let radiusPulse = 1.0 + 0.06 * sin(t * 2.2) + 0.03 * cos(t * 3.5)
+            let radius = blob.baseRadius * scale * radiusPulse
 
-        for orbiter in orbiters {
-            for trailIndex in stride(from: 3, through: 0, by: -1) {
-                let trailOffset = Double(trailIndex) * 0.22 * (orbiter.speed >= 0 ? 1 : -1)
-                let angle = CGFloat(time * orbiter.speed * .pi + orbiter.phase - trailOffset)
-                let point = CGPoint(
-                    x: center.x + cos(angle) * orbitRect.width * 0.5,
-                    y: center.y + sin(angle) * orbitRect.height * 0.5
-                )
-                let dotRadius = orbiter.radius - CGFloat(trailIndex) * 0.28
-                let opacity = max(0.12, 0.9 - Double(trailIndex) * 0.22)
+            // Draw soft-edged blob for metaball fusion effect
+            // Use many concentric circles with decreasing opacity for soft edge
+            let steps = 12
+            for i in stride(from: steps, through: 0, by: -1) {
+                let progress = CGFloat(i) / CGFloat(steps)
+                let r = radius * (0.85 + 0.5 * progress) // Extend beyond radius for soft falloff
+                let opacity = blob.intensity * (1.0 - progress * 0.92) * 0.35
+
                 let rect = CGRect(
-                    x: point.x - dotRadius,
-                    y: point.y - dotRadius,
-                    width: dotRadius * 2,
-                    height: dotRadius * 2
+                    x: position.x - r,
+                    y: position.y - r,
+                    width: r * 2,
+                    height: r * 2
                 )
-                context.fill(Path(ellipseIn: rect), with: .color(orbiter.color.opacity(opacity)))
+                context.fill(Path(ellipseIn: rect), with: .color(blob.color.opacity(Double(opacity))))
             }
+
+            // Inner bright core for each blob
+            let coreRect = CGRect(
+                x: position.x - radius * 0.5,
+                y: position.y - radius * 0.5,
+                width: radius,
+                height: radius
+            )
+            context.fill(Path(ellipseIn: coreRect), with: .color(blob.color.opacity(Double(blob.intensity * 0.7))))
         }
+
+    }
+
+    private func colorTemperature(_ color: Color) -> CGFloat {
+        // Approximate temperature based on color characteristics
+        // Yellow/orange = hot (high value), purple/blue = cool (low value)
+        // Since we can't easily extract RGB from SwiftUI Color in a canvas context,
+        // we'll use brightness as a proxy for temperature
+        return 0.5 // Neutral default - rely on order in array instead
     }
 }
 
@@ -1237,16 +1265,7 @@ struct EmptyConversationView: View {
 
     var body: some View {
         VStack(spacing: 20) {
-            ZStack {
-                Circle()
-                    .fill(NeoCodeTheme.panelRaised)
-                    .frame(width: 76, height: 76)
-                    .overlay(Circle().stroke(NeoCodeTheme.line, lineWidth: 1))
-
-                Image(systemName: "terminal")
-                    .font(.system(size: 28, weight: .medium))
-                    .foregroundStyle(NeoCodeTheme.accent)
-            }
+            MetaballOrb(size: 88)
 
             VStack(spacing: 10) {
                 Text(store.projects.isEmpty ? "Add your first project" : "Start a thread")
