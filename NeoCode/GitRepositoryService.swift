@@ -20,11 +20,12 @@ struct GitRepositoryStatus: Equatable, Sendable {
         }
     }
 
-    static let notRepository = GitRepositoryStatus(isRepository: false, hasChanges: false, aheadCount: 0)
+    static let notRepository = GitRepositoryStatus(isRepository: false, hasChanges: false, aheadCount: 0, hasRemote: false)
 
     let isRepository: Bool
     let hasChanges: Bool
     let aheadCount: Int
+    let hasRemote: Bool
 
     var primaryAction: PrimaryAction {
         hasChanges ? .commit : (aheadCount > 0 ? .push : .commit)
@@ -120,16 +121,17 @@ struct GitRepositoryService: Sendable {
                 let repositoryFlag = try Self.runGit(["rev-parse", "--is-inside-work-tree"], in: projectPath)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 guard repositoryFlag == "true" else {
-                    return GitRepositoryStatus(isRepository: false, hasChanges: false, aheadCount: 0)
+                    return GitRepositoryStatus(isRepository: false, hasChanges: false, aheadCount: 0, hasRemote: false)
                 }
 
                 let output = try Self.runGit(["status", "--porcelain=v1", "--branch"], in: projectPath)
                 let currentBranch = try? Self.currentBranch(in: projectPath)
+                let remotes = try Self.listRemotes(in: projectPath)
                 let hasChanges = Self.parseHasChanges(output)
-                let aheadCount = (try? Self.resolveAheadCount(in: projectPath, currentBranch: currentBranch, statusOutput: output)) ?? 0
-                return GitRepositoryStatus(isRepository: true, hasChanges: hasChanges, aheadCount: aheadCount)
+                let aheadCount = (try? Self.resolveAheadCount(in: projectPath, currentBranch: currentBranch, statusOutput: output, remotes: remotes)) ?? 0
+                return GitRepositoryStatus(isRepository: true, hasChanges: hasChanges, aheadCount: aheadCount, hasRemote: !remotes.isEmpty)
             } catch {
-                return GitRepositoryStatus(isRepository: false, hasChanges: false, aheadCount: 0)
+                return GitRepositoryStatus(isRepository: false, hasChanges: false, aheadCount: 0, hasRemote: false)
             }
         }.value
     }
@@ -209,7 +211,8 @@ struct GitRepositoryService: Sendable {
     private nonisolated static func resolveAheadCount(
         in projectPath: String,
         currentBranch: String?,
-        statusOutput: String
+        statusOutput: String,
+        remotes: [String]
     ) throws -> Int {
         if let branchLine = statusOutput
             .components(separatedBy: .newlines)
@@ -227,10 +230,6 @@ struct GitRepositoryService: Sendable {
 
         guard let currentBranch, !currentBranch.isEmpty else { return 0 }
 
-        let remotes = try runGit(["remote"], in: projectPath)
-            .components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
         guard !remotes.isEmpty else { return 0 }
 
         for remote in remotes {
@@ -246,6 +245,13 @@ struct GitRepositoryService: Sendable {
         let output = try runGit(["rev-list", "--count", range], in: projectPath)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return Int(output) ?? 0
+    }
+
+    private nonisolated static func listRemotes(in projectPath: String) throws -> [String] {
+        try runGit(["remote"], in: projectPath)
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
     }
 
     private nonisolated static func remoteBranchExists(named branch: String, remote: String, in projectPath: String) -> Bool {

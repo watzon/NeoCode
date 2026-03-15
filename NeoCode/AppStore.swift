@@ -766,7 +766,7 @@ final class AppStore {
         let status = await repositoryService.status(in: projectPath)
 
         logger.debug(
-            "Git refresh result path=\(projectPath, privacy: .public) repo=\(status.isRepository, privacy: .public) changes=\(status.hasChanges, privacy: .public) ahead=\(status.aheadCount, privacy: .public)"
+            "Git refresh result path=\(projectPath, privacy: .public) repo=\(status.isRepository, privacy: .public) changes=\(status.hasChanges, privacy: .public) ahead=\(status.aheadCount, privacy: .public) hasRemote=\(status.hasRemote, privacy: .public)"
         )
 
         guard selectedProject?.path == projectPath else { return }
@@ -2003,10 +2003,11 @@ final class AppStore {
     }
 
     private func applyPostCommitState(pushAfterCommit: Bool, for projectPath: String) {
-        let aheadCount = pushAfterCommit ? 0 : max(1, gitStatus.aheadCount + 1)
-        gitStatus = GitRepositoryStatus(isRepository: true, hasChanges: false, aheadCount: aheadCount)
+        let aheadCount = pushAfterCommit ? 0 : (gitStatus.hasRemote ? max(1, gitStatus.aheadCount + 1) : 0)
+        let hasRemote = gitStatus.hasRemote
+        gitStatus = GitRepositoryStatus(isRepository: true, hasChanges: false, aheadCount: aheadCount, hasRemote: hasRemote)
         logger.debug(
-            "Applied optimistic post-commit state path=\(projectPath, privacy: .public) changes=false ahead=\(aheadCount, privacy: .public)"
+            "Applied optimistic post-commit state path=\(projectPath, privacy: .public) changes=false ahead=\(aheadCount, privacy: .public) hasRemote=\(hasRemote, privacy: .public)"
         )
         cacheCurrentGitState(for: projectPath)
     }

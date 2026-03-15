@@ -261,9 +261,9 @@ struct NeoCodeCoreTests {
 
     @MainActor
     @Test func gitRepositoryStatusChoosesPrimaryActionFromChangesAndAheadCount() {
-        let changed = GitRepositoryStatus(isRepository: true, hasChanges: true, aheadCount: 0)
-        let ahead = GitRepositoryStatus(isRepository: true, hasChanges: false, aheadCount: 2)
-        let clean = GitRepositoryStatus(isRepository: true, hasChanges: false, aheadCount: 0)
+        let changed = GitRepositoryStatus(isRepository: true, hasChanges: true, aheadCount: 0, hasRemote: true)
+        let ahead = GitRepositoryStatus(isRepository: true, hasChanges: false, aheadCount: 2, hasRemote: true)
+        let clean = GitRepositoryStatus(isRepository: true, hasChanges: false, aheadCount: 0, hasRemote: true)
 
         #expect(changed.primaryAction == .commit)
         #expect(changed.isPrimaryActionEnabled == true)
