@@ -124,7 +124,10 @@ struct GitRepositoryService: Sendable {
                 }
 
                 let output = try Self.runGit(["status", "--porcelain=v1", "--branch"], in: projectPath)
-                return Self.parseStatus(output)
+                let currentBranch = try? Self.currentBranch(in: projectPath)
+                let hasChanges = Self.parseHasChanges(output)
+                let aheadCount = (try? Self.resolveAheadCount(in: projectPath, currentBranch: currentBranch, statusOutput: output)) ?? 0
+                return GitRepositoryStatus(isRepository: true, hasChanges: hasChanges, aheadCount: aheadCount)
             } catch {
                 return GitRepositoryStatus(isRepository: false, hasChanges: false, aheadCount: 0)
             }
@@ -181,25 +184,19 @@ struct GitRepositoryService: Sendable {
         }.value
     }
 
-    private nonisolated static func parseStatus(_ output: String) -> GitRepositoryStatus {
+    private nonisolated static func parseHasChanges(_ output: String) -> Bool {
         let lines = output
             .components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
 
-        var aheadCount = 0
-        var hasChanges = false
-
         for line in lines {
-            if line.hasPrefix("## ") {
-                aheadCount = parseAheadCount(from: line)
-                continue
+            if !line.hasPrefix("## ") {
+                return true
             }
-
-            hasChanges = true
         }
 
-        return GitRepositoryStatus(isRepository: true, hasChanges: hasChanges, aheadCount: aheadCount)
+        return false
     }
 
     private nonisolated static func parseAheadCount(from branchLine: String) -> Int {
@@ -207,6 +204,54 @@ struct GitRepositoryService: Sendable {
         let suffix = branchLine[range.upperBound...]
         let digits = suffix.prefix { $0.isNumber }
         return Int(digits) ?? 0
+    }
+
+    private nonisolated static func resolveAheadCount(
+        in projectPath: String,
+        currentBranch: String?,
+        statusOutput: String
+    ) throws -> Int {
+        if let branchLine = statusOutput
+            .components(separatedBy: .newlines)
+            .first(where: { $0.hasPrefix("## ") }) {
+            let parsedAheadCount = parseAheadCount(from: branchLine)
+            if parsedAheadCount > 0 {
+                return parsedAheadCount
+            }
+        }
+
+        if let upstream = try? runGit(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], in: projectPath)
+            .trimmingCharacters(in: .whitespacesAndNewlines), !upstream.isEmpty {
+            return try revListCount(range: "\(upstream)..HEAD", in: projectPath)
+        }
+
+        guard let currentBranch, !currentBranch.isEmpty else { return 0 }
+
+        let remotes = try runGit(["remote"], in: projectPath)
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard remotes.contains("origin") else { return 0 }
+
+        if remoteBranchExists(named: currentBranch, in: projectPath) {
+            return try revListCount(range: "origin/\(currentBranch)..HEAD", in: projectPath)
+        }
+
+        return hasAnyCommits(in: projectPath) ? 1 : 0
+    }
+
+    private nonisolated static func revListCount(range: String, in projectPath: String) throws -> Int {
+        let output = try runGit(["rev-list", "--count", range], in: projectPath)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return Int(output) ?? 0
+    }
+
+    private nonisolated static func remoteBranchExists(named branch: String, in projectPath: String) -> Bool {
+        (try? runGit(["show-ref", "--verify", "--quiet", "refs/remotes/origin/\(branch)"], in: projectPath)) != nil
+    }
+
+    private nonisolated static func hasAnyCommits(in projectPath: String) -> Bool {
+        (try? runGit(["rev-parse", "--verify", "HEAD"], in: projectPath)) != nil
     }
 
     private nonisolated static func parseChangedFiles(from output: String) -> [GitFileChange] {
