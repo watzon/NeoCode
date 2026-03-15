@@ -14,6 +14,8 @@ struct NeoCodeSelect<Item: Identifiable, RowContent: View>: View where Item.ID: 
     let searchableText: (Item) -> [String]
     let onSelect: (Item) -> Void
     let footer: (() -> AnyView)?
+    let rowAccessory: ((Item) -> AnyView)?
+    let showsSelectionIndicator: Bool
 
     @State private var isPresented = false
     @State private var query = ""
@@ -33,10 +35,12 @@ struct NeoCodeSelect<Item: Identifiable, RowContent: View>: View where Item.ID: 
         direction: FloatingPanelDirection = .down,
         menuWidth: CGFloat = 280,
         menuMaxHeight: CGFloat = 260,
+        showsSelectionIndicator: Bool = true,
         @ViewBuilder rowContent: @escaping (Item) -> RowContent,
         searchableText: @escaping (Item) -> [String],
         onSelect: @escaping (Item) -> Void,
-        footer: (() -> AnyView)? = nil
+        footer: (() -> AnyView)? = nil,
+        rowAccessory: ((Item) -> AnyView)? = nil
     ) {
         self.title = title
         self.selectedID = selectedID
@@ -51,6 +55,8 @@ struct NeoCodeSelect<Item: Identifiable, RowContent: View>: View where Item.ID: 
         self.searchableText = searchableText
         self.onSelect = onSelect
         self.footer = footer
+        self.rowAccessory = rowAccessory
+        self.showsSelectionIndicator = showsSelectionIndicator
     }
 
     var body: some View {
@@ -99,28 +105,54 @@ struct NeoCodeSelect<Item: Identifiable, RowContent: View>: View where Item.ID: 
                         .focused($isSearchFieldFocused)
                 }
 
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: rowSpacing) {
-                        if filteredItems.isEmpty {
-                            Text(emptyMessage)
-                                .font(.neoBody)
-                                .foregroundStyle(NeoCodeTheme.textMuted)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 10)
-                        } else {
-                            ForEach(filteredItems) { item in
-                                DropdownMenuRow(isSelected: selectedID == item.id, action: {
-                                    onSelect(item)
-                                    closeMenu()
-                                }) {
-                                    rowContent(item)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: rowSpacing) {
+                            if filteredItems.isEmpty {
+                                Text(emptyMessage)
+                                    .font(.neoBody)
+                                    .foregroundStyle(NeoCodeTheme.textMuted)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 10)
+                            } else {
+                                ForEach(filteredItems) { item in
+                                    DropdownMenuRow(
+                                        isSelected: selectedID == item.id,
+                                        action: {
+                                        onSelect(item)
+                                        closeMenu()
+                                        },
+                                        showsSelectionIndicator: showsSelectionIndicator
+                                    ) {
+                                        if let rowAccessory {
+                                            HStack(spacing: 8) {
+                                                rowContent(item)
+                                                Spacer()
+                                                rowAccessory(item)
+                                            }
+                                        } else {
+                                            rowContent(item)
+                                        }
+                                    }
+                                    .id(item.id)
                                 }
                             }
                         }
                     }
+                    .frame(height: listHeight)
+                    .onAppear {
+                        scrollToSelection(using: proxy, animated: false)
+                    }
+                    .onChange(of: isPresented) { _, newValue in
+                        guard newValue else { return }
+                        scrollToSelection(using: proxy)
+                    }
+                    .onChange(of: query) { _, _ in
+                        guard isPresented else { return }
+                        scrollToSelection(using: proxy, animated: false)
+                    }
                 }
-                .frame(height: listHeight)
 
                 if let footer {
                     footer()
@@ -156,5 +188,25 @@ struct NeoCodeSelect<Item: Identifiable, RowContent: View>: View where Item.ID: 
         isPresented = false
         query = ""
         isSearchFieldFocused = false
+    }
+
+    private func scrollToSelection(using proxy: ScrollViewProxy, animated: Bool = true) {
+        guard let selectedID,
+              filteredItems.contains(where: { $0.id == selectedID })
+        else {
+            return
+        }
+
+        DispatchQueue.main.async {
+            DispatchQueue.main.async {
+                if animated {
+                    withAnimation(.easeOut(duration: 0.14)) {
+                        proxy.scrollTo(selectedID, anchor: .center)
+                    }
+                } else {
+                    proxy.scrollTo(selectedID, anchor: .center)
+                }
+            }
+        }
     }
 }

@@ -204,20 +204,41 @@ struct ComposerView: View {
                 NeoCodeSelect(
                     title: store.selectedModel?.title ?? "Select model",
                     selectedID: store.selectedModelID,
-                    items: store.availableModels,
+                    items: store.sortedAvailableModels,
                     emptyMessage: "No models found.",
                     placeholder: "Search models",
                     isSearchable: true,
                     direction: .up,
-                    menuWidth: 320
+                    menuWidth: 320,
+                    showsSelectionIndicator: false
                 ) { model in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(model.title)
-                            .font(.neoBody)
-                            .foregroundStyle(NeoCodeTheme.textPrimary)
-                        Text(model.providerID)
-                            .font(.neoMonoSmall)
-                            .foregroundStyle(NeoCodeTheme.textMuted)
+                    let isFavorited = store.isFavoriteModel(id: model.id)
+                    HStack(alignment: .center, spacing: 12) {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(NeoCodeTheme.accent)
+                            .opacity(store.selectedModelID == model.id ? 1 : 0)
+                            .frame(width: 12, height: 12)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(model.title)
+                                .font(.neoBody)
+                                .foregroundStyle(NeoCodeTheme.textPrimary)
+                            Text(model.providerID)
+                                .font(.neoMonoSmall)
+                                .foregroundStyle(NeoCodeTheme.textMuted)
+                        }
+                        Spacer()
+                        Button {
+                            store.toggleFavoriteModel(id: model.id)
+                        } label: {
+                            Image(systemName: isFavorited ? "star.fill" : "star")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(isFavorited ? NeoCodeTheme.accent : NeoCodeTheme.textMuted)
+                                .frame(width: 24, height: 24)
+                        }
+                        .buttonStyle(.plain)
+                        .help(isFavorited ? "Remove from favorites" : "Add to favorites")
                     }
                 } searchableText: { model in
                     [model.title, model.providerID, model.modelID]

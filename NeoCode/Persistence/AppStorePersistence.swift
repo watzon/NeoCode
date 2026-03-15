@@ -161,6 +161,19 @@ struct PersistedYoloPreferencesStore {
     }
 }
 
+struct PersistedFavoriteModelsStore {
+    private let defaults = UserDefaults.standard
+    private let key = "tech.watzon.NeoCode.favoriteModels"
+
+    func loadFavoriteModelIDs() -> Set<String> {
+        Set(defaults.stringArray(forKey: key) ?? [])
+    }
+
+    func saveFavoriteModelIDs(_ ids: Set<String>) {
+        defaults.set(Array(ids).sorted(), forKey: key)
+    }
+}
+
 struct PersistedProject: Codable {
     let id: UUID
     let name: String

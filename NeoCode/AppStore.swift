@@ -15,6 +15,7 @@ final class AppStore {
     private let projectPersistence = PersistedProjectsStore()
     private let promptDraftPersistence = PersistedPromptDraftsStore()
     private let yoloPreferencePersistence = PersistedYoloPreferencesStore()
+    private let favoriteModelPersistence = PersistedFavoriteModelsStore()
     private let dashboardStatsService = DashboardStatsService()
     private let newSessionTitle = SessionSummary.defaultTitle
     private let autoRespondedPermissionTTL: TimeInterval = 60 * 60
@@ -107,6 +108,31 @@ final class AppStore {
     var dashboardStatus: DashboardRefreshStatus = .idle
     var lastError: String?
 
+    var sortedAvailableModels: [ComposerModelOption] {
+        availableModels.sorted { left, right in
+            let leftFavorite = favoriteModelIDs.contains(left.id)
+            let rightFavorite = favoriteModelIDs.contains(right.id)
+            if leftFavorite != rightFavorite {
+                return leftFavorite
+            }
+            return left.title.localizedCaseInsensitiveCompare(right.title) == .orderedAscending
+        }
+    }
+
+    func isFavoriteModel(id: String) -> Bool {
+        favoriteModelIDs.contains(id)
+    }
+
+    func toggleFavoriteModel(id: String) {
+        if favoriteModelIDs.contains(id) {
+            favoriteModelIDs.remove(id)
+        } else {
+            favoriteModelIDs.insert(id)
+        }
+        guard isPersistenceEnabled else { return }
+        favoriteModelPersistence.saveFavoriteModelIDs(favoriteModelIDs)
+    }
+
     private var composerOptionsProjectPath: String?
     private let runtimeIdleTTL: Duration = .seconds(60)
     private let gitRefreshFallbackInterval: Duration = .seconds(90)
@@ -136,6 +162,7 @@ final class AppStore {
     private var isHydratingPrompt = false
     private var promptPersistTask: Task<Void, Never>?
     private var yoloSessionKeys: Set<String>
+    private var favoriteModelIDs: Set<String> = []
     private var autoRespondedPermissionIDs: [String: Date] = [:]
     private var activeTranscriptLoadKeys = Set<String>()
     private var locallyActiveSessionIDs = Set<String>()
@@ -158,6 +185,7 @@ final class AppStore {
         self.selectedContent = .dashboard
         self.loadingTranscriptSessionID = nil
         self.yoloSessionKeys = PersistedYoloPreferencesStore().loadYoloSessionKeys()
+        self.favoriteModelIDs = favoriteModelPersistence.loadFavoriteModelIDs()
         self.performanceOptions = AppStorePerformanceOptions()
         self.isPersistenceEnabled = true
         seedComposerDefaults()
@@ -176,6 +204,7 @@ final class AppStore {
         self.selectedContent = .dashboard
         self.loadingTranscriptSessionID = nil
         self.yoloSessionKeys = isPersistenceEnabled ? PersistedYoloPreferencesStore().loadYoloSessionKeys() : []
+        self.favoriteModelIDs = isPersistenceEnabled ? favoriteModelPersistence.loadFavoriteModelIDs() : []
         self.performanceOptions = performanceOptions
         self.isPersistenceEnabled = isPersistenceEnabled
         seedComposerDefaults()

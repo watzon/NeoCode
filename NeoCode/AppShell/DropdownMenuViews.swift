@@ -30,6 +30,7 @@ struct DropdownMenuRow<Content: View>: View {
 
     let isSelected: Bool
     let isDisabled: Bool
+    let showsSelectionIndicator: Bool
     let action: () -> Void
     @ViewBuilder let content: () -> Content
 
@@ -37,11 +38,13 @@ struct DropdownMenuRow<Content: View>: View {
         isSelected: Bool = false,
         isDisabled: Bool = false,
         action: @escaping () -> Void,
+        showsSelectionIndicator: Bool = true,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.isSelected = isSelected
         self.isDisabled = isDisabled
         self.action = action
+        self.showsSelectionIndicator = showsSelectionIndicator
         self.content = content
     }
 
@@ -52,7 +55,7 @@ struct DropdownMenuRow<Content: View>: View {
 
                 Spacer(minLength: 8)
 
-                if isSelected {
+                if showsSelectionIndicator && isSelected {
                     Image(systemName: "checkmark")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(NeoCodeTheme.accent)
