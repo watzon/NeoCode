@@ -206,14 +206,17 @@ final class OpenCodeClient: OpenCodeServicing {
                     var lineBuffer = Data()
 
                     func emit(_ frame: OpenCodeSSEFrame, final: Bool = false) {
-                        let frameEvent = frame.event ?? "message"
-                        logger.debug(
-                            "\(final ? "Flushing final" : "Received") SSE frame event=\(frameEvent, privacy: .public) bytes=\(frame.data.utf8.count, privacy: .public)"
-                        )
                         do {
                             let event = try OpenCodeEventDecoder.decode(frame: frame, decoder: decoder)
+                            if case .ignored = event {
+                            } else {
+                                logger.debug(
+                                    "\(final ? "Flushing final" : "Received") SSE event=\(event.debugName, privacy: .public)"
+                                )
+                            }
                             continuation.yield(event)
                         } catch {
+                            let frameEvent = frame.event ?? "message"
                             let payloadPreview = String(frame.data.prefix(500))
                             logger.error(
                                 "Failed to decode \(final ? "final " : "")SSE frame event=\(frameEvent, privacy: .public) error=\(error.localizedDescription, privacy: .public) payload=\(payloadPreview, privacy: .public)"
@@ -223,11 +226,6 @@ final class OpenCodeClient: OpenCodeServicing {
 
                     func processLine(_ data: Data) {
                         let line = String(decoding: data, as: UTF8.self)
-                        let normalizedLinePreview = line.trimmingCharacters(in: .whitespacesAndNewlines)
-                        logger.debug(
-                            "Received SSE line length=\(line.count, privacy: .public) normalized=\(normalizedLinePreview.prefix(160), privacy: .public)"
-                        )
-
                         if let frame = parser.ingest(line: line) {
                             emit(frame)
                         }

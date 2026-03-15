@@ -136,8 +136,7 @@ struct ConversationView: View {
             }
             .onChange(of: transcriptRevision) { _, _ in
                 guard let editingMessageID,
-                      let session,
-                      session.transcript.contains(where: { $0.id == editingMessageID })
+                      transcript.contains(where: { $0.id == editingMessageID })
                 else {
                     clearInlineEditing()
                     return
@@ -566,7 +565,7 @@ struct ConversationView: View {
     }
 
     private var renderedGroups: [DisplayMessageGroup] {
-        let visibleMessages = Array((session?.transcript ?? []).suffix(loadedMessageCount))
+        let visibleMessages = Array(transcript.suffix(loadedMessageCount))
         var groups: [DisplayMessageGroup] = []
         var currentUserTurn: [ChatMessage] = []
         var currentAssistantTurn: [ChatMessage] = []
@@ -604,24 +603,23 @@ struct ConversationView: View {
     }
 
     private var session: SessionSummary? {
-        store.projects
-            .flatMap(\.sessions)
-            .first(where: { $0.id == sessionID })
+        store.sessionSummary(for: sessionID)
+    }
+
+    private var transcript: [ChatMessage] {
+        store.transcript(for: sessionID)
     }
 
     private var transcriptCount: Int {
-        session?.transcript.count ?? 0
+        transcript.count
     }
 
     private var hasOlderMessages: Bool {
         loadedMessageCount < transcriptCount
     }
 
-    private var transcriptRevision: String {
-        guard let session else { return "" }
-        return session.transcript.map { message in
-            "\(message.id):\(message.text.count):\(message.isInProgress ? 1 : 0):\(message.timestamp.timeIntervalSinceReferenceDate)"
-        }.joined(separator: "|")
+    private var transcriptRevision: Int {
+        store.transcriptRevisionToken(for: sessionID)
     }
 
     private var promptSurface: SessionPromptSurface {

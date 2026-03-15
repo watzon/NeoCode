@@ -31,6 +31,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var onDidBecomeActive: (() -> Void)?
     var onWillTerminate: (() -> Void)?
 
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        guard AppTestMode.isUnitTestHost else { return }
+
+        NSApp.setActivationPolicy(.prohibited)
+        DispatchQueue.main.async {
+            NSApp.windows.forEach { window in
+                window.alphaValue = 0
+                window.ignoresMouseEvents = true
+                window.orderOut(nil)
+            }
+        }
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
     }
@@ -57,7 +70,16 @@ private enum AppTestMode {
 private struct UnitTestHostView: View {
     var body: some View {
         Color.clear
-            .frame(minWidth: 980, minHeight: 600)
+            .frame(minWidth: 1, minHeight: 1)
+            .onAppear {
+                DispatchQueue.main.async {
+                    NSApp.windows.forEach { window in
+                        window.alphaValue = 0
+                        window.ignoresMouseEvents = true
+                        window.orderOut(nil)
+                    }
+                }
+            }
     }
 }
 

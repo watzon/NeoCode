@@ -118,6 +118,7 @@ final class AppStore {
     private var gitOperationStateByProjectPath: [String: GitOperationState] = [:]
     private var gitRepositoryMonitor: GitRepositoryMonitor?
     private var streamingRecoveryTasks: [String: Task<Void, Never>] = [:]
+    private var transcriptStateBySessionID: [String: SessionTranscriptState] = [:]
     private var messageRoles: [String: ChatMessage.Role] = [:]
     private var liveSessionStatuses: [String: OpenCodeSessionActivity] = [:]
     private var pendingPermissionsBySession: [String: [OpenCodePermissionRequest]] = [:]
@@ -129,6 +130,7 @@ final class AppStore {
     private var yoloSessionKeys: Set<String>
     private var autoRespondedPermissionIDs: [String: Date] = [:]
     private var activeTranscriptLoadKeys = Set<String>()
+    private var locallyActiveSessionIDs = Set<String>()
     private var bufferedTextDeltas: [BufferedTextDeltaKey: BufferedTextDelta] = [:]
     private var bufferedTextDeltaOrder: [BufferedTextDeltaKey] = []
     private var bufferedDeltaFlushTask: Task<Void, Never>?
@@ -136,11 +138,13 @@ final class AppStore {
     private var projectPersistenceSaveCount = 0
 
     init() {
-        let persistedProjects = Self.normalizedProjects(PersistedProjectsStore().loadProjects())
-        self.projects = persistedProjects
-        self.selectedProjectID = persistedProjects.first?.id
-        self.selectedSessionID = persistedProjects.first?.sessions.first?.id
-        self.loadingTranscriptSessionID = persistedProjects.first?.sessions.first?.id
+        let normalizedProjects = Self.normalizedProjects(PersistedProjectsStore().loadProjects())
+        let extractedState = Self.extractTranscriptState(from: normalizedProjects)
+        self.projects = extractedState.projects
+        self.transcriptStateBySessionID = extractedState.transcripts
+        self.selectedProjectID = extractedState.projects.first?.id
+        self.selectedSessionID = extractedState.projects.first?.sessions.first?.id
+        self.loadingTranscriptSessionID = extractedState.projects.first?.sessions.first?.id
         self.yoloSessionKeys = PersistedYoloPreferencesStore().loadYoloSessionKeys()
         self.performanceOptions = AppStorePerformanceOptions()
         self.isPersistenceEnabled = true
@@ -153,10 +157,12 @@ final class AppStore {
         isPersistenceEnabled: Bool = false
     ) {
         let normalizedProjects = Self.normalizedProjects(projects)
-        self.projects = normalizedProjects
-        self.selectedProjectID = normalizedProjects.first?.id
-        self.selectedSessionID = normalizedProjects.first?.sessions.first?.id
-        self.loadingTranscriptSessionID = normalizedProjects.first?.sessions.first?.id
+        let extractedState = Self.extractTranscriptState(from: normalizedProjects)
+        self.projects = extractedState.projects
+        self.transcriptStateBySessionID = extractedState.transcripts
+        self.selectedProjectID = extractedState.projects.first?.id
+        self.selectedSessionID = extractedState.projects.first?.sessions.first?.id
+        self.loadingTranscriptSessionID = extractedState.projects.first?.sessions.first?.id
         self.yoloSessionKeys = isPersistenceEnabled ? PersistedYoloPreferencesStore().loadYoloSessionKeys() : []
         self.performanceOptions = performanceOptions
         self.isPersistenceEnabled = isPersistenceEnabled
@@ -176,6 +182,24 @@ final class AppStore {
         return projects
             .flatMap(\.sessions)
             .first(where: { $0.id == selectedSessionID })
+    }
+
+    var selectedTranscript: [ChatMessage] {
+        transcript(for: selectedSessionID)
+    }
+
+    func transcript(for sessionID: String?) -> [ChatMessage] {
+        guard let sessionID else { return [] }
+        return transcriptStateBySessionID[sessionID]?.messages ?? []
+    }
+
+    func transcriptRevisionToken(for sessionID: String?) -> Int {
+        guard let sessionID else { return 0 }
+        return transcriptStateBySessionID[sessionID]?.revision ?? 0
+    }
+
+    func sessionSummary(for sessionID: String) -> SessionSummary? {
+        session(for: sessionID)
     }
 
     var selectedProject: ProjectSummary? {
@@ -200,7 +224,11 @@ final class AppStore {
     }
 
     var selectedSessionActivity: OpenCodeSessionActivity? {
-        guard let selectedSessionID else { return nil }
+        guard let selectedSessionID,
+              isSessionLocallyActive(selectedSessionID)
+        else {
+            return nil
+        }
         return liveSessionStatuses[selectedSessionID]
     }
 
@@ -698,16 +726,21 @@ final class AppStore {
     ) async -> Bool {
         let trimmed = newText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty,
-              let session = sessionSummary(for: sessionID, projectID: projectID),
-              let messageIndex = session.transcript.firstIndex(where: { $0.id == messageID }),
-              session.transcript[messageIndex].role == .user
+              let session = sessionSummary(for: sessionID, projectID: projectID)
         else {
             return false
         }
 
-        let targetMessage = session.transcript[messageIndex]
+        let currentTranscript = transcript(for: sessionID)
+        guard let messageIndex = currentTranscript.firstIndex(where: { $0.id == messageID }),
+              currentTranscript[messageIndex].role == .user
+        else {
+            return false
+        }
+
+        let targetMessage = currentTranscript[messageIndex]
         let upstreamMessageID = targetMessage.messageID ?? targetMessage.id
-        let originalTranscript = session.transcript
+        let originalTranscript = currentTranscript
         let originalUpdatedAt = session.lastUpdatedAt
         let truncatedTranscript = Array(originalTranscript.prefix(messageIndex))
         let optimisticID = "optimistic-user-\(UUID().uuidString)"
@@ -832,6 +865,7 @@ final class AppStore {
         let repositoryService = GitRepositoryService()
         let branchService = GitBranchService()
         let status = await repositoryService.status(in: projectPath)
+        guard !Task.isCancelled else { return }
 
         logger.debug(
             "Git refresh result path=\(projectPath, privacy: .public) repo=\(status.isRepository, privacy: .public) changes=\(status.hasChanges, privacy: .public) ahead=\(status.aheadCount, privacy: .public) hasRemote=\(status.hasRemote, privacy: .public)"
@@ -862,6 +896,7 @@ final class AppStore {
 
         let branches = (try? await branchesTask) ?? []
         let currentBranch = (try? await currentBranchTask) ?? selectedBranch
+        guard !Task.isCancelled else { return }
 
         logger.debug(
             "Git branch refresh path=\(projectPath, privacy: .public) current=\(currentBranch, privacy: .public) branches=\(branches.joined(separator: ","), privacy: .public)"
@@ -1030,11 +1065,16 @@ final class AppStore {
 
         do {
             let preview = try await GitRepositoryService().commitPreview(in: projectPath)
+            guard !Task.isCancelled else { return }
             guard selectedProject?.path == projectPath || projectPathOverride != nil else { return }
             gitCommitPreview = preview
             cacheCurrentGitState(for: projectPath)
             lastError = nil
+        } catch is CancellationError {
+            logger.debug("Cancelled git commit preview refresh for path=\(projectPath, privacy: .public)")
+            return
         } catch {
+            guard !Task.isCancelled else { return }
             guard selectedProject?.path == projectPath || projectPathOverride != nil else { return }
             gitCommitPreview = nil
             cacheCurrentGitState(for: projectPath)
@@ -1188,6 +1228,9 @@ final class AppStore {
             removeSession(sessionID, in: projectID)
         case .sessionStatusChanged(let sessionID, let status):
             liveSessionStatuses[sessionID] = status
+            if case .idle = status {
+                clearLocalSessionActivity(sessionID)
+            }
             refreshSessionStatus(sessionID: sessionID, projectID: projectID)
         case .permissionAsked(let request):
             if let service = liveServices[projectID],
@@ -1307,6 +1350,7 @@ final class AppStore {
         availableCommands = []
         messageRoles = [:]
         liveSessionStatuses = [:]
+        locallyActiveSessionIDs = []
         pendingPermissionsBySession = [:]
         pendingQuestionsBySession = [:]
         isLoadingSessions = false
@@ -1331,6 +1375,7 @@ final class AppStore {
         for sessionID in sessionIDs {
             cancelStreamingRecoveryCheck(for: sessionID)
             liveSessionStatuses.removeValue(forKey: sessionID)
+            clearLocalSessionActivity(sessionID)
             pendingPermissionsBySession.removeValue(forKey: sessionID)
             pendingQuestionsBySession.removeValue(forKey: sessionID)
             refreshSessionStatus(sessionID: sessionID, projectID: projectID)
@@ -1712,6 +1757,7 @@ final class AppStore {
             let sessions = try await service.listSessions()
                 .filter(\.isRootVisible)
                 .sorted { $0.updatedAt > $1.updatedAt }
+            guard !Task.isCancelled else { return }
             replaceSessions(
                 in: projectID,
                 with: sessions.map { session in
@@ -1733,6 +1779,8 @@ final class AppStore {
             if !keepsCurrentUI {
                 lastError = nil
             }
+        } catch is CancellationError {
+            logger.debug("Cancelled session load for project=\(projectID.uuidString, privacy: .public)")
         } catch {
             logger.error("Failed to load sessions: \(error.localizedDescription, privacy: .public)")
             if !keepsCurrentUI {
@@ -1771,6 +1819,7 @@ final class AppStore {
 
         do {
             let messages = try await service.listMessages(sessionID: sessionID)
+            guard !Task.isCancelled else { return }
             let transcript = ChatMessage.makeTranscript(from: messages)
             for message in messages {
                 messageRoles[message.info.id] = message.info.chatRole
@@ -1780,6 +1829,8 @@ final class AppStore {
             if !keepsCurrentUI {
                 lastError = nil
             }
+        } catch is CancellationError {
+            logger.debug("Cancelled message load for session \(sessionID, privacy: .public)")
         } catch {
             logger.error("Failed to load messages for session \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")
             if !keepsCurrentUI {
@@ -1836,6 +1887,7 @@ final class AppStore {
                             )
                             lastError = nil
                             refreshSelectedSessionMessages(projectID: projectID)
+                        } else if case .ignored = event {
                         } else {
                             reconnectAttempt = 0
                             logger.debug("Received live event: \(event.debugName, privacy: .public)")
@@ -1919,7 +1971,7 @@ final class AppStore {
         projectID: ProjectSummary.ID,
         using runtime: OpenCodeRuntime,
         attemptsRemaining: Int = 3,
-        baselineRevision: String? = nil
+        baselineRevision: Int? = nil
     ) {
         guard attemptsRemaining > 0 else {
             cancelStreamingRecoveryCheck(for: sessionID)
@@ -1928,7 +1980,7 @@ final class AppStore {
 
         let initialRevision = baselineRevision ?? transcriptRevision(for: sessionID, projectID: projectID)
         logger.debug(
-            "Scheduling streaming recovery check session=\(sessionID, privacy: .public) attemptsRemaining=\(attemptsRemaining, privacy: .public) baselineHash=\(initialRevision.hashValue, privacy: .public)"
+            "Scheduling streaming recovery check session=\(sessionID, privacy: .public) attemptsRemaining=\(attemptsRemaining, privacy: .public) baselineRevision=\(initialRevision, privacy: .public)"
         )
         streamingRecoveryTasks[sessionID]?.cancel()
         streamingRecoveryTasks[sessionID] = Task { [weak self] in
@@ -1949,7 +2001,7 @@ final class AppStore {
             let currentRevision = transcriptRevision(for: sessionID, projectID: projectID)
             guard currentRevision == initialRevision else {
                 logger.debug(
-                    "Streaming recovery check satisfied by transcript progress session=\(sessionID, privacy: .public) baselineHash=\(initialRevision.hashValue, privacy: .public) currentHash=\(currentRevision.hashValue, privacy: .public)"
+                    "Streaming recovery check satisfied by transcript progress session=\(sessionID, privacy: .public) baselineRevision=\(initialRevision, privacy: .public) currentRevision=\(currentRevision, privacy: .public)"
                 )
                 cancelStreamingRecoveryCheck(for: sessionID)
                 return
@@ -1983,6 +2035,7 @@ final class AppStore {
 
     private func apply(part: OpenCodePart, projectID: ProjectSummary.ID) {
         guard let sessionID = part.sessionID else { return }
+        markSessionLocallyActive(sessionID)
         flushBufferedTextDeltas(for: sessionID, projectID: projectID)
         let defaultRole = part.messageID.flatMap { messageRoles[$0] } ?? .assistant
         guard let message = ChatMessage(part: part, defaultRole: defaultRole) ?? streamingPlaceholder(for: part, defaultRole: defaultRole) else {
@@ -2006,6 +2059,7 @@ final class AppStore {
             return
         }
 
+        markSessionLocallyActive(delta.sessionID)
         let key = BufferedTextDeltaKey(projectID: projectID, sessionID: delta.sessionID, partID: delta.partID)
         if var buffered = bufferedTextDeltas[key] {
             buffered.text += delta.delta
@@ -2020,7 +2074,6 @@ final class AppStore {
             bufferedTextDeltaOrder.append(key)
         }
 
-        projects[indices.project].sessions[indices.session].lastUpdatedAt = .now
         if projects[indices.project].sessions[indices.session].status == .idle {
             projects[indices.project].sessions[indices.session].status = .running
         }
@@ -2194,18 +2247,34 @@ final class AppStore {
         guard let projectIndex = projects.firstIndex(where: { $0.id == projectID }) else { return }
         let ephemeralSessions = projects[projectIndex].sessions.filter(\.isEphemeral)
         let cachedSessions = Self.sessionLookup(for: projects[projectIndex].sessions)
+        let previousSessionIDs = Set(projects[projectIndex].sessions.map(\.id))
+
+        for session in sessions {
+            seedTranscript(session.transcript, for: session.id)
+        }
+
         let mergedSessions = ephemeralSessions + sessions.map { incoming in
+            let transcript = transcript(for: incoming.id)
             guard let existing = cachedSessions[incoming.id] else {
-                return incoming.applyingInferredTitle(from: incoming.transcript)
+                var inserted = incoming.applyingInferredTitle(from: transcript)
+                inserted.transcript = []
+                inserted.status = resolvedSessionStatus(sessionID: inserted.id, transcript: transcript, fallback: inserted.status)
+                return inserted
             }
 
             var merged = incoming
-            merged.transcript = existing.transcript
+            merged.transcript = []
             merged.status = existing.status
             merged.lastUpdatedAt = max(existing.lastUpdatedAt, incoming.lastUpdatedAt)
-            return merged.applyingInferredTitle(from: merged.transcript)
+            return merged.applyingInferredTitle(from: transcript)
         }
+
+        let retainedSessionIDs = Set(mergedSessions.map(\.id))
+        let removedSessionIDs = previousSessionIDs.subtracting(retainedSessionIDs)
         projects[projectIndex].sessions = mergedSessions
+        for sessionID in removedSessionIDs {
+            removeTranscript(for: sessionID)
+        }
         if selectedProjectID == projectID,
            (selectedSessionID == nil || !mergedSessions.contains(where: { $0.id == selectedSessionID })) {
             self.selectedSessionID = mergedSessions.first?.id
@@ -2216,33 +2285,35 @@ final class AppStore {
     private func replaceTranscript(in sessionID: String, projectID: ProjectSummary.ID, with transcript: [ChatMessage]) {
         guard let indices = indices(for: sessionID, projectID: projectID) else { return }
         discardBufferedTextDeltas(for: sessionID, projectID: projectID)
-        projects[indices.project].sessions[indices.session].transcript = transcript
+        setTranscript(transcript, for: sessionID)
+        projects[indices.project].sessions[indices.session].lastUpdatedAt = transcript.last?.timestamp ?? projects[indices.project].sessions[indices.session].lastUpdatedAt
         applyInferredTitleIfNeeded(sessionIndex: indices.session, projectIndex: indices.project)
         scheduleProjectPersistence()
     }
 
     private func upsert(session: SessionSummary, in projectID: ProjectSummary.ID, preferTopInsertion: Bool) {
         guard let projectIndex = projects.firstIndex(where: { $0.id == projectID }) else { return }
+        seedTranscript(session.transcript, for: session.id)
+        let transcript = transcript(for: session.id)
         if let sessionIndex = projects[projectIndex].sessions.firstIndex(where: { $0.id == session.id }) {
-            let existingTranscript = projects[projectIndex].sessions[sessionIndex].transcript
             var updated = session
-            if !existingTranscript.isEmpty {
-                updated.transcript = existingTranscript
-            }
-            updated = updated.applyingInferredTitle(from: updated.transcript)
+            updated.transcript = []
+            updated = updated.applyingInferredTitle(from: transcript)
             projects[projectIndex].sessions[sessionIndex] = updated
             projects[projectIndex].sessions[sessionIndex].status = resolvedSessionStatus(
                 sessionID: session.id,
-                transcript: projects[projectIndex].sessions[sessionIndex].transcript,
+                transcript: transcript,
                 fallback: projects[projectIndex].sessions[sessionIndex].status
             )
         } else if preferTopInsertion {
-            var inserted = session.applyingInferredTitle(from: session.transcript)
-            inserted.status = resolvedSessionStatus(sessionID: session.id, transcript: inserted.transcript, fallback: inserted.status)
+            var inserted = session.applyingInferredTitle(from: transcript)
+            inserted.transcript = []
+            inserted.status = resolvedSessionStatus(sessionID: session.id, transcript: transcript, fallback: inserted.status)
             projects[projectIndex].sessions.insert(inserted, at: 0)
         } else {
-            var inserted = session.applyingInferredTitle(from: session.transcript)
-            inserted.status = resolvedSessionStatus(sessionID: session.id, transcript: inserted.transcript, fallback: inserted.status)
+            var inserted = session.applyingInferredTitle(from: transcript)
+            inserted.transcript = []
+            inserted.status = resolvedSessionStatus(sessionID: session.id, transcript: transcript, fallback: inserted.status)
             projects[projectIndex].sessions.append(inserted)
         }
 
@@ -2255,6 +2326,8 @@ final class AppStore {
     private func removeSession(_ sessionID: String, in projectID: ProjectSummary.ID) {
         guard let projectIndex = projects.firstIndex(where: { $0.id == projectID }) else { return }
         discardBufferedTextDeltas(for: sessionID, projectID: projectID)
+        clearLocalSessionActivity(sessionID)
+        removeTranscript(for: sessionID)
         projects[projectIndex].sessions.removeAll(where: { $0.id == sessionID })
         cancelStreamingRecoveryCheck(for: sessionID)
         liveSessionStatuses.removeValue(forKey: sessionID)
@@ -2268,23 +2341,37 @@ final class AppStore {
 
     private func upsertMessage(_ message: ChatMessage, in sessionID: String, projectID: ProjectSummary.ID) {
         guard let indices = indices(for: sessionID, projectID: projectID) else { return }
-        if let messageIndex = projects[indices.project].sessions[indices.session].transcript.firstIndex(where: { $0.id == message.id }) {
-            projects[indices.project].sessions[indices.session].transcript[messageIndex] = message
+        var transcript = transcript(for: sessionID)
+        if let messageIndex = transcript.firstIndex(where: { $0.id == message.id }) {
+            transcript[messageIndex] = message
         } else {
-            projects[indices.project].sessions[indices.session].transcript.append(message)
+            transcript.append(message)
         }
+        setTranscript(transcript, for: sessionID)
+        projects[indices.project].sessions[indices.session].lastUpdatedAt = message.timestamp
         applyInferredTitleIfNeeded(sessionIndex: indices.session, projectIndex: indices.project)
         scheduleProjectPersistence()
     }
 
     private func removeMessage(id: String, sessionID: String, projectID: ProjectSummary.ID) {
         guard let indices = indices(for: sessionID, projectID: projectID) else { return }
-        projects[indices.project].sessions[indices.session].transcript.removeAll(where: { $0.id == id })
+        var transcript = transcript(for: sessionID)
+        transcript.removeAll(where: { $0.id == id })
+        setTranscript(transcript, for: sessionID)
+        projects[indices.project].sessions[indices.session].lastUpdatedAt = transcript.last?.timestamp ?? projects[indices.project].sessions[indices.session].lastUpdatedAt
         scheduleProjectPersistence()
     }
 
     private func setSessionStatus(_ status: SessionStatus, sessionID: String, projectID: ProjectSummary.ID) {
         guard let indices = indices(for: sessionID, projectID: projectID) else { return }
+
+        switch status {
+        case .running:
+            markSessionLocallyActive(sessionID)
+        case .idle, .attention:
+            clearLocalSessionActivity(sessionID)
+        }
+
         projects[indices.project].sessions[indices.session].status = status
         if status != .running {
             cancelStreamingRecoveryCheck(for: sessionID)
@@ -2296,7 +2383,7 @@ final class AppStore {
 
     private func refreshSessionStatus(sessionID: String, projectID: ProjectSummary.ID) {
         guard let indices = indices(for: sessionID, projectID: projectID) else { return }
-        let transcript = projects[indices.project].sessions[indices.session].transcript
+        let transcript = transcript(for: sessionID)
         projects[indices.project].sessions[indices.session].status = resolvedSessionStatus(
             sessionID: sessionID,
             transcript: transcript,
@@ -2310,11 +2397,9 @@ final class AppStore {
         scheduleProjectPersistence(.streaming)
     }
 
-    private func transcriptRevision(for sessionID: String, projectID: ProjectSummary.ID) -> String {
-        guard let session = sessionSummary(for: sessionID, projectID: projectID) else { return "" }
-        return session.transcript.map { message in
-            "\(message.id):\(message.text.count):\(message.isInProgress ? 1 : 0):\(message.timestamp.timeIntervalSinceReferenceDate)"
-        }.joined(separator: "|")
+    private func transcriptRevision(for sessionID: String, projectID: ProjectSummary.ID) -> Int {
+        guard indices(for: sessionID, projectID: projectID) != nil else { return 0 }
+        return transcriptRevisionToken(for: sessionID)
     }
 
     private func applyLiveSessionStatuses(_ statuses: [String: OpenCodeSessionActivity], projectID: ProjectSummary.ID) {
@@ -2343,17 +2428,23 @@ final class AppStore {
             case .idle:
                 return .idle
             case .busy:
+                guard isSessionLocallyActive(sessionID) else { break }
                 return .running
             case .retry:
+                guard isSessionLocallyActive(sessionID) else { break }
                 return .attention
             }
         }
 
-        return transcriptDerivedStatus(for: transcript, fallback: fallback)
+        return transcriptDerivedStatus(for: transcript, sessionID: sessionID, fallback: fallback)
     }
 
-    private func transcriptDerivedStatus(for transcript: [ChatMessage], fallback: SessionStatus = .idle) -> SessionStatus {
-        if transcript.contains(where: \.isInProgress) {
+    private func transcriptDerivedStatus(
+        for transcript: [ChatMessage],
+        sessionID: String,
+        fallback: SessionStatus = .idle
+    ) -> SessionStatus {
+        if isSessionLocallyActive(sessionID), transcript.contains(where: \.isInProgress) {
             return .running
         }
 
@@ -2370,7 +2461,7 @@ final class AppStore {
         guard message.attachment == nil else { return }
 
         guard let indices = indices(for: sessionID, projectID: projectID) else { return }
-        let transcript = projects[indices.project].sessions[indices.session].transcript
+        var transcript = transcript(for: sessionID)
 
         guard let optimisticIndex = transcript.firstIndex(where: {
             $0.id.hasPrefix("optimistic-user-") && $0.role == .user && $0.text == message.text
@@ -2378,7 +2469,9 @@ final class AppStore {
             return
         }
 
-        projects[indices.project].sessions[indices.session].transcript.remove(at: optimisticIndex)
+        transcript.remove(at: optimisticIndex)
+        setTranscript(transcript, for: sessionID)
+        projects[indices.project].sessions[indices.session].lastUpdatedAt = message.timestamp
     }
 
     private func reconcileOptimisticAttachmentMessage(with message: ChatMessage, sessionID: String, projectID: ProjectSummary.ID) {
@@ -2388,21 +2481,26 @@ final class AppStore {
             return
         }
 
-        let transcript = projects[indices.project].sessions[indices.session].transcript
+        var transcript = transcript(for: sessionID)
         guard let optimisticIndex = transcript.firstIndex(where: {
             $0.id.hasPrefix("optimistic-user-attachment-") && $0.attachment?.optimisticKey == attachment.optimisticKey
         }) else {
             return
         }
 
-        projects[indices.project].sessions[indices.session].transcript.remove(at: optimisticIndex)
+        transcript.remove(at: optimisticIndex)
+        setTranscript(transcript, for: sessionID)
+        projects[indices.project].sessions[indices.session].lastUpdatedAt = message.timestamp
     }
 
     private func removeOptimisticAttachmentMessages(in sessionID: String, projectID: ProjectSummary.ID) {
         guard let indices = indices(for: sessionID, projectID: projectID) else { return }
-        projects[indices.project].sessions[indices.session].transcript.removeAll(where: {
+        var transcript = transcript(for: sessionID)
+        transcript.removeAll(where: {
             $0.id.hasPrefix("optimistic-user-attachment-")
         })
+        setTranscript(transcript, for: sessionID)
+        projects[indices.project].sessions[indices.session].lastUpdatedAt = transcript.last?.timestamp ?? projects[indices.project].sessions[indices.session].lastUpdatedAt
     }
 
     private func streamingPlaceholder(for part: OpenCodePart, defaultRole: ChatMessage.Role) -> ChatMessage? {
@@ -2486,7 +2584,7 @@ final class AppStore {
         }
 
         guard let indices = indices(for: sessionID, projectID: projectID) else { return }
-        let transcript = projects[indices.project].sessions[indices.session].transcript
+        let transcript = transcript(for: sessionID)
         projects[indices.project].sessions[indices.session].status = resolvedSessionStatus(
             sessionID: sessionID,
             transcript: transcript,
@@ -2647,7 +2745,7 @@ final class AppStore {
         }
 
         guard let indices = indices(for: sessionID, projectID: projectID) else { return }
-        let transcript = projects[indices.project].sessions[indices.session].transcript
+        let transcript = transcript(for: sessionID)
         projects[indices.project].sessions[indices.session].status = resolvedSessionStatus(
             sessionID: sessionID,
             transcript: transcript,
@@ -2662,8 +2760,8 @@ final class AppStore {
     }
 
     private func hasCachedTranscript(for sessionID: String, projectID: ProjectSummary.ID) -> Bool {
-        guard let indices = indices(for: sessionID, projectID: projectID) else { return false }
-        return !projects[indices.project].sessions[indices.session].transcript.isEmpty
+        guard indices(for: sessionID, projectID: projectID) != nil else { return false }
+        return !transcript(for: sessionID).isEmpty
     }
 
     private func sessionSummary(for sessionID: String, projectID: ProjectSummary.ID) -> SessionSummary? {
@@ -2688,6 +2786,50 @@ final class AppStore {
         projects
             .flatMap(\.sessions)
             .first(where: { $0.id == sessionID })
+    }
+
+    private func setTranscript(_ transcript: [ChatMessage], for sessionID: String) {
+        var state = transcriptStateBySessionID[sessionID] ?? SessionTranscriptState()
+        state.messages = transcript
+        state.revision &+= 1
+        transcriptStateBySessionID[sessionID] = state
+    }
+
+    private func seedTranscript(_ transcript: [ChatMessage], for sessionID: String) {
+        guard !transcript.isEmpty else { return }
+
+        if let existingState = transcriptStateBySessionID[sessionID],
+           existingState.messages.count >= transcript.count {
+            return
+        }
+
+        transcriptStateBySessionID[sessionID] = SessionTranscriptState(messages: transcript, revision: 0)
+    }
+
+    private func removeTranscript(for sessionID: String) {
+        transcriptStateBySessionID.removeValue(forKey: sessionID)
+    }
+
+    private func moveTranscript(from sourceSessionID: String, to destinationSessionID: String) {
+        guard sourceSessionID != destinationSessionID,
+              let existingState = transcriptStateBySessionID.removeValue(forKey: sourceSessionID)
+        else {
+            return
+        }
+
+        transcriptStateBySessionID[destinationSessionID] = existingState
+    }
+
+    private func markSessionLocallyActive(_ sessionID: String) {
+        locallyActiveSessionIDs.insert(sessionID)
+    }
+
+    private func clearLocalSessionActivity(_ sessionID: String) {
+        locallyActiveSessionIDs.remove(sessionID)
+    }
+
+    private func isSessionLocallyActive(_ sessionID: String) -> Bool {
+        locallyActiveSessionIDs.contains(sessionID)
     }
 
     private func createEphemeralSession(in projectID: ProjectSummary.ID) {
@@ -2783,6 +2925,8 @@ final class AppStore {
     private func replaceSession(_ sessionID: String, in projectID: ProjectSummary.ID, with session: SessionSummary) {
         guard let projectIndex = projects.firstIndex(where: { $0.id == projectID }) else { return }
         discardBufferedTextDeltas(for: sessionID, projectID: projectID)
+        seedTranscript(session.transcript, for: session.id)
+        let existingTranscript = transcript(for: sessionID)
 
         projects[projectIndex].sessions.removeAll(where: { $0.id == session.id && $0.id != sessionID })
 
@@ -2792,11 +2936,12 @@ final class AppStore {
         }
 
         let existing = projects[projectIndex].sessions[sessionIndex]
-        var replacement = session.applyingInferredTitle(from: existing.transcript)
+        var replacement = session.applyingInferredTitle(from: existingTranscript)
         replacement.status = existing.status
-        replacement.transcript = existing.transcript
+        replacement.transcript = []
         replacement.lastUpdatedAt = max(existing.lastUpdatedAt, session.lastUpdatedAt)
         projects[projectIndex].sessions[sessionIndex] = replacement
+        moveTranscript(from: sessionID, to: session.id)
         scheduleProjectPersistence()
     }
 
@@ -2806,6 +2951,24 @@ final class AppStore {
             normalized.sessions = deduplicatedSessions(project.sessions)
             return normalized
         }
+    }
+
+    private static func extractTranscriptState(from projects: [ProjectSummary]) -> (
+        projects: [ProjectSummary],
+        transcripts: [String: SessionTranscriptState]
+    ) {
+        var sanitizedProjects = projects
+        var transcripts: [String: SessionTranscriptState] = [:]
+
+        for projectIndex in sanitizedProjects.indices {
+            for sessionIndex in sanitizedProjects[projectIndex].sessions.indices {
+                let session = sanitizedProjects[projectIndex].sessions[sessionIndex]
+                transcripts[session.id] = SessionTranscriptState(messages: session.transcript, revision: 0)
+                sanitizedProjects[projectIndex].sessions[sessionIndex].transcript = []
+            }
+        }
+
+        return (sanitizedProjects, transcripts)
     }
 
     private static func deduplicatedSessions(_ sessions: [SessionSummary]) -> [SessionSummary] {
@@ -2870,7 +3033,7 @@ final class AppStore {
 
     private func applyInferredTitleIfNeeded(sessionIndex: Int, projectIndex: Int) {
         let session = projects[projectIndex].sessions[sessionIndex]
-        let inferred = session.applyingInferredTitle(from: session.transcript)
+        let inferred = session.applyingInferredTitle(from: transcript(for: session.id))
         guard inferred.title != session.title else { return }
         projects[projectIndex].sessions[sessionIndex].title = inferred.title
     }
@@ -2910,13 +3073,14 @@ final class AppStore {
 
         for key in keysToFlush {
             guard let buffered = bufferedTextDeltas.removeValue(forKey: key),
-                  let indices = indices(for: key.sessionID, projectID: key.projectID)
+                  indices(for: key.sessionID, projectID: key.projectID) != nil
             else {
                 continue
             }
 
+            var transcript = transcript(for: key.sessionID)
             let messageIndex: Int
-            if let existingIndex = projects[indices.project].sessions[indices.session].transcript.firstIndex(where: { $0.id == key.partID }) {
+            if let existingIndex = transcript.firstIndex(where: { $0.id == key.partID }) {
                 messageIndex = existingIndex
             } else {
                 let placeholder = ChatMessage(
@@ -2929,13 +3093,13 @@ final class AppStore {
                     kind: .plain,
                     isInProgress: true
                 )
-                projects[indices.project].sessions[indices.session].transcript.append(placeholder)
-                messageIndex = projects[indices.project].sessions[indices.session].transcript.endIndex - 1
+                transcript.append(placeholder)
+                messageIndex = transcript.endIndex - 1
             }
 
-            projects[indices.project].sessions[indices.session].transcript[messageIndex].text += buffered.text
-            projects[indices.project].sessions[indices.session].transcript[messageIndex].timestamp = buffered.updatedAt
-            projects[indices.project].sessions[indices.session].lastUpdatedAt = buffered.updatedAt
+            transcript[messageIndex].text += buffered.text
+            transcript[messageIndex].timestamp = buffered.updatedAt
+            setTranscript(transcript, for: key.sessionID)
             changedSessions.insert("\(key.projectID.uuidString)|\(key.sessionID)")
         }
 
@@ -2951,7 +3115,7 @@ final class AppStore {
             }
 
             applyInferredTitleIfNeeded(sessionIndex: indices.session, projectIndex: indices.project)
-            let transcript = projects[indices.project].sessions[indices.session].transcript
+            let transcript = transcript(for: components[1])
             projects[indices.project].sessions[indices.session].status = resolvedSessionStatus(
                 sessionID: components[1],
                 transcript: transcript,
@@ -2986,8 +3150,20 @@ final class AppStore {
         guard hasPendingProjectPersistence else { return }
 
         hasPendingProjectPersistence = false
-        projectPersistence.saveProjects(projects)
+        projectPersistence.saveProjects(projectsForPersistence())
         projectPersistenceSaveCount += 1
+    }
+
+    private func projectsForPersistence() -> [ProjectSummary] {
+        projects.map { project in
+            var snapshot = project
+            snapshot.sessions = project.sessions.map { session in
+                var persistedSession = session
+                persistedSession.transcript = transcript(for: session.id)
+                return persistedSession
+            }
+            return snapshot
+        }
     }
 
     private func scheduleProjectPersistence(_ mode: ProjectPersistenceMode = .standard) {

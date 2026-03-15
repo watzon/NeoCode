@@ -335,9 +335,61 @@ struct NeoCodeMainActorTests {
 
         store.apply(event: event)
 
-        #expect(store.selectedSession?.transcript.count == 1)
-        #expect(store.selectedSession?.transcript.first?.text == "Thinking: streaming")
+        #expect(store.selectedTranscript.count == 1)
+        #expect(store.selectedTranscript.first?.text == "Thinking: streaming")
         #expect(store.selectedSession?.status == .running)
+    }
+
+    @MainActor
+    @Test func appStoreIgnoresExternalBusyStatusWithoutLocalActivity() {
+        let store = AppStore(projects: [
+            ProjectSummary(
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(id: "ses_1", title: "Existing", lastUpdatedAt: .distantPast),
+                ]
+            ),
+        ])
+        store.selectSession("ses_1")
+
+        store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .busy))
+
+        #expect(store.selectedSession?.status == .idle)
+        #expect(store.selectedSessionActivity == nil)
+    }
+
+    @MainActor
+    @Test func appStoreIgnoresExternalBusyStatusForSnapshotInProgressTranscript() {
+        let store = AppStore(projects: [
+            ProjectSummary(
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(
+                        id: "ses_1",
+                        title: "Existing",
+                        lastUpdatedAt: .distantPast,
+                        transcript: [
+                            ChatMessage(
+                                id: "part_1",
+                                role: .assistant,
+                                text: "Partial response",
+                                timestamp: .now,
+                                emphasis: .normal,
+                                isInProgress: true
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+        ])
+        store.selectSession("ses_1")
+
+        store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .busy))
+
+        #expect(store.selectedSession?.status == .idle)
+        #expect(store.selectedSessionActivity == nil)
     }
 
     @MainActor
@@ -363,13 +415,13 @@ struct NeoCodeMainActorTests {
         store.apply(event: .messagePartDelta(OpenCodePartDelta(sessionID: "ses_1", messageID: "msg_1", partID: "part_1", field: "text", delta: "Hello")))
         store.apply(event: .messagePartDelta(OpenCodePartDelta(sessionID: "ses_1", messageID: "msg_1", partID: "part_1", field: "text", delta: " world")))
 
-        #expect(store.selectedSession?.transcript.isEmpty == true)
+        #expect(store.selectedTranscript.isEmpty == true)
         #expect(store.debugBufferedTextDeltaCount == 1)
 
         try? await Task.sleep(for: .milliseconds(80))
 
-        #expect(store.selectedSession?.transcript.count == 1)
-        #expect(store.selectedSession?.transcript.first?.text == "Hello world")
+        #expect(store.selectedTranscript.count == 1)
+        #expect(store.selectedTranscript.first?.text == "Hello world")
         #expect(store.debugBufferedTextDeltaCount == 0)
     }
 
@@ -400,7 +452,7 @@ struct NeoCodeMainActorTests {
 
         store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .idle))
 
-        #expect(store.selectedSession?.transcript.first?.text == "Buffered text")
+        #expect(store.selectedTranscript.first?.text == "Buffered text")
         #expect(store.debugBufferedTextDeltaCount == 0)
     }
 
@@ -564,7 +616,8 @@ struct NeoCodeMainActorTests {
 
         #expect(store.projects[0].sessions.count == 1)
         #expect(store.projects[0].sessions[0].id == "ses_1")
-        #expect(store.projects[0].sessions[0].transcript == transcript)
+        #expect(store.projects[0].sessions[0].transcript.isEmpty == true)
+        #expect(store.transcript(for: "ses_1") == transcript)
         #expect(store.projects[0].sessions[0].status == .running)
         #expect(store.projects[0].sessions[0].title == "Fix the duplicated thread bug")
     }
@@ -605,7 +658,8 @@ struct NeoCodeMainActorTests {
 
         #expect(store.projects[0].sessions.count == 1)
         #expect(store.projects[0].sessions[0].title == "Server session")
-        #expect(store.projects[0].sessions[0].transcript == transcript)
+        #expect(store.projects[0].sessions[0].transcript.isEmpty == true)
+        #expect(store.transcript(for: "ses_1") == transcript)
         #expect(store.projects[0].sessions[0].status == .running)
     }
 
@@ -804,9 +858,9 @@ struct NeoCodeMainActorTests {
         #expect(service.sentPrompts[0].sessionID == "ses_1")
         #expect(service.sentPrompts[0].text == "Updated prompt")
         #expect(service.sentPrompts[0].attachments.isEmpty)
-        #expect(store.selectedSession?.transcript.count == 1)
-        #expect(store.selectedSession?.transcript.first?.text == "Updated prompt")
-        #expect(store.selectedSession?.transcript.first?.id.hasPrefix("optimistic-user-") == true)
+        #expect(store.selectedTranscript.count == 1)
+        #expect(store.selectedTranscript.first?.text == "Updated prompt")
+        #expect(store.selectedTranscript.first?.id.hasPrefix("optimistic-user-") == true)
         #expect(store.selectedSession?.status == .running)
     }
 
@@ -1016,7 +1070,7 @@ struct NeoCodeMainActorTests {
         #expect(service.sentCommands[0].command == "review")
         #expect(service.sentCommands[0].arguments == "current diff")
         #expect(store.draft.isEmpty)
-        #expect(store.selectedSession?.transcript.isEmpty == true)
+        #expect(store.selectedTranscript.isEmpty == true)
         #expect(store.selectedSession?.status == .running)
     }
 
@@ -1136,7 +1190,7 @@ struct NeoCodeMainActorTests {
         #expect(didSend == false)
         #expect(service.revertedMessageID == "msg_user_1")
         #expect(service.unrevertedSessionIDs == ["ses_1"])
-        #expect(store.selectedSession?.transcript == originalTranscript)
+        #expect(store.selectedTranscript == originalTranscript)
         #expect(store.lastError == "send failed")
     }
 
