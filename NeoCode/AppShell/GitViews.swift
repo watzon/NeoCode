@@ -245,7 +245,9 @@ struct GitCommitSheet: View {
                 pushAfterCommit: selectedAction == .commitAndPush
             )
             if committed {
-                isPresented = false
+                await MainActor.run {
+                    isPresented = false
+                }
             }
         }
     }
