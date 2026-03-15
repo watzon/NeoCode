@@ -341,11 +341,11 @@ struct OpenCodePart: Decodable, Equatable {
             let name = tool ?? "tool"
             switch state?.status {
             case .completed:
-                return "\(name) completed\n\(state?.output?.prettyPrinted ?? state?.rawOutput ?? "")".trimmingCharacters(in: .whitespacesAndNewlines)
+                return "\(name) completed\n\(state?.output?.displayString ?? "")".trimmingCharacters(in: .whitespacesAndNewlines)
             case .error:
                 return "\(name) failed\n\(state?.error ?? "Unknown error")"
             case .running, .pending, .none:
-                return "\(name) running\n\(state?.input?.prettyPrinted ?? state?.rawInput ?? "")".trimmingCharacters(in: .whitespacesAndNewlines)
+                return "\(name) running\n\(state?.input?.displayString ?? "")".trimmingCharacters(in: .whitespacesAndNewlines)
             }
         case .file:
             return attachment?.displayTitle ?? text ?? ""
@@ -409,8 +409,8 @@ struct OpenCodeToolState: Decodable, Equatable {
     let output: JSONValue?
     let error: String?
 
-    var rawInput: String? { input?.prettyPrinted }
-    var rawOutput: String? { output?.prettyPrinted }
+    var rawInput: String? { input?.displayString }
+    var rawOutput: String? { output?.displayString }
 }
 
 struct OpenCodeTimeContainer: Decodable, Equatable {

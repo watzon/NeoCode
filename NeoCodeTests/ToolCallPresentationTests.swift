@@ -118,4 +118,24 @@ struct ToolCallPresentationTests {
 
         #expect(text.contains("xcodebuild: WARNING"))
     }
+
+    @Test func applyPatchDoesNotShowEmptyObjectPlaceholder() {
+        let toolCall = ChatMessage.ToolCall(
+            name: "apply_patch",
+            status: .running,
+            detail: "apply_patch running",
+            input: .object([:])
+        )
+
+        let presentation = ToolCallPresentation(toolCall: toolCall)
+
+        #expect(presentation.items.count == 1)
+
+        guard case .text(let text) = presentation.items[0].content else {
+            Issue.record("Expected apply_patch placeholder to remain plain text")
+            return
+        }
+
+        #expect(text == "apply_patch running")
+    }
 }

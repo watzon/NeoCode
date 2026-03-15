@@ -126,11 +126,6 @@ private struct DiffFileView: View {
         LazyVStack(alignment: .leading, spacing: 0) {
             ForEach(rows) { row in
                 DiffRowView(row: row, lineNumberColumnWidth: lineNumberColumnWidth)
-                    .overlay(alignment: .bottom) {
-                        Rectangle()
-                            .fill(NeoCodeTheme.lineSoft)
-                            .frame(height: 1)
-                    }
             }
         }
         .background(NeoCodeTheme.diffContextBackground)

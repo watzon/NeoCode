@@ -53,10 +53,10 @@ private enum ToolCallPresentationBuilder {
         if toolCall.status == .error, let error = toolCall.error, !error.isEmpty {
             return error
         }
-        if let output = toolCall.output?.prettyPrinted, !output.isEmpty {
+        if let output = toolCall.output?.displayString, !output.isEmpty {
             return output
         }
-        if let input = toolCall.input?.prettyPrinted, !input.isEmpty {
+        if let input = toolCall.input?.displayString, !input.isEmpty {
             return input
         }
         return ""

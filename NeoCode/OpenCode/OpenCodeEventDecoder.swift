@@ -60,6 +60,26 @@ enum JSONValue: Codable, Equatable, Hashable {
         }
     }
 
+    var displayString: String? {
+        guard isMeaningfulDisplayValue else { return nil }
+        return prettyPrinted
+    }
+
+    private var isMeaningfulDisplayValue: Bool {
+        switch self {
+        case .null:
+            return false
+        case .string(let value):
+            return !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .array(let values):
+            return !values.isEmpty
+        case .object(let values):
+            return !values.isEmpty
+        case .number, .bool:
+            return true
+        }
+    }
+
     private var foundationValue: Any {
         switch self {
         case .string(let value): value
