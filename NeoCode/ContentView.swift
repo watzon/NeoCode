@@ -69,7 +69,9 @@ struct ContentView: View {
     }
 
     private var isRuntimeBootstrappingEnabled: Bool {
-        ProcessInfo.processInfo.environment[uiTestModeKey] != "1"
+        let environment = ProcessInfo.processInfo.environment
+        return environment[uiTestModeKey] != "1"
+            && environment["XCTestConfigurationFilePath"] == nil
     }
 }
 

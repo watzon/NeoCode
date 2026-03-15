@@ -3,7 +3,7 @@ import Testing
 @testable import NeoCode
 
 @Suite(.serialized)
-struct NeoCodeTests {
+struct NeoCodeCoreTests {
     @Test func decodesSessionsAndBuildsTranscript() throws {
         let sessions: [OpenCodeSession] = try decode(
             """
@@ -136,7 +136,7 @@ struct NeoCodeTests {
     }
 
     @MainActor
-    @Test func decodesSessionStatusEvents() throws {
+    @Test func decodesSessionStatusEvents() async throws {
         let event = try OpenCodeEventDecoder.decode(
             frame: OpenCodeSSEFrame(
                 event: "session.status",
@@ -154,7 +154,7 @@ struct NeoCodeTests {
     }
 
     @MainActor
-    @Test func decodesPermissionAskedEvents() throws {
+    @Test func decodesPermissionAskedEvents() async throws {
         let event = try OpenCodeEventDecoder.decode(
             frame: OpenCodeSSEFrame(
                 event: "permission.asked",
@@ -174,7 +174,7 @@ struct NeoCodeTests {
     }
 
     @MainActor
-    @Test func decodesQuestionAskedEvents() throws {
+    @Test func decodesQuestionAskedEvents() async throws {
         let event = try OpenCodeEventDecoder.decode(
             frame: OpenCodeSSEFrame(
                 event: "question.asked",
@@ -211,7 +211,6 @@ struct NeoCodeTests {
             ]
             """
         )
-
         #expect(commands.count == 1)
         #expect(commands[0].id == "review")
         #expect(commands[0].trimmedDescription == "Review the current working tree")
@@ -219,8 +218,53 @@ struct NeoCodeTests {
         #expect(commands[0].hints == ["$1"])
     }
 
+    @Test func projectSummaryLimitsDisplayedSessionsToEight() {
+        let sessions = (0..<10).map { index in
+            SessionSummary(
+                id: "ses_\(index)",
+                title: "Session \(index)",
+                lastUpdatedAt: Date(timeIntervalSince1970: TimeInterval(index))
+            )
+        }
+        let project = ProjectSummary(name: "NeoCode", path: "/tmp/NeoCode", sessions: sessions)
+
+        #expect(project.sessions.count == 10)
+        #expect(project.displayedSessions.count == 8)
+        #expect(project.displayedSessions.map(\.id) == Array(sessions.prefix(8)).map(\.id))
+    }
+
+    @Test func sessionSummaryOmitsPlaceholderTitlesWhenCreatingRemoteSessions() {
+        let draft = SessionSummary(id: "draft", title: "New session", lastUpdatedAt: .distantPast, isEphemeral: true)
+        let timestamped = SessionSummary(id: "draft-2", title: "New session - 2026-03-13T10:00:00Z", lastUpdatedAt: .distantPast, isEphemeral: true)
+        let renamed = SessionSummary(id: "draft-3", title: "Scratchpad", lastUpdatedAt: .distantPast, isEphemeral: true)
+
+        #expect(draft.requestedServerTitle == nil)
+        #expect(timestamped.requestedServerTitle == nil)
+        #expect(renamed.requestedServerTitle == "Scratchpad")
+    }
+
+    @Test func runtimeCapsStartupOutputBufferToRecentTail() {
+        let existing = String(repeating: "a", count: 8)
+        let chunk = String(repeating: "b", count: 8)
+
+        let result = OpenCodeRuntime.cappedOutputBuffer(existing, appending: chunk, limit: 10)
+
+        #expect(result.count == 10)
+        #expect(result == "aabbbbbbbb")
+    }
+
+    @Test func runtimeUsesTrimmedRecentOutputSnippet() {
+        let snippet = OpenCodeRuntime.recentOutputSnippet(from: "\n\n  hello world  \n", limit: 5)
+
+        #expect(snippet == "world")
+    }
+}
+
+@Suite(.serialized)
+struct NeoCodeMainActorTests {
+
     @MainActor
-    @Test func appStoreAppliesStreamingEventsToSelectedSession() throws {
+    @Test func appStoreAppliesStreamingEventsToSelectedSession() async throws {
         let store = AppStore(projects: [
             ProjectSummary(
                 name: "NeoCode",
@@ -247,7 +291,7 @@ struct NeoCodeTests {
     }
 
     @MainActor
-    @Test func appStoreCreatesAndDeletesSessionsFromEvents() {
+    @Test func appStoreCreatesAndDeletesSessionsFromEvents() async {
         let store = AppStore(projects: [ProjectSummary(name: "NeoCode", path: "/tmp/NeoCode")])
 
         store.apply(event: .sessionCreated(OpenCodeSession(id: "ses_new", title: "New Session", parentID: nil, time: OpenCodeTimeContainer(created: Date(), updated: Date(), completed: nil))))
@@ -259,7 +303,7 @@ struct NeoCodeTests {
     }
 
     @MainActor
-    @Test func appStoreTracksPendingPermissionsAndClearsThemAfterReply() {
+    @Test func appStoreTracksPendingPermissionsAndClearsThemAfterReply() async {
         let store = AppStore(projects: [
             ProjectSummary(
                 name: "NeoCode",
@@ -302,7 +346,7 @@ struct NeoCodeTests {
     }
 
     @MainActor
-    @Test func appStoreCanToggleYoloModePerSession() {
+    @Test func appStoreCanToggleYoloModePerSession() async {
         let store = AppStore(projects: [
             ProjectSummary(
                 name: "NeoCode",
@@ -323,7 +367,7 @@ struct NeoCodeTests {
     }
 
     @MainActor
-    @Test func appStoreTracksPendingQuestionsAndClearsThemAfterReply() {
+    @Test func appStoreTracksPendingQuestionsAndClearsThemAfterReply() async {
         let store = AppStore(projects: [
             ProjectSummary(
                 name: "NeoCode",
@@ -371,7 +415,7 @@ struct NeoCodeTests {
     }
 
     @MainActor
-    @Test func appStoreDeduplicatesCachedSessionsOnInitialization() {
+    @Test func appStoreDeduplicatesCachedSessionsOnInitialization() async {
         let transcript = [
             ChatMessage(
                 id: "msg_1",
@@ -412,7 +456,7 @@ struct NeoCodeTests {
     }
 
     @MainActor
-    @Test func appStorePrefersExplicitTitlesWhenDeduplicatingSessions() {
+    @Test func appStorePrefersExplicitTitlesWhenDeduplicatingSessions() async {
         let transcript = [
             ChatMessage(
                 id: "msg_1",
@@ -451,23 +495,8 @@ struct NeoCodeTests {
         #expect(store.projects[0].sessions[0].status == .running)
     }
 
-    @Test func projectSummaryLimitsDisplayedSessionsToEight() {
-        let sessions = (0..<10).map { index in
-            SessionSummary(
-                id: "ses_\(index)",
-                title: "Session \(index)",
-                lastUpdatedAt: Date(timeIntervalSince1970: TimeInterval(index))
-            )
-        }
-        let project = ProjectSummary(name: "NeoCode", path: "/tmp/NeoCode", sessions: sessions)
-
-        #expect(project.sessions.count == 10)
-        #expect(project.displayedSessions.count == 8)
-        #expect(project.displayedSessions.map(\.id) == Array(sessions.prefix(8)).map(\.id))
-    }
-
     @MainActor
-    @Test func appStorePreservesExistingSessionTitleWhenServerTitleIsMissing() {
+    @Test func appStorePreservesExistingSessionTitleWhenServerTitleIsMissing() async {
         let store = AppStore(projects: [
             ProjectSummary(
                 name: "NeoCode",
@@ -492,18 +521,8 @@ struct NeoCodeTests {
         #expect(store.projects[0].sessions[0].title == "Real Title")
     }
 
-    @Test func sessionSummaryOmitsPlaceholderTitlesWhenCreatingRemoteSessions() {
-        let draft = SessionSummary(id: "draft", title: "New session", lastUpdatedAt: .distantPast, isEphemeral: true)
-        let timestamped = SessionSummary(id: "draft-2", title: "New session - 2026-03-13T10:00:00Z", lastUpdatedAt: .distantPast, isEphemeral: true)
-        let renamed = SessionSummary(id: "draft-3", title: "Scratchpad", lastUpdatedAt: .distantPast, isEphemeral: true)
-
-        #expect(draft.requestedServerTitle == nil)
-        #expect(timestamped.requestedServerTitle == nil)
-        #expect(renamed.requestedServerTitle == "Scratchpad")
-    }
-
     @MainActor
-    @Test func appStoreInfersPlaceholderTitleFromFirstUserMessage() {
+    @Test func appStoreInfersPlaceholderTitleFromFirstUserMessage() async {
         let now = Date()
         let store = AppStore(projects: [
             ProjectSummary(
@@ -551,7 +570,7 @@ struct NeoCodeTests {
     }
 
     @MainActor
-    @Test func appStoreUsesExplicitSessionStatusOverTranscriptHeuristics() {
+    @Test func appStoreUsesExplicitSessionStatusOverTranscriptHeuristics() async {
         let store = AppStore(projects: [
             ProjectSummary(
                 name: "NeoCode",
@@ -678,7 +697,7 @@ struct NeoCodeTests {
     }
 
     @MainActor
-    @Test func chatMessageFileAttachmentRoundTripsThroughCodable() throws {
+    @Test func chatMessageFileAttachmentRoundTripsThroughCodable() async throws {
         let message = ChatMessage(
             id: "file_1",
             role: .user,
@@ -1078,7 +1097,7 @@ struct NeoCodeTests {
     }
 
     @MainActor
-    @Test func selectingProjectDoesNotAutoSelectFirstThread() {
+    @Test func selectingProjectDoesNotAutoSelectFirstThread() async {
         let firstProject = ProjectSummary(
             id: UUID(),
             name: "NeoCode",
@@ -1105,7 +1124,7 @@ struct NeoCodeTests {
     }
 
     @MainActor
-    @Test func chatMessageToolCallRoundTripsThroughCodable() throws {
+    @Test func chatMessageToolCallRoundTripsThroughCodable() async throws {
         let message = ChatMessage(
             id: "tool_1",
             role: .tool,
@@ -1156,22 +1175,6 @@ struct NeoCodeTests {
         )
 
         try await client.abortSession(sessionID: "ses_1")
-    }
-
-    @Test func runtimeCapsStartupOutputBufferToRecentTail() {
-        let existing = String(repeating: "a", count: 8)
-        let chunk = String(repeating: "b", count: 8)
-
-        let result = OpenCodeRuntime.cappedOutputBuffer(existing, appending: chunk, limit: 10)
-
-        #expect(result.count == 10)
-        #expect(result == "aabbbbbbbb")
-    }
-
-    @Test func runtimeUsesTrimmedRecentOutputSnippet() {
-        let snippet = OpenCodeRuntime.recentOutputSnippet(from: "\n\n  hello world  \n", limit: 5)
-
-        #expect(snippet == "world")
     }
 
     @MainActor
@@ -1300,38 +1303,39 @@ struct NeoCodeTests {
         #expect(payload.answers == [["Yes"], ["Type your own answer"]])
     }
 
-    private func decode<T: Decodable>(_ json: String) throws -> T {
-        try JSONDecoder.opencode.decode(T.self, from: Data(json.utf8))
+}
+
+private func decode<T: Decodable>(_ json: String) throws -> T {
+    try JSONDecoder.opencode.decode(T.self, from: Data(json.utf8))
+}
+
+private func requestBodyData(from request: URLRequest) throws -> Data? {
+    if let body = request.httpBody {
+        return body
     }
 
-    private func requestBodyData(from request: URLRequest) throws -> Data? {
-        if let body = request.httpBody {
-            return body
-        }
-
-        guard let stream = request.httpBodyStream else {
-            return nil
-        }
-
-        stream.open()
-        defer { stream.close() }
-
-        var data = Data()
-        var buffer = [UInt8](repeating: 0, count: 1024)
-
-        while stream.hasBytesAvailable {
-            let readCount = stream.read(&buffer, maxLength: buffer.count)
-            if readCount < 0 {
-                throw stream.streamError ?? URLError(.cannotDecodeRawData)
-            }
-            if readCount == 0 {
-                break
-            }
-            data.append(buffer, count: readCount)
-        }
-
-        return data
+    guard let stream = request.httpBodyStream else {
+        return nil
     }
+
+    stream.open()
+    defer { stream.close() }
+
+    var data = Data()
+    var buffer = [UInt8](repeating: 0, count: 1024)
+
+    while stream.hasBytesAvailable {
+        let readCount = stream.read(&buffer, maxLength: buffer.count)
+        if readCount < 0 {
+            throw stream.streamError ?? URLError(.cannotDecodeRawData)
+        }
+        if readCount == 0 {
+            break
+        }
+        data.append(buffer, count: readCount)
+    }
+
+    return data
 }
 
 private struct QuestionReplyPayload: Decodable {
