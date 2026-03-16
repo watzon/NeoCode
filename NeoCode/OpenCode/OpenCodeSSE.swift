@@ -9,7 +9,7 @@ struct OpenCodeSSEParser {
     private var currentEvent: String?
     private var currentData: [String] = []
 
-    mutating func ingest(line: String) -> OpenCodeSSEFrame? {
+    nonisolated mutating func ingest(line: String) -> OpenCodeSSEFrame? {
         if line.isEmpty {
             return flush()
         }
@@ -41,7 +41,7 @@ struct OpenCodeSSEParser {
         return nil
     }
 
-    mutating func flush() -> OpenCodeSSEFrame? {
+    nonisolated mutating func flush() -> OpenCodeSSEFrame? {
         guard !currentData.isEmpty || currentEvent != nil else { return nil }
         let frame = OpenCodeSSEFrame(event: currentEvent, data: currentData.joined(separator: "\n"))
         currentEvent = nil

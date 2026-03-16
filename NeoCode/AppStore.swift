@@ -145,6 +145,7 @@ final class AppStore {
     }
 
     private var composerOptionsProjectPath: String?
+    private var cachedModelsByProjectPath: [String: [ComposerModelOption]] = [:]
     private var cachedCommandsByProjectPath: [String: [OpenCodeCommand]] = [:]
     private let runtimeIdleTTL: Duration = .seconds(60)
     private let gitRefreshFallbackInterval: Duration = .seconds(90)
@@ -166,6 +167,7 @@ final class AppStore {
     private var streamingRecoveryTasks: [String: Task<Void, Never>] = [:]
     private var transcriptStateBySessionID: [String: SessionTranscriptState] = [:]
     private var messageRoles: [String: ChatMessage.Role] = [:]
+    private var messageInfosBySessionID: [String: [String: OpenCodeMessageInfo]] = [:]
     private var liveSessionStatuses: [String: OpenCodeSessionActivity] = [:]
     private var pendingPermissionsBySession: [String: [OpenCodePermissionRequest]] = [:]
     private var pendingQuestionsBySession: [String: [OpenCodeQuestionRequest]] = [:]
@@ -289,6 +291,11 @@ final class AppStore {
     func transcriptRevisionToken(for sessionID: String?) -> Int {
         guard let sessionID else { return 0 }
         return transcriptStateBySessionID[sessionID]?.revision ?? 0
+    }
+
+    func sessionStats(for sessionID: String?) -> SessionStatsSnapshot? {
+        guard let sessionID else { return nil }
+        return session(for: sessionID)?.stats
     }
 
     func sessionSummary(for sessionID: String) -> SessionSummary? {
@@ -432,6 +439,7 @@ final class AppStore {
         guard projects.contains(where: { $0.id == destinationProjectID }) else { return }
         selectedProjectID = destinationProjectID
         if let projectPath = projectPath(for: destinationProjectID) {
+            availableModels = cachedModelsByProjectPath[projectPath] ?? availableModels
             availableCommands = cachedCommandsByProjectPath[projectPath] ?? []
         }
         if let selectedSessionID,
@@ -506,6 +514,7 @@ final class AppStore {
         }
 
         scheduleGitRefreshLoop(for: project.path)
+        availableModels = cachedModelsByProjectPath[project.path] ?? availableModels
         availableCommands = cachedCommandsByProjectPath[project.path] ?? []
         _ = await connectProject(project.id, using: runtime, includeComposerOptions: true)
         reevaluateRuntimeRetention(using: runtime)
@@ -705,6 +714,10 @@ final class AppStore {
                 dashboardSnapshot = plan.snapshot
                 refreshWork.append(contentsOf: plan.changedSessions.map { (project, descriptor, $0) })
             } catch {
+                guard !Task.isCancelled, !(error is CancellationError) else {
+                    stopDashboardOnlyRuntimes(services, runtime: runtime)
+                    return
+                }
                 logger.error("Failed to scan dashboard sessions for project \(project.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
                 failedProjects.append(project.name)
             }
@@ -771,6 +784,10 @@ final class AppStore {
                     let messages = try await runtimeService.service.listMessages(sessionID: item.session.id)
                     ingestions.append(DashboardSessionIngress(project: item.descriptor, session: item.session, messages: messages))
                 } catch {
+                    guard !Task.isCancelled, !(error is CancellationError) else {
+                        stopDashboardOnlyRuntimes(services, runtime: runtime)
+                        return
+                    }
                     logger.error("Failed to fetch dashboard messages for session \(item.session.id, privacy: .public): \(error.localizedDescription, privacy: .public)")
                 }
             }
@@ -799,6 +816,13 @@ final class AppStore {
 
     private func stopDashboardOnlyRuntimes(_ services: [ProjectSummary.ID: DashboardRuntimeService], runtime: OpenCodeRuntime) {
         for (projectID, runtimeService) in services where runtimeService.shouldStopAfterUse {
+            guard !shouldKeepRuntimeAlive(for: projectID),
+                  liveServices[projectID] == nil,
+                  eventTasks[projectID] == nil
+            else {
+                continue
+            }
+
             runtime.stop(projectPath: projectPath(for: projectID))
         }
     }
@@ -1779,6 +1803,10 @@ final class AppStore {
         case .messageUpdated(let info):
             messageRoles[info.id] = info.chatRole
             if let sessionID = info.sessionID {
+                var infos = messageInfosBySessionID[sessionID] ?? [:]
+                infos[info.id] = info
+                messageInfosBySessionID[sessionID] = infos
+                refreshSessionStats(sessionID: sessionID, projectID: projectID)
                 touchSession(sessionID: sessionID, projectID: projectID, updatedAt: info.updatedAt ?? info.createdAt ?? Date())
             }
         case .messagePartUpdated(let part):
@@ -1939,12 +1967,14 @@ final class AppStore {
                             providerID: provider.id,
                             modelID: $0.id,
                             title: $0.name,
+                            contextWindow: $0.limit?.context,
                             variants: ($0.variants?.keys.sorted()) ?? []
                         )
                     }
                 }
                 .sorted { $0.title < $1.title }
 
+            cachedModelsByProjectPath[projectPath] = models
             availableModels = models
             if selectedModelID == nil || !models.contains(where: { $0.id == selectedModelID }) {
                 selectedModelID = models.first?.id
@@ -1954,10 +1984,17 @@ final class AppStore {
                models.contains(where: { $0.id == selectedModelID }) {
                 preferredFallbackModelID = selectedModelID
             }
+            if let projectID = projects.first(where: { $0.path == projectPath })?.id {
+                for sessionID in projectSessionIDs(for: projectID) {
+                    refreshSessionStats(sessionID: sessionID, projectID: projectID)
+                }
+            }
         case .failure(let message):
             logger.error("Failed to load composer models: \(message, privacy: .public)")
-            availableModels = []
-            selectedModelID = nil
+            availableModels = cachedModelsByProjectPath[projectPath] ?? []
+            if selectedModelID == nil || !availableModels.contains(where: { $0.id == selectedModelID }) {
+                selectedModelID = availableModels.first?.id
+            }
         }
 
         switch agentsResult {
@@ -2436,7 +2473,14 @@ final class AppStore {
     }
 
     private func seedComposerDefaults() {
-        let fallback = ComposerModelOption(id: "openai/gpt-5.4", providerID: "openai", modelID: "gpt-5.4", title: "GPT-5.4", variants: ["high", "medium", "low"])
+        let fallback = ComposerModelOption(
+            id: "openai/gpt-5.4",
+            providerID: "openai",
+            modelID: "gpt-5.4",
+            title: "GPT-5.4",
+            contextWindow: nil,
+            variants: ["high", "medium", "low"]
+        )
         availableModels = [fallback]
         selectedModelID = fallback.id
         availableAgents = ["Builder"]
@@ -2518,10 +2562,12 @@ final class AppStore {
             let messages = try await service.listMessages(sessionID: sessionID)
             guard !Task.isCancelled else { return }
             let transcript = ChatMessage.makeTranscript(from: messages)
+            messageInfosBySessionID[sessionID] = Dictionary(uniqueKeysWithValues: messages.map { ($0.info.id, $0.info) })
             for message in messages {
                 messageRoles[message.info.id] = message.info.chatRole
             }
             replaceTranscript(in: sessionID, projectID: projectID, with: transcript)
+            refreshSessionStats(sessionID: sessionID, projectID: projectID)
             refreshSessionStatus(sessionID: sessionID, projectID: projectID)
             if !keepsCurrentUI {
                 lastError = nil
@@ -3025,9 +3071,13 @@ final class AppStore {
         seedTranscript(session.transcript, for: session.id)
         let transcript = transcript(for: session.id)
         if let sessionIndex = projects[projectIndex].sessions.firstIndex(where: { $0.id == session.id }) {
+            let existing = projects[projectIndex].sessions[sessionIndex]
             var updated = session
             updated.transcript = []
             updated = updated.applyingInferredTitle(from: transcript)
+            if updated.stats == nil {
+                updated.stats = existing.stats
+            }
             projects[projectIndex].sessions[sessionIndex] = updated
             projects[projectIndex].sessions[sessionIndex].status = resolvedSessionStatus(
                 sessionID: session.id,
@@ -3593,6 +3643,22 @@ final class AppStore {
         return projects[indices.project].sessions[indices.session]
     }
 
+    private func refreshSessionStats(sessionID: String, projectID: ProjectSummary.ID) {
+        guard let indices = indices(for: sessionID, projectID: projectID),
+              let infos = messageInfosBySessionID[sessionID]
+        else {
+            return
+        }
+
+        let projectPath = projects[indices.project].path
+        let models = cachedModelsByProjectPath[projectPath] ?? availableModels
+        projects[indices.project].sessions[indices.session].stats = SessionStatsSnapshot.make(
+            sessionID: sessionID,
+            messageInfos: Array(infos.values),
+            models: models
+        )
+    }
+
     private func indices(for sessionID: String, projectID: ProjectSummary.ID) -> (project: Int, session: Int)? {
         guard let projectIndex = projects.firstIndex(where: { $0.id == projectID }),
               let sessionIndex = projects[projectIndex].sessions.firstIndex(where: { $0.id == sessionID })
@@ -3632,6 +3698,7 @@ final class AppStore {
 
     private func removeTranscript(for sessionID: String) {
         transcriptStateBySessionID.removeValue(forKey: sessionID)
+        messageInfosBySessionID.removeValue(forKey: sessionID)
     }
 
     private func moveTranscript(from sourceSessionID: String, to destinationSessionID: String) {
@@ -3642,6 +3709,9 @@ final class AppStore {
         }
 
         transcriptStateBySessionID[destinationSessionID] = existingState
+        if let infos = messageInfosBySessionID.removeValue(forKey: sourceSessionID) {
+            messageInfosBySessionID[destinationSessionID] = infos
+        }
     }
 
     @discardableResult
@@ -3912,6 +3982,9 @@ final class AppStore {
         let existing = projects[projectIndex].sessions[sessionIndex]
         var replacement = session.applyingInferredTitle(from: existingTranscript)
         replacement.status = existing.status
+        if replacement.stats == nil {
+            replacement.stats = existing.stats
+        }
         replacement.transcript = []
         replacement.lastUpdatedAt = max(existing.lastUpdatedAt, session.lastUpdatedAt)
         projects[projectIndex].sessions[sessionIndex] = replacement

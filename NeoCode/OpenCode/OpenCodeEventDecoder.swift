@@ -45,7 +45,7 @@ enum JSONValue: Codable, Equatable, Hashable, Sendable {
         }
     }
 
-    var prettyPrinted: String {
+    nonisolated var prettyPrinted: String {
         switch self {
         case .string(let value): return value
         case .number(let value): return String(value)
@@ -60,12 +60,12 @@ enum JSONValue: Codable, Equatable, Hashable, Sendable {
         }
     }
 
-    var displayString: String? {
+    nonisolated var displayString: String? {
         guard isMeaningfulDisplayValue else { return nil }
         return prettyPrinted
     }
 
-    private var isMeaningfulDisplayValue: Bool {
+    private nonisolated var isMeaningfulDisplayValue: Bool {
         switch self {
         case .null:
             return false
@@ -80,7 +80,7 @@ enum JSONValue: Codable, Equatable, Hashable, Sendable {
         }
     }
 
-    private var foundationValue: Any {
+    private nonisolated var foundationValue: Any {
         switch self {
         case .string(let value): value
         case .number(let value): value
@@ -91,7 +91,7 @@ enum JSONValue: Codable, Equatable, Hashable, Sendable {
         }
     }
 
-    private static func stringify(_ payload: Any) -> String {
+    private static nonisolated func stringify(_ payload: Any) -> String {
         guard JSONSerialization.isValidJSONObject(payload),
               let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted]),
               let string = String(data: data, encoding: .utf8)

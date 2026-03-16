@@ -49,6 +49,7 @@ struct SessionSummary: Codable, Identifiable, Hashable {
     var title: String
     var lastUpdatedAt: Date
     var status: SessionStatus
+    var stats: SessionStatsSnapshot?
     var transcript: [ChatMessage]
     var isEphemeral: Bool
 
@@ -58,6 +59,7 @@ struct SessionSummary: Codable, Identifiable, Hashable {
         title: String,
         lastUpdatedAt: Date,
         status: SessionStatus = .idle,
+        stats: SessionStatsSnapshot? = nil,
         transcript: [ChatMessage] = [],
         isEphemeral: Bool = false
     ) {
@@ -66,6 +68,7 @@ struct SessionSummary: Codable, Identifiable, Hashable {
         self.title = title
         self.lastUpdatedAt = lastUpdatedAt
         self.status = status
+        self.stats = stats
         self.transcript = transcript
         self.isEphemeral = isEphemeral
     }
@@ -77,6 +80,7 @@ struct SessionSummary: Codable, Identifiable, Hashable {
             title: session.title?.isEmpty == false ? session.title! : fallbackTitle,
             lastUpdatedAt: session.updatedAt,
             status: .idle,
+            stats: nil,
             transcript: [],
             isEphemeral: false
         )
@@ -145,14 +149,14 @@ struct ChatAttachment: Codable, Hashable {
     let url: String
     let sourcePath: String?
 
-    init(filename: String?, mimeType: String, url: String, sourcePath: String? = nil) {
+    nonisolated init(filename: String?, mimeType: String, url: String, sourcePath: String? = nil) {
         self.filename = filename
         self.mimeType = mimeType
         self.url = url
         self.sourcePath = sourcePath
     }
 
-    init(attachment: ComposerAttachment) {
+    nonisolated init(attachment: ComposerAttachment) {
         self.init(
             filename: attachment.name,
             mimeType: attachment.mimeType,
@@ -161,11 +165,11 @@ struct ChatAttachment: Codable, Hashable {
         )
     }
 
-    var isImage: Bool {
+    nonisolated var isImage: Bool {
         mimeType.lowercased().hasPrefix("image/")
     }
 
-    var displayTitle: String {
+    nonisolated var displayTitle: String {
         if let filename, !filename.isEmpty {
             return filename
         }
@@ -188,14 +192,14 @@ struct ChatAttachment: Codable, Hashable {
         return "Attachment"
     }
 
-    var displaySubtitle: String? {
+    nonisolated var displaySubtitle: String? {
         if let sourcePath, !sourcePath.isEmpty {
             return sourcePath
         }
         return mimeType.isEmpty ? nil : mimeType
     }
 
-    var optimisticKey: String {
+    nonisolated var optimisticKey: String {
         url
     }
 }
@@ -222,7 +226,7 @@ struct ChatMessage: Codable, Identifiable, Hashable {
         let output: JSONValue?
         let error: String?
 
-        init(
+        nonisolated init(
             name: String,
             status: ToolCallStatus,
             detail: String? = nil,
@@ -242,6 +246,7 @@ struct ChatMessage: Codable, Identifiable, Hashable {
     enum Kind: Codable, Hashable {
         case plain
         case toolCall(ToolCall)
+        case compactionMarker
 
         private enum CodingKeys: String, CodingKey {
             case type
@@ -256,6 +261,7 @@ struct ChatMessage: Codable, Identifiable, Hashable {
         private enum PayloadType: String, Codable {
             case plain
             case toolCall
+            case compactionMarker
         }
 
         init(from decoder: Decoder) throws {
@@ -274,6 +280,8 @@ struct ChatMessage: Codable, Identifiable, Hashable {
                         error: try container.decodeIfPresent(String.self, forKey: .error)
                     )
                 )
+            case .compactionMarker:
+                self = .compactionMarker
             }
         }
 
@@ -290,12 +298,19 @@ struct ChatMessage: Codable, Identifiable, Hashable {
                 try container.encodeIfPresent(toolCall.input, forKey: .input)
                 try container.encodeIfPresent(toolCall.output, forKey: .output)
                 try container.encodeIfPresent(toolCall.error, forKey: .error)
+            case .compactionMarker:
+                try container.encode(PayloadType.compactionMarker, forKey: .type)
             }
         }
 
         var toolCall: ToolCall? {
             guard case .toolCall(let toolCall) = self else { return nil }
             return toolCall
+        }
+
+        var isCompactionMarker: Bool {
+            if case .compactionMarker = self { return true }
+            return false
         }
     }
 
@@ -370,6 +385,102 @@ struct ChatMessage: Codable, Identifiable, Hashable {
                 )
             }
         }
+    }
+}
+
+struct SessionStatsSnapshot: Codable, Hashable, Sendable {
+    let sessionID: String
+    let providerID: String?
+    let modelID: String?
+    let modelTitle: String?
+    let contextWindow: Int?
+    let totalContextTokens: Int
+    let inputTokens: Int
+    let outputTokens: Int
+    let reasoningTokens: Int
+    let cacheReadTokens: Int
+    let cacheWriteTokens: Int
+    let totalCost: Double
+    let lastActivityAt: Date?
+
+    var remainingContextTokens: Int? {
+        guard let contextWindow else { return nil }
+        return max(contextWindow - totalContextTokens, 0)
+    }
+
+    var usedContextFraction: Double? {
+        guard let contextWindow, contextWindow > 0 else { return nil }
+        return min(max(Double(totalContextTokens) / Double(contextWindow), 0), 1)
+    }
+
+    var remainingContextFraction: Double? {
+        guard let usedContextFraction else { return nil }
+        return max(1 - usedContextFraction, 0)
+    }
+
+    var percentUsed: Int? {
+        guard let usedContextFraction else { return nil }
+        return Int((usedContextFraction * 100).rounded())
+    }
+
+    var percentRemaining: Int? {
+        guard let remainingContextFraction else { return nil }
+        return Int((remainingContextFraction * 100).rounded())
+    }
+
+    var modelDisplayName: String {
+        modelTitle ?? modelID ?? "Unknown model"
+    }
+
+    static func make(
+        sessionID: String,
+        messageInfos: [OpenCodeMessageInfo],
+        models: [ComposerModelOption]
+    ) -> SessionStatsSnapshot? {
+        let assistantInfos = messageInfos
+            .filter { $0.role == "assistant" }
+            .sorted {
+                ($0.updatedAt ?? $0.createdAt ?? .distantPast) < ($1.updatedAt ?? $1.createdAt ?? .distantPast)
+            }
+
+        guard !assistantInfos.isEmpty else { return nil }
+
+        let usageInfo = assistantInfos.last { info in
+            guard let tokens = info.tokens else { return false }
+            let total = tokens.total ?? tokens.input + tokens.output + tokens.reasoning + (tokens.cache?.read ?? 0) + (tokens.cache?.write ?? 0)
+            return total > 0
+        }
+
+        let referenceInfo = usageInfo ?? assistantInfos.last
+        guard let referenceInfo else { return nil }
+
+        let tokens = referenceInfo.tokens
+        let inputTokens = tokens?.input ?? 0
+        let outputTokens = tokens?.output ?? 0
+        let reasoningTokens = tokens?.reasoning ?? 0
+        let cacheReadTokens = tokens?.cache?.read ?? 0
+        let cacheWriteTokens = tokens?.cache?.write ?? 0
+        let totalContextTokens = tokens?.total ?? (inputTokens + outputTokens + reasoningTokens + cacheReadTokens + cacheWriteTokens)
+
+        let matchedModel = models.first {
+            $0.providerID == referenceInfo.providerID && $0.modelID == referenceInfo.modelID
+        }
+
+        return SessionStatsSnapshot(
+            sessionID: sessionID,
+            providerID: referenceInfo.providerID,
+            modelID: referenceInfo.modelID,
+            modelTitle: matchedModel?.title,
+            contextWindow: matchedModel?.contextWindow,
+            totalContextTokens: totalContextTokens,
+            inputTokens: inputTokens,
+            outputTokens: outputTokens,
+            reasoningTokens: reasoningTokens,
+            cacheReadTokens: cacheReadTokens,
+            cacheWriteTokens: cacheWriteTokens,
+            totalCost: assistantInfos.reduce(0) { $0 + ($1.cost ?? 0) },
+            lastActivityAt: messageInfos.compactMap { $0.updatedAt ?? $0.createdAt }.max()
+        )
     }
 }
 

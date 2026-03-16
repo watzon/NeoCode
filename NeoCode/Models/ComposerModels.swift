@@ -24,11 +24,11 @@ struct ComposerAttachment: Identifiable, Hashable {
         self.content = content
     }
 
-    var isImage: Bool {
+    nonisolated var isImage: Bool {
         mimeType.lowercased().hasPrefix("image/")
     }
 
-    var requestURL: String {
+    nonisolated var requestURL: String {
         switch content {
         case .file(let path):
             return URL(fileURLWithPath: path).absoluteString
@@ -37,11 +37,11 @@ struct ComposerAttachment: Identifiable, Hashable {
         }
     }
 
-    var deduplicationKey: String {
+    nonisolated var deduplicationKey: String {
         requestURL
     }
 
-    var filePath: String? {
+    nonisolated var filePath: String? {
         guard case .file(let path) = content else { return nil }
         return path
     }
@@ -198,6 +198,7 @@ struct ComposerModelOption: Identifiable, Hashable {
     let providerID: String
     let modelID: String
     let title: String
+    let contextWindow: Int?
     let variants: [String]
 }
 
@@ -308,12 +309,12 @@ struct ComposerSlashCommand: Identifiable, Hashable {
 }
 
 extension String {
-    var nonEmptyTrimmed: String? {
+    nonisolated var nonEmptyTrimmed: String? {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    var thinkingLevelSortKey: Int {
+    nonisolated var thinkingLevelSortKey: Int {
         switch lowercased() {
         case "none": 0
         case "low": 1

@@ -72,6 +72,24 @@ struct SessionHeaderView: View {
                             }
                         )
                     }
+
+                    Rectangle()
+                        .fill(NeoCodeTheme.line)
+                        .frame(width: 1, height: 18)
+                        .padding(.horizontal, 2)
+
+                    SessionStatsMenuButton(
+                        stats: store.sessionStats(for: session.id),
+                        isMenuOpen: openMenu == .sessionStats,
+                        onToggleMenu: {
+                            openMenu = openMenu == .sessionStats ? nil : .sessionStats
+                        },
+                        onDismissMenu: {
+                            if openMenu == .sessionStats {
+                                openMenu = nil
+                            }
+                        }
+                    )
                 }
             }
         }
@@ -104,6 +122,7 @@ struct SessionHeaderView: View {
     private enum HeaderMenu {
         case workspaceTools
         case gitActions
+        case sessionStats
     }
 
     private var sessionMenuButton: some View {
@@ -304,6 +323,197 @@ private struct GitActionsSplitButton: View {
                 }
             }
         )
+    }
+}
+
+private struct SessionStatsMenuButton: View {
+    let stats: SessionStatsSnapshot?
+    let isMenuOpen: Bool
+    let onToggleMenu: () -> Void
+    let onDismissMenu: () -> Void
+
+    private let controlSize: CGFloat = 32
+    private let visualSize: CGFloat = 28
+    private let ringLineWidth: CGFloat = 3
+
+    var body: some View {
+        Button(action: onToggleMenu) {
+            ZStack {
+                Circle()
+                    .stroke(baseRingColor, style: StrokeStyle(lineWidth: ringLineWidth))
+
+                if let progress = ringProgress {
+                    Circle()
+                        .trim(from: 0, to: progress)
+                        .stroke(ringColor, style: StrokeStyle(lineWidth: ringLineWidth, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                } else {
+                    Circle()
+                        .stroke(NeoCodeTheme.textMuted, style: StrokeStyle(lineWidth: ringLineWidth, lineCap: .round, dash: [2.5, 3.5]))
+                        .opacity(0.6)
+                }
+
+                Circle()
+                    .fill(centerDotColor)
+                    .frame(width: 6, height: 6)
+            }
+            .frame(width: visualSize, height: visualSize)
+            .background(
+                Circle()
+                    .fill(isMenuOpen ? NeoCodeTheme.panelSoft : NeoCodeTheme.panelRaised)
+                    .overlay(
+                        Circle()
+                            .stroke(isMenuOpen ? NeoCodeTheme.lineStrong : NeoCodeTheme.line, lineWidth: 1)
+                    )
+            )
+            .frame(width: controlSize, height: controlSize)
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help(helpText)
+        .accessibilityLabel("Session stats")
+        .accessibilityValue(accessibilityValue)
+        .background {
+            AnchoredFloatingPanelPresenter(isPresented: isMenuOpen, direction: .down, onDismiss: onDismissMenu) {
+                SessionStatsDropdown(stats: stats)
+            }
+        }
+        .zIndex(isMenuOpen ? 10 : 0)
+    }
+
+    private var ringProgress: CGFloat? {
+        guard let remaining = stats?.remainingContextFraction else { return nil }
+        if remaining <= 0 { return 0.001 }
+        return CGFloat(remaining)
+    }
+
+    private var ringColor: Color {
+        guard let remaining = stats?.remainingContextFraction else { return NeoCodeTheme.textMuted }
+        switch remaining {
+        case 0.5...:
+            return NeoCodeTheme.success
+        case 0.2...:
+            return NeoCodeTheme.accent
+        default:
+            return NeoCodeTheme.warning
+        }
+    }
+
+    private var baseRingColor: Color {
+        isMenuOpen ? NeoCodeTheme.lineStrong : NeoCodeTheme.line
+    }
+
+    private var centerDotColor: Color {
+        stats == nil ? NeoCodeTheme.textMuted : ringColor
+    }
+
+    private var helpText: String {
+        guard let stats else { return "Session stats unavailable" }
+        if let remaining = stats.percentRemaining {
+            return "\(remaining)% context remaining"
+        }
+        return "Session stats"
+    }
+
+    private var accessibilityValue: String {
+        guard let stats else { return "Unavailable" }
+        if let remaining = stats.percentRemaining {
+            return "\(remaining) percent context remaining"
+        }
+        return "Context limit unavailable"
+    }
+}
+
+private struct SessionStatsDropdown: View {
+    let stats: SessionStatsSnapshot?
+
+    var body: some View {
+        DropdownMenuSurface(width: 260) {
+            VStack(alignment: .leading, spacing: 12) {
+                if let stats {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Session Stats")
+                            .font(.neoAction)
+                            .foregroundStyle(NeoCodeTheme.textPrimary)
+
+                        Text(contextSummary(for: stats))
+                            .font(.neoMonoSmall)
+                            .foregroundStyle(NeoCodeTheme.textSecondary)
+                    }
+
+                    statRow("Context used", value: count(stats.totalContextTokens))
+                    statRow("Context limit", value: optionalCount(stats.contextWindow))
+                    statRow("Context remaining", value: optionalCount(stats.remainingContextTokens))
+                    statRow("Usage", value: optionalPercent(stats.percentUsed))
+                    statRow("Total tokens", value: count(stats.totalContextTokens))
+                    statRow("Input", value: count(stats.inputTokens))
+                    statRow("Output", value: count(stats.outputTokens))
+                    statRow("Reasoning", value: count(stats.reasoningTokens))
+                    statRow("Cache", value: "\(count(stats.cacheReadTokens)) / \(count(stats.cacheWriteTokens))")
+                    statRow("Cost", value: currency(stats.totalCost))
+                    statRow("Provider", value: stats.providerID ?? "-")
+                    statRow("Model", value: stats.modelDisplayName)
+                    statRow("Last activity", value: time(stats.lastActivityAt))
+                } else {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Session Stats")
+                            .font(.neoAction)
+                            .foregroundStyle(NeoCodeTheme.textPrimary)
+
+                        Text("Stats will appear after the session records assistant usage.")
+                            .font(.neoBody)
+                            .foregroundStyle(NeoCodeTheme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .padding(4)
+        }
+    }
+
+    @ViewBuilder
+    private func statRow(_ label: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(label)
+                .font(.neoMeta)
+                .foregroundStyle(NeoCodeTheme.textSecondary)
+
+            Spacer(minLength: 12)
+
+            Text(value)
+                .font(.neoMonoSmall)
+                .foregroundStyle(NeoCodeTheme.textPrimary)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+
+    private func contextSummary(for stats: SessionStatsSnapshot) -> String {
+        let remaining = optionalCount(stats.remainingContextTokens)
+        let usage = optionalPercent(stats.percentUsed)
+        return "\(remaining) remaining - \(usage) used"
+    }
+
+    private func count(_ value: Int) -> String {
+        value.formatted(.number.grouping(.automatic))
+    }
+
+    private func optionalCount(_ value: Int?) -> String {
+        guard let value else { return "-" }
+        return count(value)
+    }
+
+    private func optionalPercent(_ value: Int?) -> String {
+        guard let value else { return "-" }
+        return "\(value)%"
+    }
+
+    private func currency(_ value: Double) -> String {
+        value.formatted(.currency(code: "USD"))
+    }
+
+    private func time(_ value: Date?) -> String {
+        guard let value else { return "-" }
+        return value.formatted(date: .omitted, time: .shortened)
     }
 }
 

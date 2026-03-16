@@ -162,6 +162,201 @@ struct NeoCodeCoreTests {
         #expect(message.info.tokens?.cache?.write == 8)
     }
 
+    @Test func decodesUserMessageSummaryObjectsWithoutFailing() throws {
+        let envelopes: [OpenCodeMessageEnvelope] = try decode(
+            """
+            [
+              {
+                "info": {
+                  "id": "msg_user_summary",
+                  "sessionID": "ses_summary",
+                  "role": "user",
+                  "summary": {
+                    "title": "Context snapshot",
+                    "body": "What happened so far",
+                    "diffs": []
+                  },
+                  "agent": "builder",
+                  "time": {
+                    "created": 1741860000
+                  }
+                },
+                "parts": [
+                  {
+                    "id": "part_text",
+                    "sessionID": "ses_summary",
+                    "messageID": "msg_user_summary",
+                    "type": "text",
+                    "text": "Please continue from here.",
+                    "time": {
+                      "created": 1741860000
+                    }
+                  }
+                ]
+              }
+            ]
+            """
+        )
+
+        #expect(envelopes.count == 1)
+        #expect(envelopes[0].info.isSummaryMessage == false)
+        #expect(envelopes[0].parts.first?.text == "Please continue from here.")
+    }
+
+    @Test func buildsTranscriptWithCompactionMarker() throws {
+        let envelopes: [OpenCodeMessageEnvelope] = try decode(
+            """
+            [
+              {
+                "info": {
+                  "id": "msg_compact_request",
+                  "sessionID": "ses_usage",
+                  "role": "user",
+                  "agent": "builder",
+                  "time": {
+                    "created": "2026-03-13T10:07:00Z"
+                  }
+                },
+                "parts": [
+                  {
+                    "id": "part_compaction",
+                    "sessionID": "ses_usage",
+                    "messageID": "msg_compact_request",
+                    "type": "compaction",
+                    "time": {
+                      "created": "2026-03-13T10:07:00Z"
+                    }
+                  }
+                ]
+              },
+              {
+                "info": {
+                  "id": "msg_compact_summary",
+                  "sessionID": "ses_usage",
+                  "role": "assistant",
+                  "summary": true,
+                  "agent": "compaction",
+                  "providerID": "openai",
+                  "modelID": "gpt-5.4",
+                  "time": {
+                    "created": "2026-03-13T10:07:10Z",
+                    "completed": "2026-03-13T10:07:12Z"
+                  }
+                },
+                "parts": [
+                  {
+                    "id": "part_summary",
+                    "sessionID": "ses_usage",
+                    "messageID": "msg_compact_summary",
+                    "type": "text",
+                    "text": "## Goal\\nContinue the feature work.",
+                    "time": {
+                      "created": "2026-03-13T10:07:10Z",
+                      "completed": "2026-03-13T10:07:12Z"
+                    }
+                  }
+                ]
+              }
+            ]
+            """
+        )
+
+        let transcript = ChatMessage.makeTranscript(from: envelopes)
+        #expect(transcript.count == 2)
+        #expect(transcript[0].role == .system)
+        #expect(transcript[0].kind.isCompactionMarker)
+        #expect(transcript[1].role == .assistant)
+        #expect(transcript[1].text.contains("Continue the feature work"))
+    }
+
+    @Test func computesSessionStatsFromLatestAssistantUsage() throws {
+        let envelopes: [OpenCodeMessageEnvelope] = try decode(
+            """
+            [
+              {
+                "info": {
+                  "id": "msg_first",
+                  "sessionID": "ses_usage",
+                  "role": "assistant",
+                  "agent": "builder",
+                  "providerID": "openai",
+                  "modelID": "gpt-5.4",
+                  "cost": 0.4,
+                  "tokens": {
+                    "total": 600,
+                    "input": 200,
+                    "output": 300,
+                    "reasoning": 50,
+                    "cache": {
+                      "read": 30,
+                      "write": 20
+                    }
+                  },
+                  "time": {
+                    "created": "2026-03-13T10:06:00Z",
+                    "completed": "2026-03-13T10:06:10Z"
+                  }
+                },
+                "parts": []
+              },
+              {
+                "info": {
+                  "id": "msg_latest",
+                  "sessionID": "ses_usage",
+                  "role": "assistant",
+                  "agent": "builder",
+                  "providerID": "openai",
+                  "modelID": "gpt-5.4",
+                  "cost": 0.6,
+                  "tokens": {
+                    "total": 1200,
+                    "input": 500,
+                    "output": 450,
+                    "reasoning": 100,
+                    "cache": {
+                      "read": 100,
+                      "write": 50
+                    }
+                  },
+                  "time": {
+                    "created": "2026-03-13T10:08:00Z",
+                    "completed": "2026-03-13T10:08:15Z"
+                  }
+                },
+                "parts": []
+              }
+            ]
+            """
+        )
+
+        let stats = SessionStatsSnapshot.make(
+            sessionID: "ses_usage",
+            messageInfos: envelopes.map(\.info),
+            models: [
+                ComposerModelOption(
+                    id: "openai/gpt-5.4",
+                    providerID: "openai",
+                    modelID: "gpt-5.4",
+                    title: "GPT-5.4",
+                    contextWindow: 2000,
+                    variants: ["high"]
+                )
+            ]
+        )
+
+        let resolved = try #require(stats)
+        #expect(resolved.modelDisplayName == "GPT-5.4")
+        #expect(resolved.totalContextTokens == 1200)
+        #expect(resolved.remainingContextTokens == 800)
+        #expect(resolved.percentUsed == 60)
+        #expect(resolved.totalCost == 1.0)
+        #expect(resolved.inputTokens == 500)
+        #expect(resolved.outputTokens == 450)
+        #expect(resolved.reasoningTokens == 100)
+        #expect(resolved.cacheReadTokens == 100)
+        #expect(resolved.cacheWriteTokens == 50)
+    }
+
     @Test func parsesMultiLineSSEPayloadsBeforeFlushing() throws {
         var parser = OpenCodeSSEParser()
 
@@ -778,6 +973,48 @@ struct NeoCodeMainActorTests {
     }
 
     @MainActor
+    @Test func appStorePreservesSessionStatsWhenServerSessionUpdateArrives() async {
+        let snapshot = SessionStatsSnapshot(
+            sessionID: "ses_1",
+            providerID: "openai",
+            modelID: "gpt-5.4",
+            modelTitle: "GPT-5.4",
+            contextWindow: 200_000,
+            totalContextTokens: 40_000,
+            inputTokens: 20_000,
+            outputTokens: 15_000,
+            reasoningTokens: 3_000,
+            cacheReadTokens: 1_500,
+            cacheWriteTokens: 500,
+            totalCost: 1.25,
+            lastActivityAt: .now
+        )
+
+        let store = AppStore(projects: [
+            ProjectSummary(
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(id: "ses_1", title: "Existing", lastUpdatedAt: .distantPast, stats: snapshot),
+                ]
+            ),
+        ])
+
+        store.apply(
+            event: .sessionUpdated(
+                OpenCodeSession(
+                    id: "ses_1",
+                    title: "Existing",
+                    parentID: nil,
+                    time: OpenCodeTimeContainer(created: Date(), updated: Date(), completed: nil)
+                )
+            )
+        )
+
+        #expect(store.projects[0].sessions[0].stats == snapshot)
+    }
+
+    @MainActor
     @Test func appStoreInfersPlaceholderTitleFromFirstUserMessage() async {
         let now = Date()
         let store = AppStore(projects: [
@@ -797,6 +1034,7 @@ struct NeoCodeMainActorTests {
                     id: "msg_1",
                     sessionID: "ses_1",
                     role: "user",
+                    summary: nil,
                     agent: nil,
                     providerID: nil,
                     modelID: nil,
@@ -1111,6 +1349,7 @@ struct NeoCodeMainActorTests {
                     providerID: "openai",
                     modelID: "gpt-5.4",
                     title: "GPT-5.4",
+                    contextWindow: nil,
                     variants: ["high"]
                 ),
                 agentName: "builder",

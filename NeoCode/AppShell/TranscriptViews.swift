@@ -297,6 +297,36 @@ struct ToolCallClusterRowView: View {
     }
 }
 
+private struct CompactionMarkerRowView: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            Rectangle()
+                .fill(NeoCodeTheme.line)
+                .frame(maxWidth: .infinity, minHeight: 1, maxHeight: 1)
+
+            Text("Compaction")
+                .font(.neoMonoSmall)
+                .foregroundStyle(NeoCodeTheme.accent)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(NeoCodeTheme.panelRaised)
+                        .overlay(
+                            Capsule(style: .continuous)
+                                .stroke(NeoCodeTheme.lineStrong, lineWidth: 1)
+                        )
+                )
+
+            Rectangle()
+                .fill(NeoCodeTheme.line)
+                .frame(maxWidth: .infinity, minHeight: 1, maxHeight: 1)
+        }
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity)
+    }
+}
+
 struct MessageRowView: View {
     @Environment(AppStore.self) private var store
     @Environment(OpenCodeRuntime.self) private var runtime
@@ -316,7 +346,7 @@ struct MessageRowView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if showsMetadataHeader, message.role != .tool {
+            if showsMetadataHeader, !isCompactionMarker, message.role != .tool {
                 MessageMetadataHeaderView(
                     roleLabel: roleLabel,
                     timestamp: message.timestamp,
@@ -325,7 +355,9 @@ struct MessageRowView: View {
                 )
             }
 
-            if message.role == .tool {
+            if isCompactionMarker {
+                CompactionMarkerRowView()
+            } else if message.role == .tool {
                 EmptyView()
             } else if isThinking {
                 ThinkingRowView(message: message)
@@ -404,6 +436,10 @@ struct MessageRowView: View {
 
     private var isThinking: Bool {
         message.role == .assistant && message.emphasis == .strong
+    }
+
+    private var isCompactionMarker: Bool {
+        message.kind.isCompactionMarker
     }
 
     private var roleLabel: String {

@@ -12,9 +12,16 @@ struct OpenCodeProvider: Decodable, Equatable, Identifiable, Sendable {
 }
 
 struct OpenCodeModel: Decodable, Equatable, Sendable {
+    struct Limits: Decodable, Equatable, Sendable {
+        let context: Int
+        let input: Int?
+        let output: Int
+    }
+
     let id: String
     let providerID: String
     let name: String
+    let limit: Limits?
     let variants: [String: JSONValue]?
 }
 
@@ -175,6 +182,7 @@ struct OpenCodeMessageInfo: Decodable, Equatable, Sendable {
     let id: String
     let sessionID: String?
     let role: String
+    let summary: JSONValue?
     let agent: String?
     let providerID: String?
     let modelID: String?
@@ -184,6 +192,10 @@ struct OpenCodeMessageInfo: Decodable, Equatable, Sendable {
 
     nonisolated var createdAt: Date? { time?.created }
     nonisolated var updatedAt: Date? { time?.completed ?? time?.updated ?? time?.created }
+    nonisolated var isSummaryMessage: Bool {
+        guard case .bool(true) = summary else { return false }
+        return true
+    }
 
     nonisolated var chatRole: ChatMessage.Role {
         switch role {
@@ -289,6 +301,7 @@ struct OpenCodePart: Decodable, Equatable, Sendable {
         case tool
         case file
         case diff
+        case compaction
         case unknown
 
         init(from decoder: Decoder) throws {
@@ -333,13 +346,15 @@ struct OpenCodePart: Decodable, Equatable, Sendable {
             case .pending, .running, .none:
                 return true
             }
-        case .text, .reasoning, .file, .diff, .unknown:
+        case .text, .reasoning, .file, .diff, .compaction, .unknown:
             return time?.completed == nil
         }
     }
 
     nonisolated var shouldDisplay: Bool {
         switch type {
+        case .compaction:
+            return true
         case .file:
             return attachment != nil || !trimmedText.isEmpty
         case .text, .reasoning, .diff, .unknown:
@@ -360,6 +375,8 @@ struct OpenCodePart: Decodable, Equatable, Sendable {
         switch type {
         case .text, .reasoning:
             return text ?? ""
+        case .compaction:
+            return "Session compacted"
         case .tool:
             let name = tool ?? "tool"
             switch state?.status {
@@ -381,6 +398,8 @@ struct OpenCodePart: Decodable, Equatable, Sendable {
 
     nonisolated func chatRole(defaultRole: ChatMessage.Role) -> ChatMessage.Role {
         switch type {
+        case .compaction:
+            return .system
         case .tool:
             return .tool
         case .reasoning:
@@ -392,6 +411,8 @@ struct OpenCodePart: Decodable, Equatable, Sendable {
 
     nonisolated var chatEmphasis: ChatMessage.Emphasis {
         switch type {
+        case .compaction:
+            return .subtle
         case .reasoning:
             return .strong
         case .tool:
@@ -402,6 +423,9 @@ struct OpenCodePart: Decodable, Equatable, Sendable {
     }
 
     nonisolated var chatMessageKind: ChatMessage.Kind {
+        if type == .compaction {
+            return .compactionMarker
+        }
         if type == .tool {
             let status = ChatMessage.ToolCallStatus(rawValue: toolStatus?.rawValue ?? "running") ?? .running
             return .toolCall(
@@ -458,12 +482,12 @@ enum OpenCodeEvent: Equatable, Sendable {
     case messagePartDelta(OpenCodePartDelta)
     case ignored(String)
 
-    var isCreated: Bool {
+    nonisolated var isCreated: Bool {
         if case .sessionCreated = self { return true }
         return false
     }
 
-    var debugName: String {
+    nonisolated var debugName: String {
         switch self {
         case .connected:
             return "connected"
