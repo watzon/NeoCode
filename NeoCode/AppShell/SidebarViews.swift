@@ -18,13 +18,13 @@ struct AppSidebarView: View {
             )
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                LazyVStack(alignment: .leading, spacing: 18) {
                     ThreadsSectionHeader(onAddProject: { isPickingProject = true })
 
                     if store.projects.isEmpty {
                         EmptyProjectsSidebarView(onAddProject: { isPickingProject = true })
                     } else {
-                        VStack(alignment: .leading, spacing: 4) {
+                        LazyVStack(alignment: .leading, spacing: 4) {
                             ForEach(store.projects) { project in
                                 ProjectTreeNode(project: project)
                             }
@@ -173,37 +173,7 @@ struct ProjectTreeNode: View {
 
                 Spacer(minLength: 8)
 
-                if isHovering {
-                    Button {
-                        Task { await store.createSession(in: project.id, using: runtime) }
-                    } label: {
-                        Image(systemName: "square.and.pencil")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(NeoCodeTheme.textSecondary)
-                    }
-                    .buttonStyle(.plain)
-
-                    Menu {
-                        Button {
-                            Task { await store.refreshSessions(in: project.id, using: runtime) }
-                        } label: {
-                            Label("Refresh Threads", systemImage: "arrow.clockwise")
-                        }
-
-                        Divider()
-
-                        Button("Open Project", action: openProject)
-                        Button("Reveal in Finder", action: revealProject)
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(NeoCodeTheme.textSecondary)
-                            .frame(width: 12, height: 12)
-                    }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                }
+                projectActions
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
@@ -247,6 +217,44 @@ struct ProjectTreeNode: View {
         }
 
         return AnyShapeStyle(.clear)
+    }
+
+    private var projectActions: some View {
+        HStack(spacing: 10) {
+            Button {
+                Task { await store.createSession(in: project.id, using: runtime) }
+            } label: {
+                Image(systemName: "square.and.pencil")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(NeoCodeTheme.textSecondary)
+            }
+            .buttonStyle(.plain)
+
+            Menu {
+                Button {
+                    Task { await store.refreshSessions(in: project.id, using: runtime) }
+                } label: {
+                    Label("Refresh Threads", systemImage: "arrow.clockwise")
+                }
+
+                Divider()
+
+                Button("Open Project", action: openProject)
+                Button("Reveal in Finder", action: revealProject)
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(NeoCodeTheme.textSecondary)
+                    .frame(width: 12, height: 12)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+        }
+        .opacity(isHovering ? 1 : 0)
+        .allowsHitTesting(isHovering)
+        .accessibilityHidden(!isHovering)
+        .frame(width: 42, alignment: .trailing)
     }
 
     private func toggleCollapsed() {
@@ -325,24 +333,24 @@ struct SessionTreeRow: View {
 
     @ViewBuilder
     private var trailingAccessory: some View {
-        if let statusLabel {
-            HStack(spacing: 6) {
-                SidebarSessionStatusBadge(label: statusLabel, tone: statusTone)
-
-                sessionMenuButton
-                    .frame(width: isHovering ? 16 : 0, alignment: .trailing)
-                    .opacity(isHovering ? 1 : 0)
-                    .allowsHitTesting(isHovering)
-                    .clipped()
-            }
-            .fixedSize()
-        } else if isHovering {
-            sessionMenuButton
-        } else {
+        ZStack(alignment: .trailing) {
             Text(relativeAge)
                 .font(.neoMonoSmall)
                 .foregroundStyle(NeoCodeTheme.textMuted)
+                .opacity(statusLabel == nil && !isHovering ? 1 : 0)
+
+            HStack(spacing: 6) {
+                if let statusLabel {
+                    SidebarSessionStatusBadge(label: statusLabel, tone: statusTone)
+                }
+
+                sessionMenuButton
+                    .opacity(isHovering ? 1 : 0)
+                    .allowsHitTesting(isHovering)
+            }
+            .opacity(statusLabel != nil || isHovering ? 1 : 0)
         }
+        .fixedSize()
     }
 
     private var sessionMenuButton: some View {

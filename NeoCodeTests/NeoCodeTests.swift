@@ -1266,6 +1266,46 @@ struct NeoCodeMainActorTests {
     }
 
     @MainActor
+    @Test func appStorePrefersRemoteSlashCommandsOverLocalHandlers() async {
+        let projectID = UUID()
+        let store = AppStore(projects: [
+            ProjectSummary(
+                id: projectID,
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(id: "ses_1", title: "Existing", lastUpdatedAt: .distantPast),
+                ]
+            ),
+        ])
+        let service = MockOpenCodeService()
+
+        store.selectSession("ses_1")
+        store.availableCommands = [
+            OpenCodeCommand(
+                name: "model",
+                description: "Server-side model command",
+                agent: nil,
+                model: nil,
+                source: "command",
+                template: nil,
+                subtask: nil,
+                hints: []
+            ),
+        ]
+        store.draft = "/model gpt-5"
+
+        let didSend = await store.sendDraft(using: service, projectID: projectID, sessionID: "ses_1")
+
+        #expect(didSend == true)
+        #expect(service.sentCommands.count == 1)
+        #expect(service.sentCommands[0].command == "model")
+        #expect(service.sentCommands[0].arguments == "gpt-5")
+        #expect(store.selectedModelID == "openai/gpt-5.4")
+        #expect(store.draft.isEmpty)
+    }
+
+    @MainActor
     @Test func appStoreRestoresSlashDraftWhenCommandExecutionFails() async {
         let projectID = UUID()
         let store = AppStore(projects: [

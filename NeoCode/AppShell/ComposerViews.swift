@@ -449,14 +449,111 @@ struct ComposerTextSelectionRequest: Equatable {
 }
 
 private struct ComposerActivityIndicator: View {
+    @Environment(AppStore.self) private var store
+    @State private var chatBeatTrigger = 0
+    @State private var chatBeatStrength: CGFloat = 0
+
     let state: ComposerActivityState
 
     var body: some View {
-        MetaballOrb(size: 32)
+        MetaballOrb(
+            size: 32,
+            renderScale: 1.04,
+            internalResolutionScale: 1.0,
+            animationInterval: 1.0 / 18.0,
+            intensity: activityIntensity,
+            pulse: activityBasePulse,
+            warmth: activityWarmth,
+            beatTrigger: chatBeatTrigger,
+            beatStrength: chatBeatStrength
+        )
             .help(state.helpText)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Agent activity")
             .accessibilityValue(state.accessibilityValue)
+            .onAppear {
+                triggerChatBeat(amplitude: 0.42)
+            }
+            .onChange(of: transcriptRevision) { _, _ in
+                triggerChatBeat(amplitude: 0.30 + activityIntensity * 0.18)
+            }
+            .onChange(of: activitySignature) { _, _ in
+                triggerChatBeat(amplitude: 0.72)
+            }
+    }
+
+    private var transcriptRevision: Int {
+        store.transcriptRevisionToken(for: store.selectedSessionID)
+    }
+
+    private var activitySignature: String {
+        [
+            state.title,
+            store.selectedSession?.status.rawValue ?? "idle",
+            selectedSessionActivityKey,
+            "\(runningToolCount)",
+            "\(inProgressMessageCount)"
+        ].joined(separator: ":")
+    }
+
+    private var selectedSessionActivityKey: String {
+        switch store.selectedSessionActivity {
+        case .idle:
+            return "idle"
+        case .busy:
+            return "busy"
+        case .retry(let attempt, _, _):
+            return "retry-\(attempt)"
+        case nil:
+            return "none"
+        }
+    }
+
+    private var runningToolCount: Int {
+        store.selectedTranscript.reduce(into: 0) { count, message in
+            guard let toolCall = message.kind.toolCall,
+                  toolCall.status == .running || toolCall.status == .pending
+            else {
+                return
+            }
+            count += 1
+        }
+    }
+
+    private var inProgressMessageCount: Int {
+        store.selectedTranscript.reduce(into: 0) { count, message in
+            if message.isInProgress {
+                count += 1
+            }
+        }
+    }
+
+    private var activityIntensity: CGFloat {
+        let base: CGFloat = switch state {
+        case .thinking: 0.48
+        case .retrying: 0.68
+        }
+        let toolBoost = min(0.28, CGFloat(runningToolCount) * 0.1)
+        let streamBoost = min(0.2, CGFloat(inProgressMessageCount) * 0.06)
+        return min(1, base + toolBoost + streamBoost)
+    }
+
+    private var activityWarmth: CGFloat {
+        let base: CGFloat = switch state {
+        case .thinking: 0.22
+        case .retrying: 0.78
+        }
+        let toolBoost = min(0.18, CGFloat(runningToolCount) * 0.06)
+        return min(1, base + toolBoost)
+    }
+
+    private var activityBasePulse: CGFloat {
+        min(0.34, activityIntensity * 0.16 + CGFloat(runningToolCount) * 0.035)
+    }
+
+    private func triggerChatBeat(amplitude: CGFloat) {
+        chatBeatStrength = min(1, amplitude)
+        chatBeatTrigger += 1
     }
 }
 
@@ -559,6 +656,7 @@ struct GrowingTextView: NSViewRepresentable {
 
         DispatchQueue.main.async {
             context.coordinator.recalculateHeight(for: textView)
+            textView.scheduleFileMentionHighlightUpdate()
         }
 
         return scrollView
@@ -566,8 +664,12 @@ struct GrowingTextView: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? ComposerNSTextView else { return }
+        let previousProjectPath = textView.projectPath
+        var needsHighlightRefresh = previousProjectPath != projectPath
+
         if textView.string != text {
             textView.string = text
+            needsHighlightRefresh = true
 
             if text.isEmpty {
                 textView.scheduleFileMentionHighlightUpdate()
@@ -586,13 +688,16 @@ struct GrowingTextView: NSViewRepresentable {
             textView.string = selectionRequest.text
             textView.setSelectedRange(NSRange(location: selectionRequest.cursorLocation, length: 0))
             textView.window?.makeFirstResponder(textView)
+            needsHighlightRefresh = true
 
             DispatchQueue.main.async {
                 self.selectionRequest = nil
             }
         }
 
-        textView.scheduleFileMentionHighlightUpdate()
+        if needsHighlightRefresh {
+            textView.scheduleFileMentionHighlightUpdate()
+        }
 
         context.coordinator.recalculateHeight(for: textView)
     }
@@ -677,6 +782,11 @@ struct GrowingTextView: NSViewRepresentable {
 }
 
 private final class ComposerNSTextView: NSTextView {
+    private struct MentionHighlightRequest: Equatable {
+        let text: String
+        let projectPath: String?
+    }
+
     var onImportAttachments: (([ComposerAttachmentImportItem]) -> Void)?
     var onConfirmAuxiliarySelection: (() -> Bool)?
     var onMoveAuxiliarySelection: ((Int) -> Bool)?
@@ -684,6 +794,8 @@ private final class ComposerNSTextView: NSTextView {
     var projectPath: String?
 
     private var mentionHighlightTask: Task<Void, Never>?
+    private var pendingMentionHighlightRequest: MentionHighlightRequest?
+    private var appliedMentionHighlightRequest: MentionHighlightRequest?
     private var promotedFileMentionSourceTexts: [ComposerPromptFileReference.SourceText] = []
     private lazy var mentionHighlightAttributes: [NSAttributedString.Key: Any] = [
         .foregroundColor: NSColor(NeoCodeTheme.accent),
@@ -715,15 +827,18 @@ private final class ComposerNSTextView: NSTextView {
     }
 
     func scheduleFileMentionHighlightUpdate() {
+        let request = MentionHighlightRequest(text: string, projectPath: projectPath)
+        guard pendingMentionHighlightRequest != request else {
+            return
+        }
+
+        pendingMentionHighlightRequest = request
         mentionHighlightTask?.cancel()
 
-        let textSnapshot = string
-        let projectPathSnapshot = projectPath
-        applyFileMentionHighlights([])
-
-        guard let projectPathSnapshot,
-              !textSnapshot.isEmpty
+        guard let projectPathSnapshot = request.projectPath,
+              request.text.contains("@")
         else {
+            applyFileMentionHighlightsIfNeeded([], for: request)
             return
         }
 
@@ -733,22 +848,35 @@ private final class ComposerNSTextView: NSTextView {
 
             let references = await ProjectFileSearchService.shared.resolveFileReferences(
                 in: projectPathSnapshot,
-                text: textSnapshot
+                text: request.text
             )
             let sourceTexts = references.map(\.sourceText)
             guard !Task.isCancelled else { return }
 
             await MainActor.run {
                 guard let self,
-                      self.string == textSnapshot,
+                      self.string == request.text,
                       self.projectPath == projectPathSnapshot
                 else {
                     return
                 }
 
-                self.applyFileMentionHighlights(sourceTexts)
+                self.applyFileMentionHighlightsIfNeeded(sourceTexts, for: request)
             }
         }
+    }
+
+    private func applyFileMentionHighlightsIfNeeded(
+        _ sourceTexts: [ComposerPromptFileReference.SourceText],
+        for request: MentionHighlightRequest
+    ) {
+        if appliedMentionHighlightRequest == request,
+           promotedFileMentionSourceTexts == sourceTexts {
+            return
+        }
+
+        applyFileMentionHighlights(sourceTexts)
+        appliedMentionHighlightRequest = request
     }
 
     private func applyFileMentionHighlights(_ sourceTexts: [ComposerPromptFileReference.SourceText]) {
@@ -1087,7 +1215,13 @@ struct EmptyConversationView: View {
 
     var body: some View {
         VStack(spacing: 20) {
-            MetaballOrb(size: 88)
+            DraftReactiveMetaballOrb(
+                size: 88,
+                text: store.draft,
+                renderScale: 1.1,
+                internalResolutionScale: 1.15,
+                animationInterval: 1.0 / 20.0
+            )
 
             VStack(spacing: 10) {
                 Text(store.projects.isEmpty ? "Add your first project" : "Start a thread")

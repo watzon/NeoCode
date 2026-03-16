@@ -105,4 +105,5 @@ struct ComposerAuxiliaryTests {
 
         #expect(range == NSRange(location: 5, length: 15))
     }
+
 }

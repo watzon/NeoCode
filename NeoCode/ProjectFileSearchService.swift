@@ -22,6 +22,7 @@ actor ProjectFileSearchService {
     private struct CachedIndex: Sendable {
         let createdAt: Date
         let files: [IndexedFile]
+        let filesByNormalizedPath: [String: String]
     }
 
     private var cachedIndexes: [String: CachedIndex] = [:]
@@ -52,16 +53,13 @@ actor ProjectFileSearchService {
     }
 
     func resolveFileReferences(in projectPath: String, text: String) async -> [ComposerPromptFileReference] {
-        let indexedFiles = fileIndex(for: projectPath)
+        guard text.contains("@") else { return [] }
+
+        let cachedIndex = cachedFileIndex(for: projectPath)
         guard !Task.isCancelled else { return [] }
 
-        let filesByNormalizedPath = Dictionary(
-            indexedFiles.map { ($0.normalizedRelativePath, $0.relativePath) },
-            uniquingKeysWith: { first, _ in first }
-        )
-
         let matches: [(path: String, sourceText: ComposerPromptFileReference.SourceText)] = ComposerPromptFileReferenceBuilder.matchedPaths(in: text).compactMap { match in
-            guard let resolvedPath = filesByNormalizedPath[match.path.lowercased()] else {
+            guard let resolvedPath = cachedIndex.filesByNormalizedPath[match.path.lowercased()] else {
                 return nil
             }
 
@@ -72,14 +70,35 @@ actor ProjectFileSearchService {
     }
 
     private func fileIndex(for projectPath: String) -> [IndexedFile] {
+        cachedFileIndex(for: projectPath).files
+    }
+
+    private func cachedFileIndex(for projectPath: String) -> CachedIndex {
+        pruneExpiredIndexes()
+
         if let cached = cachedIndexes[projectPath],
            Date().timeIntervalSince(cached.createdAt) < cacheLifetime {
-            return cached.files
+            return cached
         }
 
         let files = buildFileIndex(for: projectPath)
-        cachedIndexes[projectPath] = CachedIndex(createdAt: Date(), files: files)
-        return files
+        let cached = CachedIndex(
+            createdAt: Date(),
+            files: files,
+            filesByNormalizedPath: Dictionary(
+                files.map { ($0.normalizedRelativePath, $0.relativePath) },
+                uniquingKeysWith: { first, _ in first }
+            )
+        )
+        cachedIndexes[projectPath] = cached
+        return cached
+    }
+
+    private func pruneExpiredIndexes() {
+        let now = Date()
+        cachedIndexes = cachedIndexes.filter {
+            now.timeIntervalSince($0.value.createdAt) < cacheLifetime
+        }
     }
 
     private func buildFileIndex(for projectPath: String) -> [IndexedFile] {

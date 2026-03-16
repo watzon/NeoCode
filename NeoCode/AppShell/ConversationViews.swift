@@ -754,11 +754,15 @@ struct ConversationView: View {
     }
 
     private var showsNewSessionEmptyState: Bool {
-        transcriptCount == 0 && store.lastError == nil && !store.isLoadingSessions
+        transcriptCount == 0
+            && store.lastError == nil
+            && (session?.isEphemeral == true || !store.isLoadingSessions)
     }
 
     private var shouldShowTranscriptLoadingState: Bool {
-        isAwaitingInitialScroll && store.loadingTranscriptSessionID == sessionID
+        session?.isEphemeral != true
+            && isAwaitingInitialScroll
+            && store.loadingTranscriptSessionID == sessionID
     }
 
     private func scrollToBottom(using proxy: ScrollViewProxy, animated: Bool) {
@@ -858,9 +862,17 @@ struct ConversationView: View {
 }
 
 private struct NewSessionEmptyStateView: View {
+    @Environment(AppStore.self) private var store
+
     var body: some View {
         VStack(spacing: 24) {
-            MetaballOrb(size: 100)
+            DraftReactiveMetaballOrb(
+                size: 100,
+                text: store.draft,
+                renderScale: 1.1,
+                internalResolutionScale: 1.15,
+                animationInterval: 1.0 / 20.0
+            )
 
             VStack(spacing: 10) {
                 Text("Build something cool")

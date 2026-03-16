@@ -134,6 +134,7 @@ final class AppStore {
     }
 
     private var composerOptionsProjectPath: String?
+    private var cachedCommandsByProjectPath: [String: [OpenCodeCommand]] = [:]
     private let runtimeIdleTTL: Duration = .seconds(60)
     private let gitRefreshFallbackInterval: Duration = .seconds(90)
     private var isRefreshingGitCommitPreview = false
@@ -411,6 +412,9 @@ final class AppStore {
             discardSelectedEphemeralSessionIfNeeded()
         }
         selectedProjectID = destinationProjectID
+        if let projectPath = projectPath(for: destinationProjectID) {
+            availableCommands = cachedCommandsByProjectPath[projectPath] ?? []
+        }
         if let selectedSessionID,
            projectID(for: selectedSessionID) != destinationProjectID {
             self.selectedSessionID = nil
@@ -487,6 +491,7 @@ final class AppStore {
         }
 
         scheduleGitRefreshLoop(for: project.path)
+        availableCommands = cachedCommandsByProjectPath[project.path] ?? []
         _ = await connectProject(project.id, using: runtime, includeComposerOptions: true)
         reevaluateRuntimeRetention(using: runtime)
     }
@@ -794,8 +799,6 @@ final class AppStore {
             return
         }
 
-        loadingTranscriptSessionID = selectedSessionID
-
         guard let projectID = projectID(for: selectedSessionID),
               let project = projects.first(where: { $0.id == projectID }),
               session(for: selectedSessionID)?.isEphemeral != true
@@ -805,6 +808,8 @@ final class AppStore {
             }
             return
         }
+
+        loadingTranscriptSessionID = selectedSessionID
 
         guard let service = await connectProject(projectID, using: runtime, includeComposerOptions: selectedProjectID == projectID),
               let connection = runtime.connection(for: project.path)
@@ -916,7 +921,9 @@ final class AppStore {
               let projectID = selectedProject?.id
         else { return }
 
-        if let localCommand = localSlashCommandInvocation(in: trimmed) {
+        let remoteCommand = slashCommandInvocation(in: trimmed)
+        if remoteCommand == nil,
+           let localCommand = localSlashCommandInvocation(in: trimmed) {
             let handled = await executeLocalSlashCommand(localCommand, in: projectID, using: runtime)
             if handled {
                 logger.info(
@@ -1657,7 +1664,8 @@ final class AppStore {
             logger.info("Detected runtime connection change for project: \(project.path, privacy: .public)")
         }
 
-        if includeComposerOptions && composerOptionsProjectPath != project.path {
+        if includeComposerOptions,
+           shouldReloadComposerOptions(for: project.path) {
             await loadComposerOptions(using: service, projectPath: project.path)
             guard isCurrentConnection(connectionIdentifier, for: projectID, runtime: runtime) else { return nil }
         }
@@ -1694,6 +1702,10 @@ final class AppStore {
         return service
     }
 
+    private func shouldReloadComposerOptions(for projectPath: String) -> Bool {
+        composerOptionsProjectPath != projectPath || availableCommands.isEmpty
+    }
+
     func disconnectLiveState() {
         cancelGitRefreshLoop()
 
@@ -1706,7 +1718,6 @@ final class AppStore {
         refreshTask?.cancel()
         refreshTask = nil
         composerOptionsProjectPath = nil
-        availableCommands = []
         messageRoles = [:]
         liveSessionStatuses = [:]
         locallyActiveSessionIDs = []
@@ -1742,20 +1753,23 @@ final class AppStore {
 
         if composerOptionsProjectPath == projectPath(for: projectID) {
             composerOptionsProjectPath = nil
-            availableCommands = []
+            if let selectedProjectPath = selectedProject?.path {
+                availableCommands = cachedCommandsByProjectPath[selectedProjectPath] ?? []
+            }
         }
     }
 
     private func loadComposerOptions(using service: any OpenCodeServicing, projectPath: String) async {
-        async let providersTask = service.listProviders()
-        async let agentsTask = service.listAgents()
-        async let commandsTask = service.listCommands()
+        async let providersTask = Self.captureResult { try await service.listProviders() }
+        async let agentsTask = Self.captureResult { try await service.listAgents() }
+        async let commandsTask = Self.captureResult { try await service.listCommands() }
 
-        do {
-            let providersResponse = try await providersTask
-            let agents = try await agentsTask
-            let commands = (try? await commandsTask) ?? []
+        let providersResult = await providersTask
+        let agentsResult = await agentsTask
+        let commandsResult = await commandsTask
 
+        switch providersResult {
+        case .success(let providersResponse):
             let models = providersResponse.providers
                 .flatMap { provider in
                     provider.models.values.map {
@@ -1774,7 +1788,14 @@ final class AppStore {
             if selectedModelID == nil || !models.contains(where: { $0.id == selectedModelID }) {
                 selectedModelID = models.first?.id
             }
+        case .failure(let message):
+            logger.error("Failed to load composer models: \(message, privacy: .public)")
+            availableModels = []
+            selectedModelID = nil
+        }
 
+        switch agentsResult {
+        case .success(let agents):
             availableAgents = agents
                 .filter { !($0.hidden ?? false) }
                 .filter { ($0.mode ?? "primary") != "subagent" }
@@ -1783,19 +1804,44 @@ final class AppStore {
             if !availableAgents.contains(selectedAgent) {
                 selectedAgent = availableAgents.first ?? ""
             }
+        case .failure(let message):
+            logger.error("Failed to load composer agents: \(message, privacy: .public)")
+            availableAgents = []
+            selectedAgent = ""
+        }
 
-            availableCommands = commands.sorted {
+        switch commandsResult {
+        case .success(let commands):
+            let sortedCommands = commands.sorted {
                 $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
             }
-            logger.info(
-                "Loaded composer options project=\(projectPath, privacy: .public) models=\(models.count, privacy: .public) agents=\(self.availableAgents.count, privacy: .public) commands=\(self.availableCommands.count, privacy: .public)"
-            )
+            cachedCommandsByProjectPath[projectPath] = sortedCommands
+            availableCommands = sortedCommands
+        case .failure(let message):
+            logger.error("Failed to load composer commands: \(message, privacy: .public)")
+            availableCommands = cachedCommandsByProjectPath[projectPath] ?? []
+        }
 
-            refreshThinkingLevels()
+        logger.info(
+            "Loaded composer options project=\(projectPath, privacy: .public) models=\(self.availableModels.count, privacy: .public) agents=\(self.availableAgents.count, privacy: .public) commands=\(self.availableCommands.count, privacy: .public)"
+        )
 
-            composerOptionsProjectPath = projectPath
+        refreshThinkingLevels()
+        composerOptionsProjectPath = projectPath
+    }
+
+    private enum ComposerOptionsLoadResult<T: Sendable>: Sendable {
+        case success(T)
+        case failure(String)
+    }
+
+    private static func captureResult<T: Sendable>(
+        _ operation: @escaping @Sendable () async throws -> T
+    ) async -> ComposerOptionsLoadResult<T> {
+        do {
+            return .success(try await operation())
         } catch {
-            logger.error("Failed to load composer options: \(error.localizedDescription, privacy: .public)")
+            return .failure(error.localizedDescription)
         }
     }
 
@@ -3219,6 +3265,7 @@ final class AppStore {
         upsert(session: session, in: projectID, preferTopInsertion: true)
         selectedProjectID = projectID
         selectedSessionID = session.id
+        scheduleGitRefreshLoop(for: projectPath(for: projectID))
         primePromptState(for: session.id)
         lastError = nil
     }
