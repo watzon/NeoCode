@@ -133,6 +133,7 @@ private struct DashboardHeader: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
+        .background(WindowDragRegion())
     }
 }
 

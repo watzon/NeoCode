@@ -1015,6 +1015,45 @@ struct NeoCodeMainActorTests {
     }
 
     @MainActor
+    @Test func appStorePreservesPerModelReasoningAcrossNonReasoningModelSwitches() async {
+        let store = AppStore(projects: [])
+        store.availableModels = [
+            ComposerModelOption(
+                id: "openai/gpt-5.4",
+                providerID: "openai",
+                modelID: "gpt-5.4",
+                title: "GPT-5.4",
+                contextWindow: nil,
+                variants: ["high", "medium", "low"]
+            ),
+            ComposerModelOption(
+                id: "anthropic/claude-sonnet",
+                providerID: "anthropic",
+                modelID: "claude-sonnet",
+                title: "Claude Sonnet",
+                contextWindow: nil,
+                variants: []
+            ),
+        ]
+
+        store.selectedModelID = "openai/gpt-5.4"
+        store.refreshThinkingLevels()
+        store.selectedThinkingLevel = "medium"
+
+        store.selectedModelID = "anthropic/claude-sonnet"
+        store.refreshThinkingLevels()
+
+        #expect(store.availableThinkingLevels.isEmpty)
+        #expect(store.selectedThinkingLevel == "medium")
+
+        store.selectedModelID = "openai/gpt-5.4"
+        store.refreshThinkingLevels()
+
+        #expect(store.availableThinkingLevels == ["low", "medium", "high"])
+        #expect(store.selectedThinkingLevel == "medium")
+    }
+
+    @MainActor
     @Test func appStoreInfersPlaceholderTitleFromFirstUserMessage() async {
         let now = Date()
         let store = AppStore(projects: [
@@ -1866,6 +1905,56 @@ struct NeoCodeMainActorTests {
 
         #expect(store.selectedProjectID == secondProject.id)
         #expect(store.selectedSessionID == nil)
+    }
+
+    @MainActor
+    @Test func selectingCachedSessionKeepsTranscriptVisible() {
+        let now = Date()
+        let store = AppStore(projects: [
+            ProjectSummary(
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(
+                        id: "ses_1",
+                        title: "Cached",
+                        lastUpdatedAt: now,
+                        transcript: [
+                            ChatMessage(
+                                id: "msg_1",
+                                role: .assistant,
+                                text: "Already loaded",
+                                timestamp: now,
+                                emphasis: .normal,
+                                isInProgress: false
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+        ])
+
+        store.selectSession("ses_1")
+
+        #expect(store.loadingTranscriptSessionID == nil)
+        #expect(store.selectedTranscript.count == 1)
+    }
+
+    @MainActor
+    @Test func selectingUncachedSessionShowsColdLoadState() {
+        let store = AppStore(projects: [
+            ProjectSummary(
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(id: "ses_1", title: "Existing", lastUpdatedAt: .distantPast),
+                ]
+            ),
+        ])
+
+        store.selectSession("ses_1")
+
+        #expect(store.loadingTranscriptSessionID == "ses_1")
     }
 
     @MainActor

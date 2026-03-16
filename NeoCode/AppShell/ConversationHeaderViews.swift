@@ -15,86 +15,85 @@ struct SessionHeaderView: View {
     let session: SessionSummary
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            HStack(alignment: .center, spacing: 16) {
-                HStack(spacing: 8) {
-                    Text(session.title)
-                        .font(.system(size: 15, weight: .semibold, design: .default))
-                        .foregroundStyle(NeoCodeTheme.textPrimary)
+        HStack(alignment: .center, spacing: 16) {
+            HStack(spacing: 8) {
+                Text(session.title)
+                    .font(.system(size: 15, weight: .semibold, design: .default))
+                    .foregroundStyle(NeoCodeTheme.textPrimary)
 
-                    sessionMenuButton
-                }
+                sessionMenuButton
+            }
 
-                Spacer(minLength: 24)
+            Spacer(minLength: 24)
 
-                HStack(spacing: 10) {
-                    if let selectedWorkspaceTool {
-                        WorkspaceToolSplitButton(
-                            tool: selectedWorkspaceTool,
-                            allTools: workspaceTools,
-                            service: workspaceToolService,
-                            projectPath: projectPath,
-                            isMenuOpen: openMenu == .workspaceTools,
-                            onToggleMenu: {
-                                openMenu = openMenu == .workspaceTools ? nil : .workspaceTools
-                            },
-                            onDismissMenu: {
-                                if openMenu == .workspaceTools {
-                                    openMenu = nil
-                                }
-                            },
-                            onSelectTool: selectWorkspaceTool
-                        )
-                    }
-
-                    if store.gitStatus.isRepository {
-                        GitActionsSplitButton(
-                            gitStatus: store.gitStatus,
-                            operationState: store.currentGitOperationState,
-                            isBusy: store.isPerformingGitOperation,
-                            isMenuOpen: openMenu == .gitActions,
-                            onPrimaryAction: handlePrimaryGitAction,
-                            onCommit: {
-                                isCommitSheetPresented = true
-                            },
-                            onPush: {
-                                Task {
-                                    _ = await store.pushChanges()
-                                }
-                            },
-                            onToggleMenu: {
-                                openMenu = openMenu == .gitActions ? nil : .gitActions
-                            },
-                            onDismissMenu: {
-                                if openMenu == .gitActions {
-                                    openMenu = nil
-                                }
-                            }
-                        )
-                    }
-
-                    Rectangle()
-                        .fill(NeoCodeTheme.line)
-                        .frame(width: 1, height: 18)
-                        .padding(.horizontal, 2)
-
-                    SessionStatsMenuButton(
-                        stats: store.sessionStats(for: session.id),
-                        isMenuOpen: openMenu == .sessionStats,
+            HStack(spacing: 10) {
+                if let selectedWorkspaceTool {
+                    WorkspaceToolSplitButton(
+                        tool: selectedWorkspaceTool,
+                        allTools: workspaceTools,
+                        service: workspaceToolService,
+                        projectPath: projectPath,
+                        isMenuOpen: openMenu == .workspaceTools,
                         onToggleMenu: {
-                            openMenu = openMenu == .sessionStats ? nil : .sessionStats
+                            openMenu = openMenu == .workspaceTools ? nil : .workspaceTools
                         },
                         onDismissMenu: {
-                            if openMenu == .sessionStats {
+                            if openMenu == .workspaceTools {
+                                openMenu = nil
+                            }
+                        },
+                        onSelectTool: selectWorkspaceTool
+                    )
+                }
+
+                if store.gitStatus.isRepository {
+                    GitActionsSplitButton(
+                        gitStatus: store.gitStatus,
+                        operationState: store.currentGitOperationState,
+                        isBusy: store.isPerformingGitOperation,
+                        isMenuOpen: openMenu == .gitActions,
+                        onPrimaryAction: handlePrimaryGitAction,
+                        onCommit: {
+                            isCommitSheetPresented = true
+                        },
+                        onPush: {
+                            Task {
+                                _ = await store.pushChanges()
+                            }
+                        },
+                        onToggleMenu: {
+                            openMenu = openMenu == .gitActions ? nil : .gitActions
+                        },
+                        onDismissMenu: {
+                            if openMenu == .gitActions {
                                 openMenu = nil
                             }
                         }
                     )
                 }
+
+                Rectangle()
+                    .fill(NeoCodeTheme.line)
+                    .frame(width: 1, height: 18)
+                    .padding(.horizontal, 2)
+
+                SessionStatsMenuButton(
+                    stats: store.sessionStats(for: session.id),
+                    isMenuOpen: openMenu == .sessionStats,
+                    onToggleMenu: {
+                        openMenu = openMenu == .sessionStats ? nil : .sessionStats
+                    },
+                    onDismissMenu: {
+                        if openMenu == .sessionStats {
+                            openMenu = nil
+                        }
+                    }
+                )
             }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
+        .background(WindowDragRegion())
         .task(id: projectPath) {
             await refreshHeaderState()
         }

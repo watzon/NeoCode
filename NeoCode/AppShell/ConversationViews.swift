@@ -409,10 +409,6 @@ struct ConversationView: View {
                             InlineStatusView(text: error, tone: .warning)
                         }
 
-                        if store.isLoadingSessions {
-                            InlineStatusView(text: "Loading session transcript...", tone: .neutral)
-                        }
-
                         VStack(alignment: .leading, spacing: 18) {
                             ForEach(renderedGroups) { group in
                                 transcriptGroupView(group)
@@ -773,6 +769,7 @@ struct ConversationView: View {
 
     private var shouldShowTranscriptLoadingState: Bool {
         session?.isEphemeral != true
+            && transcriptCount == 0
             && isAwaitingInitialScroll
             && store.loadingTranscriptSessionID == sessionID
     }

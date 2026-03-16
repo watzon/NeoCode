@@ -33,9 +33,9 @@ struct ContentView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .task(id: store.selectedProject?.id) {
+        .task(id: selectionSyncTaskKey) {
             guard isRuntimeBootstrappingEnabled else { return }
-            await store.connect(to: runtime)
+            await store.syncSelection(using: runtime)
         }
         .task(id: dashboardRefreshTaskKey) {
             guard isRuntimeBootstrappingEnabled else { return }
@@ -45,10 +45,6 @@ struct ContentView: View {
             } else {
                 store.suspendDashboardRefresh()
             }
-        }
-        .task(id: store.selectedSessionID) {
-            guard isRuntimeBootstrappingEnabled else { return }
-            await store.syncSelectedSession(using: runtime)
         }
         .onChange(of: store.lastError) { _, newValue in
             showToast(newValue)
@@ -85,6 +81,12 @@ struct ContentView: View {
 
     private var dashboardRefreshTaskKey: String {
         "\(store.isDashboardSelected)-\(store.dashboardProjectSignature)"
+    }
+
+    private var selectionSyncTaskKey: String {
+        let projectID = store.selectedProject?.id.uuidString ?? "none"
+        let sessionID = store.selectedSessionID ?? "dashboard"
+        return "\(projectID):\(sessionID)"
     }
 }
 

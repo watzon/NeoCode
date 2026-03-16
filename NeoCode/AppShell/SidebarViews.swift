@@ -9,6 +9,9 @@ struct AppSidebarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            WindowDragRegion()
+                .frame(height: 52)
+
             SidebarActionBar(
                 isDashboardSelected: store.isDashboardSelected,
                 onDashboard: {
@@ -36,7 +39,6 @@ struct AppSidebarView: View {
                 .padding(.bottom, 24)
             }
         }
-        .padding(.top, 52)
         .background(.clear)
         .fileImporter(
             isPresented: $isPickingProject,

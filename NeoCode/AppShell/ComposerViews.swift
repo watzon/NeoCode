@@ -1372,30 +1372,35 @@ struct EmptyConversationView: View {
     @Environment(AppStore.self) private var store
 
     var body: some View {
-        VStack(spacing: 20) {
-            DraftReactiveMetaballOrb(
-                size: 88,
-                text: store.draft,
-                renderScale: 1.1,
-                internalResolutionScale: 1.15,
-                animationInterval: 1.0 / 20.0
-            )
+        ZStack(alignment: .top) {
+            VStack(spacing: 20) {
+                DraftReactiveMetaballOrb(
+                    size: 88,
+                    text: store.draft,
+                    renderScale: 1.1,
+                    internalResolutionScale: 1.15,
+                    animationInterval: 1.0 / 20.0
+                )
 
-            VStack(spacing: 10) {
-                Text(store.projects.isEmpty ? "Add your first project" : "Start a thread")
-                    .font(.system(size: 22, weight: .semibold, design: .default))
-                    .foregroundStyle(NeoCodeTheme.textPrimary)
+                VStack(spacing: 10) {
+                    Text(store.projects.isEmpty ? "Add your first project" : "Start a thread")
+                        .font(.system(size: 22, weight: .semibold, design: .default))
+                        .foregroundStyle(NeoCodeTheme.textPrimary)
 
-                Text(store.projects.isEmpty
-                     ? "Use the project button in the Threads sidebar to add a folder. NeoCode will only show threads for projects you explicitly add."
-                     : "Create a new thread or select one from the sidebar to begin chatting with the OpenCode runtime.")
-                    .font(.neoBody)
-                    .foregroundStyle(NeoCodeTheme.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 420)
+                    Text(store.projects.isEmpty
+                         ? "Use the project button in the Threads sidebar to add a folder. NeoCode will only show threads for projects you explicitly add."
+                         : "Create a new thread or select one from the sidebar to begin chatting with the OpenCode runtime.")
+                        .font(.neoBody)
+                        .foregroundStyle(NeoCodeTheme.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 420)
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+
+            WindowDragRegion()
+                .frame(height: 52)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 }
 
@@ -1457,6 +1462,32 @@ struct ErrorToast: View {
     }
 }
 
+struct WindowDragRegion: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        DragRegionView()
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
+struct WindowDragSpacer: View {
+    var minLength: CGFloat = 0
+
+    var body: some View {
+        WindowDragRegion()
+            .frame(minWidth: minLength, maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private final class DragRegionView: NSView {
+    override var mouseDownCanMoveWindow: Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard bounds.contains(point) else { return nil }
+        return self
+    }
+}
+
 struct WindowChromeConfigurator: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
@@ -1476,7 +1507,7 @@ struct WindowChromeConfigurator: NSViewRepresentable {
         guard let window = view.window else { return }
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
-        window.isMovableByWindowBackground = true
+        window.isMovableByWindowBackground = false
         window.styleMask.insert(.fullSizeContentView)
         window.minSize = NSSize(width: 980, height: 600)
     }

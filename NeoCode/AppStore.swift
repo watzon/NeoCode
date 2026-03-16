@@ -98,6 +98,7 @@ final class AppStore {
     private var availableAgentObjects: [OpenCodeAgent] = []
     private var ephemeralAgentModels: [String: String] = [:]
     private var preferredFallbackModelID: String?
+    private var lastThinkingLevelByModelID: [String: String] = [:]
     var availableCommands: [OpenCodeCommand] = []
     var availableThinkingLevels: [String] = []
     var selectedThinkingLevel: String?
@@ -445,11 +446,11 @@ final class AppStore {
         if let selectedSessionID,
            projectID(for: selectedSessionID) != destinationProjectID {
             self.selectedSessionID = nil
+            loadingTranscriptSessionID = nil
             primePromptState(for: nil)
         }
 
         scheduleGitRefreshLoop(for: projectPath(for: destinationProjectID))
-        flushPendingProjectPersistence()
     }
 
     func selectDashboard() {
@@ -457,21 +458,25 @@ final class AppStore {
         loadingTranscriptSessionID = nil
         primePromptState(for: nil)
         scheduleGitRefreshLoop(for: selectedProject?.path)
-        flushPendingProjectPersistence()
     }
 
     func selectSession(_ sessionID: String) {
         guard selectedSessionID != sessionID else { return }
+        let destinationProjectID = projectID(for: sessionID)
         selectedSessionID = sessionID
-        selectedProjectID = projectID(for: sessionID)
-        if selectedSession?.isEphemeral == true {
+        selectedProjectID = destinationProjectID
+
+        if session(for: sessionID)?.isEphemeral == true {
+            loadingTranscriptSessionID = nil
+        } else if let destinationProjectID,
+                  hasCachedTranscript(for: sessionID, projectID: destinationProjectID) {
             loadingTranscriptSessionID = nil
         } else {
             loadingTranscriptSessionID = sessionID
         }
+
         primePromptState(for: sessionID)
         scheduleGitRefreshLoop(for: selectedProject?.path)
-        flushPendingProjectPersistence()
     }
 
     func addProject(directoryURL: URL) {
@@ -518,6 +523,16 @@ final class AppStore {
         availableCommands = cachedCommandsByProjectPath[project.path] ?? []
         _ = await connectProject(project.id, using: runtime, includeComposerOptions: true)
         reevaluateRuntimeRetention(using: runtime)
+    }
+
+    func syncSelection(using runtime: OpenCodeRuntime) async {
+        guard selectedSessionID != nil else {
+            loadingTranscriptSessionID = nil
+            await connect(to: runtime)
+            return
+        }
+
+        await syncSelectedSession(using: runtime)
     }
 
     @discardableResult
@@ -857,7 +872,12 @@ final class AppStore {
             return
         }
 
-        loadingTranscriptSessionID = selectedSessionID
+        if !hasCachedTranscript(for: selectedSessionID, projectID: projectID) {
+            loadingTranscriptSessionID = selectedSessionID
+        }
+
+        let hadLiveService = liveServices[projectID] != nil
+        let previousConnectionIdentifier = serviceConnectionIdentifiers[projectID]
 
         guard let service = await connectProject(projectID, using: runtime, includeComposerOptions: selectedProjectID == projectID),
               let connection = runtime.connection(for: project.path)
@@ -878,7 +898,10 @@ final class AppStore {
             return
         }
 
-        await loadMessages(for: selectedSessionID, using: service, projectID: projectID, allowCachedFallback: true)
+        let didRefreshDuringConnect = !hadLiveService || previousConnectionIdentifier != connectionIdentifier
+        if !didRefreshDuringConnect {
+            await loadMessages(for: selectedSessionID, using: service, projectID: projectID, allowCachedFallback: true)
+        }
         reevaluateRuntimeRetention(using: runtime)
     }
 
@@ -2143,9 +2166,22 @@ final class AppStore {
 
     func refreshThinkingLevels() {
         let variants = (selectedModel?.variants ?? []).sorted(using: KeyPathComparator(\.thinkingLevelSortKey))
+
+        if let selectedModelID,
+           let selectedThinkingLevel,
+           !selectedThinkingLevel.isEmpty {
+            lastThinkingLevelByModelID[selectedModelID] = selectedThinkingLevel
+        }
+
         availableThinkingLevels = variants
         if variants.isEmpty {
-            selectedThinkingLevel = nil
+            return
+        }
+
+        if let selectedModelID,
+           let rememberedLevel = lastThinkingLevelByModelID[selectedModelID],
+           variants.contains(rememberedLevel) {
+            selectedThinkingLevel = rememberedLevel
         } else if selectedThinkingLevel == nil || !variants.contains(selectedThinkingLevel ?? "") {
             selectedThinkingLevel = variants.first
         }
@@ -2546,7 +2582,7 @@ final class AppStore {
         let keepsCurrentUI = allowCachedFallback && hasCachedTranscript(for: sessionID, projectID: projectID)
         let shouldTrackVisibleLoadingState = selectedSessionID == sessionID && selectedProjectID == projectID
 
-        if shouldTrackVisibleLoadingState {
+        if shouldTrackVisibleLoadingState && !keepsCurrentUI {
             loadingTranscriptSessionID = sessionID
         }
 
