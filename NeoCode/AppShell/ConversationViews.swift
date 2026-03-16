@@ -78,7 +78,7 @@ struct ConversationView: View {
     // Keep it inside scroll content via `contentBottomInset`; do not move this
     // to a safe area inset or external padding unless you also want the
     // scrollbar track to shrink.
-    private let composerBottomClearance: CGFloat = 160
+    private let composerBottomClearance: CGFloat = 180
     private let promptOverlayBottomClearance: CGFloat = 40
     private let scrollbarCompensation = ConversationLayout.scrollbarCompensation
 
@@ -423,6 +423,7 @@ struct ConversationView: View {
                                 transcriptGroupView(group)
                             }
                         }
+                        .padding(.bottom, queuedMessagesContentPadding)
 
                         Color.clear
                             .frame(height: contentBottomInset)
@@ -560,6 +561,17 @@ struct ConversationView: View {
                 .zIndex(2)
             }
 
+            if !store.queuedMessages(for: sessionID).isEmpty {
+                QueuedMessagesView(
+                    messages: store.queuedMessages(for: sessionID),
+                    onEdit: { store.editQueuedMessage(id: $0, in: sessionID) },
+                    onRemove: { store.removeQueuedMessage(id: $0, in: sessionID) }
+                )
+                .frame(width: transcriptColumnWidth)
+                .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
+                .zIndex(1)
+            }
+
             SessionPromptAreaView(
                 surface: promptSurface,
                 draftText: draftBinding,
@@ -655,6 +667,12 @@ struct ConversationView: View {
             bottomAnchorSpacerHeight,
             max(promptOverlayHeight, promptOverlayFallbackHeight) + bottomClearance
         )
+    }
+
+    private var queuedMessagesContentPadding: CGFloat {
+        let messageCount = store.queuedMessages(for: sessionID).count
+        guard messageCount > 0 else { return 0 }
+        return CGFloat(messageCount) * 100
     }
 
     private var promptOverlayFallbackHeight: CGFloat {

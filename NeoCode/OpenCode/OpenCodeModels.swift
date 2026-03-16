@@ -18,18 +18,25 @@ struct OpenCodeModel: Decodable, Equatable, Sendable {
     let variants: [String: JSONValue]?
 }
 
+struct OpenCodeAgentModel: Decodable, Equatable, Sendable {
+    let providerID: String
+    let modelID: String
+}
+
 struct OpenCodeAgent: Decodable, Equatable, Identifiable, Sendable {
     let id = UUID()
     let name: String
     let description: String?
     let hidden: Bool?
     let mode: String?
+    let model: OpenCodeAgentModel?
 
     private enum CodingKeys: String, CodingKey {
         case name
         case description
         case hidden
         case mode
+        case model
     }
 }
 

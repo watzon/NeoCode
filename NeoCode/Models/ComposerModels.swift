@@ -157,6 +157,42 @@ struct ComposerAttachment: Identifiable, Hashable {
     }
 }
 
+struct ComposerQueuedMessage: Identifiable, Hashable {
+    struct OptionsSnapshot: Hashable {
+        let model: ComposerModelOption?
+        let agentName: String?
+        let variant: String?
+    }
+
+    let id: UUID
+    var text: String
+    var attachments: [ComposerAttachment]
+    let createdAt: Date
+    var options: OptionsSnapshot
+
+    init(
+        id: UUID = UUID(),
+        text: String,
+        attachments: [ComposerAttachment] = [],
+        createdAt: Date = .now,
+        options: OptionsSnapshot
+    ) {
+        self.id = id
+        self.text = text
+        self.attachments = attachments
+        self.createdAt = createdAt
+        self.options = options
+    }
+
+    var hasText: Bool {
+        text.nonEmptyTrimmed != nil
+    }
+
+    var hasContent: Bool {
+        hasText || !attachments.isEmpty
+    }
+}
+
 struct ComposerModelOption: Identifiable, Hashable {
     let id: String
     let providerID: String

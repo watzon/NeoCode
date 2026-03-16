@@ -88,6 +88,9 @@ final class AppStore {
     var selectedModelVariant: String?
     var selectedAgent = ""
     var availableAgents: [String] = []
+    private var availableAgentObjects: [OpenCodeAgent] = []
+    private var ephemeralAgentModels: [String: String] = [:]
+    private var preferredFallbackModelID: String?
     var availableCommands: [OpenCodeCommand] = []
     var availableThinkingLevels: [String] = []
     var selectedThinkingLevel: String?
@@ -101,6 +104,7 @@ final class AppStore {
     var isLoadingSessions = false
     var loadingTranscriptSessionID: String?
     var isSending = false
+    var queuedMessagesBySessionID: [String: [ComposerQueuedMessage]] = [:]
     var isRespondingToPrompt = false
     var isPromptReady = true
     var promptLoadingText: String?
@@ -177,6 +181,7 @@ final class AppStore {
     private var dashboardRefreshPending = false
     private var dashboardDirtySessions: [ProjectSummary.ID: Set<String>] = [:]
     private var isDashboardActive = false
+    private var queuedMessageDispatchingSessionIDs = Set<String>()
 
     init() {
         let normalizedProjects = Self.normalizedProjects(PersistedProjectsStore().loadProjects())
@@ -259,9 +264,18 @@ final class AppStore {
         transcript(for: selectedSessionID)
     }
 
+    var selectedQueuedMessages: [ComposerQueuedMessage] {
+        queuedMessages(for: selectedSessionID)
+    }
+
     func transcript(for sessionID: String?) -> [ChatMessage] {
         guard let sessionID else { return [] }
         return transcriptStateBySessionID[sessionID]?.messages ?? []
+    }
+
+    func queuedMessages(for sessionID: String?) -> [ComposerQueuedMessage] {
+        guard let sessionID else { return [] }
+        return queuedMessagesBySessionID[sessionID] ?? []
     }
 
     func transcriptRevisionToken(for sessionID: String?) -> Int {
@@ -934,6 +948,14 @@ final class AppStore {
             return
         }
 
+        if let selectedSessionID,
+           self.projectID(for: selectedSessionID) == projectID,
+           session(for: selectedSessionID)?.status == .running,
+           enqueueDraft(in: selectedSessionID) {
+            reevaluateRuntimeRetention(using: runtime)
+            return
+        }
+
         guard let service = await liveService(for: projectID, runtime: runtime) else {
             logger.error("Cannot send draft because live service is unavailable for project: \(projectID.uuidString, privacy: .public)")
             return
@@ -941,7 +963,12 @@ final class AppStore {
 
         guard let sessionID = await resolveSessionForSend(projectID: projectID, service: service) else { return }
 
-        let accepted = await sendDraft(using: service, projectID: projectID, sessionID: sessionID, fileReferences: fileReferences)
+        let accepted = await sendDraft(
+            using: service,
+            projectID: projectID,
+            sessionID: sessionID,
+            fileReferences: fileReferences
+        )
         if accepted {
             scheduleStreamingRecoveryCheck(for: sessionID, projectID: projectID, using: runtime)
         }
@@ -954,10 +981,50 @@ final class AppStore {
         using service: any OpenCodeServicing,
         projectID: ProjectSummary.ID,
         sessionID: String,
-        fileReferences: [ComposerPromptFileReference] = []
+        fileReferences: [ComposerPromptFileReference] = [],
+        allowQueueIfRunning: Bool = false
     ) async -> Bool {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         let attachments = attachedFiles
+        guard !trimmed.isEmpty || !attachments.isEmpty else { return false }
+
+        if allowQueueIfRunning,
+           session(for: sessionID)?.status == .running {
+            return enqueueDraft(in: sessionID)
+        }
+
+        let queuedOptions = currentQueuedMessageOptions()
+        let options = OpenCodePromptOptions(
+            model: queuedOptions.model,
+            agentName: queuedOptions.agentName,
+            variant: queuedOptions.variant
+        )
+        return await sendMessage(
+            text: trimmed,
+            attachments: attachments,
+            fileReferences: fileReferences,
+            options: options,
+            using: service,
+            projectID: projectID,
+            sessionID: sessionID,
+            clearComposerOnSend: true,
+            restoreComposerOnFailure: true
+        )
+    }
+
+    @discardableResult
+    private func sendMessage(
+        text: String,
+        attachments: [ComposerAttachment],
+        fileReferences: [ComposerPromptFileReference],
+        options: OpenCodePromptOptions,
+        using service: any OpenCodeServicing,
+        projectID: ProjectSummary.ID,
+        sessionID: String,
+        clearComposerOnSend: Bool,
+        restoreComposerOnFailure: Bool
+    ) async -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !attachments.isEmpty else { return false }
 
         let slashCommand = slashCommandInvocation(in: trimmed)
@@ -1000,8 +1067,10 @@ final class AppStore {
                 )
             }
         }
-        draft = ""
-        attachedFiles = []
+        if clearComposerOnSend {
+            draft = ""
+            attachedFiles = []
+        }
         setSessionStatus(.running, sessionID: sessionID, projectID: projectID)
 
         do {
@@ -1012,11 +1081,7 @@ final class AppStore {
                     arguments: slashCommand.arguments,
                     attachments: attachments,
                     fileReferences: fileReferences,
-                    options: OpenCodePromptOptions(
-                        model: selectedModel,
-                        agentName: selectedAgent.isEmpty ? nil : selectedAgent,
-                        variant: selectedThinkingLevel
-                    )
+                    options: options
                 )
                 logger.info(
                     "Slash command accepted for session \(sessionID, privacy: .public): \(slashCommand.command.name, privacy: .public)"
@@ -1027,11 +1092,7 @@ final class AppStore {
                     text: trimmed,
                     attachments: attachments,
                     fileReferences: fileReferences,
-                    options: OpenCodePromptOptions(
-                        model: selectedModel,
-                        agentName: selectedAgent.isEmpty ? nil : selectedAgent,
-                        variant: selectedThinkingLevel
-                    )
+                    options: options
                 )
                 logger.info("Draft accepted for session: \(sessionID, privacy: .public)")
             }
@@ -1043,8 +1104,10 @@ final class AppStore {
             if shouldShowOptimisticUserMessage {
                 removeOptimisticAttachmentMessages(in: sessionID, projectID: projectID)
             }
-            draft = trimmed
-            attachedFiles = attachments
+            if restoreComposerOnFailure {
+                draft = text
+                attachedFiles = attachments
+            }
             setSessionStatus(.attention, sessionID: sessionID, projectID: projectID)
             lastError = error.localizedDescription
             isSending = false
@@ -1189,6 +1252,7 @@ final class AppStore {
             cancelStreamingRecoveryCheck(for: sessionID)
             refreshSelectedSessionMessages(projectID: projectID)
             lastError = nil
+            await sendQueuedMessagesIfPossible(for: sessionID, projectID: projectID, using: runtime)
             reevaluateRuntimeRetention(using: runtime)
         } catch {
             logger.error("Failed to abort session \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")
@@ -1215,6 +1279,56 @@ final class AppStore {
 
     func removeAttachment(id: ComposerAttachment.ID) {
         attachedFiles.removeAll(where: { $0.id == id })
+    }
+
+    func editQueuedMessage(id: ComposerQueuedMessage.ID, in sessionID: String? = nil) {
+        let targetSessionID = sessionID ?? selectedSessionID
+        guard let targetSessionID,
+              var queue = queuedMessagesBySessionID[targetSessionID],
+              let queuedIndex = queue.firstIndex(where: { $0.id == id })
+        else {
+            return
+        }
+
+        let queuedMessage = queue.remove(at: queuedIndex)
+        let draftText = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let draftAttachments = attachedFiles
+        if !draftText.isEmpty || !draftAttachments.isEmpty {
+            queue.insert(
+                ComposerQueuedMessage(
+                    text: draftText,
+                    attachments: draftAttachments,
+                    options: currentQueuedMessageOptions()
+                ),
+                at: queuedIndex
+            )
+        }
+
+        if queue.isEmpty {
+            queuedMessagesBySessionID.removeValue(forKey: targetSessionID)
+        } else {
+            queuedMessagesBySessionID[targetSessionID] = queue
+        }
+
+        draft = queuedMessage.text
+        attachedFiles = queuedMessage.attachments
+        applyQueuedMessageOptions(queuedMessage.options)
+    }
+
+    func removeQueuedMessage(id: ComposerQueuedMessage.ID, in sessionID: String? = nil) {
+        let targetSessionID = sessionID ?? selectedSessionID
+        guard let targetSessionID,
+              var queue = queuedMessagesBySessionID[targetSessionID]
+        else {
+            return
+        }
+
+        queue.removeAll(where: { $0.id == id })
+        if queue.isEmpty {
+            queuedMessagesBySessionID.removeValue(forKey: targetSessionID)
+        } else {
+            queuedMessagesBySessionID[targetSessionID] = queue
+        }
     }
 
     func refreshGitStatus() async {
@@ -1788,6 +1902,11 @@ final class AppStore {
             if selectedModelID == nil || !models.contains(where: { $0.id == selectedModelID }) {
                 selectedModelID = models.first?.id
             }
+            if preferredFallbackModelID == nil,
+               let selectedModelID,
+               models.contains(where: { $0.id == selectedModelID }) {
+                preferredFallbackModelID = selectedModelID
+            }
         case .failure(let message):
             logger.error("Failed to load composer models: \(message, privacy: .public)")
             availableModels = []
@@ -1796,16 +1915,20 @@ final class AppStore {
 
         switch agentsResult {
         case .success(let agents):
-            availableAgents = agents
+            let filteredAgents = agents
                 .filter { !($0.hidden ?? false) }
                 .filter { ($0.mode ?? "primary") != "subagent" }
+            availableAgentObjects = filteredAgents
+            availableAgents = filteredAgents
                 .map(\.name)
                 .sorted { displayAgentName($0) < displayAgentName($1) }
             if !availableAgents.contains(selectedAgent) {
-                selectedAgent = availableAgents.first ?? ""
+                let firstAgent = availableAgents.first ?? ""
+                selectAgent(firstAgent)
             }
         case .failure(let message):
             logger.error("Failed to load composer agents: \(message, privacy: .public)")
+            availableAgentObjects = []
             availableAgents = []
             selectedAgent = ""
         }
@@ -1948,12 +2071,138 @@ final class AppStore {
         availableModels.first(where: { $0.id == selectedModelID })
     }
 
+    private func currentQueuedMessageOptions() -> ComposerQueuedMessage.OptionsSnapshot {
+        ComposerQueuedMessage.OptionsSnapshot(
+            model: selectedModel,
+            agentName: selectedAgent.isEmpty ? nil : selectedAgent,
+            variant: selectedThinkingLevel
+        )
+    }
+
+    private func applyQueuedMessageOptions(_ options: ComposerQueuedMessage.OptionsSnapshot) {
+        selectedModelID = options.model?.id
+        refreshThinkingLevels()
+        selectedAgent = options.agentName ?? ""
+        if let variant = options.variant,
+           availableThinkingLevels.contains(variant) {
+            selectedThinkingLevel = variant
+        } else if availableThinkingLevels.isEmpty {
+            selectedThinkingLevel = nil
+        }
+    }
+
+    @discardableResult
+    private func enqueueDraft(in sessionID: String) -> Bool {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let attachments = attachedFiles
+        guard !trimmed.isEmpty || !attachments.isEmpty else { return false }
+
+        var queue = queuedMessagesBySessionID[sessionID] ?? []
+        queue.append(
+            ComposerQueuedMessage(
+                text: trimmed,
+                attachments: attachments,
+                options: currentQueuedMessageOptions()
+            )
+        )
+        queuedMessagesBySessionID[sessionID] = queue
+        draft = ""
+        attachedFiles = []
+        lastError = nil
+        return true
+    }
+
+    private func popFirstQueuedMessage(in sessionID: String) -> ComposerQueuedMessage? {
+        guard var queue = queuedMessagesBySessionID[sessionID], !queue.isEmpty else { return nil }
+        let message = queue.removeFirst()
+        if queue.isEmpty {
+            queuedMessagesBySessionID.removeValue(forKey: sessionID)
+        } else {
+            queuedMessagesBySessionID[sessionID] = queue
+        }
+        return message
+    }
+
+    private func prependQueuedMessage(_ message: ComposerQueuedMessage, in sessionID: String) {
+        var queue = queuedMessagesBySessionID[sessionID] ?? []
+        queue.insert(message, at: 0)
+        queuedMessagesBySessionID[sessionID] = queue
+    }
+
     func displayAgentName(_ rawName: String) -> String {
         rawName
             .replacingOccurrences(of: "-", with: " ")
             .split(separator: " ")
             .map { $0.prefix(1).uppercased() + $0.dropFirst().lowercased() }
             .joined(separator: " ")
+    }
+
+    /// Selects an agent and switches to the appropriate model based on priority:
+    /// 1. Last model used with this agent
+    /// 2. Agent's configured default model
+    /// 3. Preferred global fallback model
+    /// 4. First available model
+    func selectAgent(_ agentName: String) {
+        if !selectedAgent.isEmpty,
+           selectedAgent != agentName,
+           let selectedModelID,
+           availableModels.contains(where: { $0.id == selectedModelID }) {
+            ephemeralAgentModels[selectedAgent] = selectedModelID
+        }
+
+        selectedAgent = agentName
+
+        guard let agent = availableAgentObjects.first(where: { $0.name == agentName }) else { return }
+
+        // Priority 1: Check ephemeral storage for last model used with this agent
+        if let ephemeralModelID = ephemeralAgentModels[agentName],
+           availableModels.contains(where: { $0.id == ephemeralModelID }) {
+            selectedModelID = ephemeralModelID
+            selectedModelVariant = nil
+            logger.info("Switched to ephemeral model for agent \(agentName): \(ephemeralModelID)")
+            return
+        }
+
+        // Priority 2: Use agent's configured default model
+        if let agentModel = agent.model {
+            let modelOptionID = "\(agentModel.providerID)/\(agentModel.modelID)"
+            if availableModels.contains(where: { $0.id == modelOptionID }) {
+                selectedModelID = modelOptionID
+                selectedModelVariant = nil
+                logger.info("Switched to agent \(agentName)'s configured model: \(modelOptionID)")
+                return
+            } else {
+                logger.warning("Agent \(agentName)'s configured model \(modelOptionID) is not available")
+            }
+        }
+
+        // Priority 3: Use the preferred global fallback model
+        if let preferredFallbackModelID,
+           availableModels.contains(where: { $0.id == preferredFallbackModelID }) {
+            selectedModelID = preferredFallbackModelID
+            selectedModelVariant = nil
+            logger.debug("Switched to fallback model for agent \(agentName): \(preferredFallbackModelID)")
+            return
+        }
+
+        // Priority 4: Fall back to first available model
+        if let firstModel = availableModels.first {
+            selectedModelID = firstModel.id
+            selectedModelVariant = nil
+            logger.info("Fell back to first available model for agent \(agentName): \(firstModel.id)")
+        }
+    }
+
+    /// Sets the model for the current agent and stores it for future agent switches.
+    func setModelForCurrentAgent(_ modelID: String) {
+        selectedModelID = modelID
+        selectedModelVariant = nil
+        preferredFallbackModelID = modelID
+
+        if !self.selectedAgent.isEmpty {
+            self.ephemeralAgentModels[self.selectedAgent] = modelID
+            logger.info("Stored ephemeral model for agent \(self.selectedAgent): \(modelID)")
+        }
     }
 
     private func slashCommandInvocation(in text: String) -> SlashCommandInvocation? {
@@ -2012,7 +2261,7 @@ final class AppStore {
                 lastError = "No model matches '\(query)'."
                 return false
             }
-            selectedModelID = match.id
+            setModelForCurrentAgent(match.id)
             refreshThinkingLevels()
             draft = ""
             return true
@@ -2026,7 +2275,7 @@ final class AppStore {
                 lastError = "No agent matches '\(query)'."
                 return false
             }
-            selectedAgent = match
+            selectAgent(match)
             draft = ""
             return true
 
@@ -2295,6 +2544,13 @@ final class AppStore {
                         }
 
                         self.apply(event: event, projectID: projectID)
+                        if let queueSessionID = self.queueDispatchSessionID(for: event) {
+                            await self.sendQueuedMessagesIfPossible(
+                                for: queueSessionID,
+                                projectID: projectID,
+                                using: runtime
+                            )
+                        }
                         switch event {
                         case .sessionCreated(let session):
                             self.noteDashboardChange(projectID: projectID, sessionID: session.id, using: runtime)
@@ -2749,6 +3005,8 @@ final class AppStore {
         guard let projectIndex = projects.firstIndex(where: { $0.id == projectID }) else { return }
         discardBufferedTextDeltas(for: sessionID, projectID: projectID)
         clearLocalSessionActivity(sessionID)
+        queuedMessagesBySessionID.removeValue(forKey: sessionID)
+        queuedMessageDispatchingSessionIDs.remove(sessionID)
         removeTranscript(for: sessionID)
         projects[projectIndex].sessions.removeAll(where: { $0.id == sessionID })
         cancelStreamingRecoveryCheck(for: sessionID)
@@ -2876,6 +3134,97 @@ final class AppStore {
         }
 
         return fallback == .attention ? .attention : .idle
+    }
+
+    private func queueDispatchSessionID(for event: OpenCodeEvent) -> String? {
+        switch event {
+        case .sessionStatusChanged(let sessionID, _):
+            return sessionID
+        case .permissionAsked(let request):
+            return request.sessionID
+        case .permissionReplied(let event):
+            return event.sessionID
+        case .questionAsked(let request):
+            return request.sessionID
+        case .questionReplied(let event):
+            return event.sessionID
+        case .questionRejected(let event):
+            return event.sessionID
+        case .messageUpdated(let info):
+            return info.sessionID
+        case .messagePartUpdated(let part):
+            return part.sessionID
+        case .messagePartDelta(let delta):
+            return delta.sessionID
+        case .sessionCreated, .sessionUpdated, .sessionDeleted, .connected, .ignored:
+            return nil
+        }
+    }
+
+    @discardableResult
+    func sendNextQueuedMessageIfPossible(
+        in sessionID: String,
+        projectID: ProjectSummary.ID,
+        projectPath: String,
+        using service: any OpenCodeServicing
+    ) async -> Bool {
+        guard session(for: sessionID)?.status == .idle,
+              pendingPermission(for: sessionID) == nil,
+              pendingQuestion(for: sessionID) == nil,
+              let queuedMessage = popFirstQueuedMessage(in: sessionID)
+        else {
+            return false
+        }
+
+        let fileReferences = await ProjectFileSearchService.shared.resolveFileReferences(in: projectPath, text: queuedMessage.text)
+        let didSend = await sendMessage(
+            text: queuedMessage.text,
+            attachments: queuedMessage.attachments,
+            fileReferences: fileReferences,
+            options: OpenCodePromptOptions(
+                model: queuedMessage.options.model,
+                agentName: queuedMessage.options.agentName,
+                variant: queuedMessage.options.variant
+            ),
+            using: service,
+            projectID: projectID,
+            sessionID: sessionID,
+            clearComposerOnSend: false,
+            restoreComposerOnFailure: false
+        )
+
+        if !didSend {
+            prependQueuedMessage(queuedMessage, in: sessionID)
+        }
+        return didSend
+    }
+
+    private func sendQueuedMessagesIfPossible(
+        for sessionID: String,
+        projectID: ProjectSummary.ID,
+        using runtime: OpenCodeRuntime
+    ) async {
+        guard queuedMessageDispatchingSessionIDs.insert(sessionID).inserted else { return }
+        defer { queuedMessageDispatchingSessionIDs.remove(sessionID) }
+
+        while true {
+            guard let service = await liveService(for: projectID, runtime: runtime),
+                  let projectPath = projectPath(for: projectID)
+            else {
+                return
+            }
+
+            let didSend = await sendNextQueuedMessageIfPossible(
+                in: sessionID,
+                projectID: projectID,
+                projectPath: projectPath,
+                using: service
+            )
+            guard didSend else {
+                return
+            }
+            scheduleStreamingRecoveryCheck(for: sessionID, projectID: projectID, using: runtime)
+        }
     }
 
     private func reconcileOptimisticUserMessage(with message: ChatMessage, sessionID: String, projectID: ProjectSummary.ID) {

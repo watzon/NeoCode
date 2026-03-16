@@ -1266,6 +1266,111 @@ struct NeoCodeMainActorTests {
     }
 
     @MainActor
+    @Test func appStoreQueuesDraftWhenSessionIsAlreadyRunning() async {
+        let projectID = UUID()
+        let store = AppStore(projects: [
+            ProjectSummary(
+                id: projectID,
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(id: "ses_1", title: "Existing", lastUpdatedAt: .distantPast, status: .running),
+                ]
+            ),
+        ])
+        let service = MockOpenCodeService()
+
+        store.selectSession("ses_1")
+        store.draft = "Queued follow-up"
+
+        let didSend = await store.sendDraft(
+            using: service,
+            projectID: projectID,
+            sessionID: "ses_1",
+            allowQueueIfRunning: true
+        )
+
+        #expect(didSend == true)
+        #expect(service.sentPrompts.isEmpty)
+        #expect(store.queuedMessages(for: "ses_1").count == 1)
+        #expect(store.queuedMessages(for: "ses_1").first?.text == "Queued follow-up")
+        #expect(store.draft.isEmpty)
+    }
+
+    @MainActor
+    @Test func editingQueuedDraftSwapsCurrentComposerContent() async throws {
+        let projectID = UUID()
+        let store = AppStore(projects: [
+            ProjectSummary(
+                id: projectID,
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(id: "ses_1", title: "Existing", lastUpdatedAt: .distantPast, status: .running),
+                ]
+            ),
+        ])
+        let service = MockOpenCodeService()
+
+        store.selectSession("ses_1")
+        store.draft = "Queued follow-up"
+        _ = await store.sendDraft(
+            using: service,
+            projectID: projectID,
+            sessionID: "ses_1",
+            allowQueueIfRunning: true
+        )
+
+        let queuedID = try #require(store.queuedMessages(for: "ses_1").first?.id)
+        store.draft = "Work in progress"
+
+        store.editQueuedMessage(id: queuedID, in: "ses_1")
+
+        #expect(store.draft == "Queued follow-up")
+        #expect(store.queuedMessages(for: "ses_1").count == 1)
+        #expect(store.queuedMessages(for: "ses_1").first?.text == "Work in progress")
+    }
+
+    @MainActor
+    @Test func appStoreSendsQueuedDraftOnceSessionReturnsToIdle() async {
+        let projectID = UUID()
+        let store = AppStore(projects: [
+            ProjectSummary(
+                id: projectID,
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(id: "ses_1", title: "Existing", lastUpdatedAt: .distantPast, status: .running),
+                ]
+            ),
+        ])
+        let service = MockOpenCodeService()
+
+        store.selectSession("ses_1")
+        store.draft = "Queued follow-up"
+        _ = await store.sendDraft(
+            using: service,
+            projectID: projectID,
+            sessionID: "ses_1",
+            allowQueueIfRunning: true
+        )
+
+        store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .idle))
+        let didSend = await store.sendNextQueuedMessageIfPossible(
+            in: "ses_1",
+            projectID: projectID,
+            projectPath: "/tmp/NeoCode",
+            using: service
+        )
+
+        #expect(didSend == true)
+        #expect(store.queuedMessages(for: "ses_1").isEmpty)
+        #expect(service.sentPrompts.count == 1)
+        #expect(service.sentPrompts[0].text == "Queued follow-up")
+        #expect(store.selectedSession?.status == .running)
+    }
+
+    @MainActor
     @Test func appStorePrefersRemoteSlashCommandsOverLocalHandlers() async {
         let projectID = UUID()
         let store = AppStore(projects: [

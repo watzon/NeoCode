@@ -244,7 +244,7 @@ struct ComposerView: View {
                 } searchableText: { model in
                     [model.title, model.providerID, model.modelID]
                 } onSelect: { model in
-                    store.selectedModelID = model.id
+                    store.setModelForCurrentAgent(model.id)
                     store.refreshThinkingLevels()
                 }
 
@@ -264,7 +264,7 @@ struct ComposerView: View {
                 } searchableText: { option in
                     [option.title, option.id]
                 } onSelect: { option in
-                    store.selectedAgent = option.id
+                    store.selectAgent(option.id)
                 }
 
                 if !store.availableThinkingLevels.isEmpty {
@@ -322,7 +322,7 @@ struct ComposerView: View {
     }
 
     private var isStopMode: Bool {
-        store.selectedSession?.status == .running
+        store.selectedSession?.status == .running && !canSend
     }
 
     private var activityState: ComposerActivityState? {
@@ -368,7 +368,13 @@ struct ComposerView: View {
     }
 
     private var primaryActionHelp: String {
-        isStopMode ? "Stop current response" : "Send message"
+        if isStopMode {
+            return "Stop current response"
+        }
+        if store.selectedSession?.status == .running {
+            return "Queue message"
+        }
+        return "Send message"
     }
 
     private func handlePrimaryAction() {
@@ -388,8 +394,115 @@ struct ComposerView: View {
     }
 }
 
+struct QueuedMessagesView: View {
+    let messages: [ComposerQueuedMessage]
+    let onEdit: (ComposerQueuedMessage.ID) -> Void
+    let onRemove: (ComposerQueuedMessage.ID) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(messages.enumerated()), id: \.element.id) { entry in
+                QueuedMessageCard(
+                    message: entry.element,
+                    position: entry.offset + 1,
+                    totalCount: messages.count,
+                    onEdit: { onEdit(entry.element.id) },
+                    onRemove: { onRemove(entry.element.id) }
+                )
+            }
+        }
+    }
+}
+
 private enum ComposerLayout {
     static let minimumTextViewHeight: CGFloat = 36
+}
+
+private struct QueuedMessageCard: View {
+    let message: ComposerQueuedMessage
+    let position: Int
+    let totalCount: Int
+    let onEdit: () -> Void
+    let onRemove: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 10) {
+                Label {
+                    Text(totalCount > 1 ? "Queued \(position) of \(totalCount)" : "Queued")
+                        .font(.neoMonoSmall)
+                        .foregroundStyle(NeoCodeTheme.textSecondary)
+                } icon: {
+                    Image(systemName: "clock")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(NeoCodeTheme.accent)
+                }
+
+                Spacer(minLength: 0)
+
+                Button("Edit", action: onEdit)
+                    .buttonStyle(.plain)
+                    .font(.neoMonoSmall)
+                    .foregroundStyle(NeoCodeTheme.textPrimary)
+
+                Button("Remove", action: onRemove)
+                    .buttonStyle(.plain)
+                    .font(.neoMonoSmall)
+                    .foregroundStyle(NeoCodeTheme.warning)
+            }
+
+            if let previewText = message.text.nonEmptyTrimmed {
+                Text(previewText)
+                    .font(.neoBody)
+                    .foregroundStyle(NeoCodeTheme.textPrimary)
+                    .lineLimit(4)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            if !message.attachments.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(message.attachments) { attachment in
+                            QueuedMessageAttachmentTag(attachment: attachment)
+                        }
+                    }
+                }
+            }
+
+            Text("Waiting for the current response to finish before sending.")
+                .font(.neoMonoSmall)
+                .foregroundStyle(NeoCodeTheme.textMuted)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(NeoCodeTheme.panelRaised)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(NeoCodeTheme.line, lineWidth: 1)
+                )
+        )
+        .shadow(color: NeoCodeTheme.canvas.opacity(0.14), radius: 12, x: 0, y: 8)
+    }
+}
+
+private struct QueuedMessageAttachmentTag: View {
+    let attachment: ComposerAttachment
+
+    var body: some View {
+        Text(attachment.name)
+            .font(.neoMonoSmall)
+            .foregroundStyle(NeoCodeTheme.textSecondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill(NeoCodeTheme.panelSoft)
+                    .overlay(Capsule().stroke(NeoCodeTheme.lineSoft, lineWidth: 1))
+            )
+    }
 }
 
 private enum ComposerActivityState: Equatable {
