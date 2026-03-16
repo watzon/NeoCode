@@ -3,6 +3,7 @@ import Foundation
 enum AppContentSelection: Hashable {
     case dashboard
     case session(String)
+    case settings(AppSettingsSection)
 }
 
 struct DashboardProjectDescriptor: Codable, Hashable, Identifiable, Sendable {

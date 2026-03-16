@@ -5,7 +5,9 @@ struct PrimaryContentScreen: View {
     @Environment(AppStore.self) private var store
 
     var body: some View {
-        if store.isDashboardSelected {
+        if let section = store.selectedSettingsSection {
+            SettingsScreen(section: section)
+        } else if store.isDashboardSelected {
             DashboardScreen()
         } else {
             ConversationScreen(selectedSessionID: store.selectedSessionID)

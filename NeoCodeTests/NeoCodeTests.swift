@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import NeoCode
 
@@ -1972,6 +1973,75 @@ struct NeoCodeMainActorTests {
         #expect(store.isDashboardSelected == true)
         #expect(store.selectedProjectID == store.projects.first?.id)
         #expect(store.selectedSessionID == nil)
+    }
+
+    @MainActor
+    @Test func appStoreReturnsToPreviousWorkspaceSelectionWhenClosingSettings() {
+        let store = AppStore(projects: [
+            ProjectSummary(
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(id: "ses_1", title: "Existing", lastUpdatedAt: .distantPast),
+                ]
+            ),
+        ])
+
+        store.selectSession("ses_1")
+        store.openSettings()
+
+        #expect(store.isSettingsSelected == true)
+        #expect(store.selectedSettingsSection == .general)
+        #expect(store.selectedSessionID == nil)
+
+        store.selectSettingsSection(.general)
+        #expect(store.selectedSettingsSection == .general)
+
+        store.closeSettings()
+
+        #expect(store.isSettingsSelected == false)
+        #expect(store.selectedSessionID == "ses_1")
+    }
+
+    @Test func themeModeMapsToPreferredColorScheme() {
+        #expect(NeoCodeThemeMode.system.preferredColorScheme == nil)
+        #expect(NeoCodeThemeMode.light.preferredColorScheme == .light)
+        #expect(NeoCodeThemeMode.dark.preferredColorScheme == .dark)
+    }
+
+    @MainActor
+    @Test func persistedAppSettingsStoreRoundTripsAppearanceSettings() {
+        let suiteName = "tech.watzon.NeoCodeTests.app-settings.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let persistence = PersistedAppSettingsStore(defaults: defaults, key: "appSettings")
+        let settings = NeoCodeAppSettings(
+            general: .init(launchToDashboard: false),
+            appearance: .init(
+                themeMode: .dark,
+                lightTheme: .lightDefault,
+                darkTheme: .init(
+                    accentHex: "#55AAFF",
+                    backgroundHex: "#14181F",
+                    foregroundHex: "#F4F7FA",
+                    contrast: 68,
+                    isSidebarTranslucent: false
+                ),
+                usesPointerCursor: true,
+                uiFontSize: 15,
+                codeFontSize: 14,
+                uiFontName: "Instrument Sans",
+                codeFontName: "JetBrains Mono"
+            )
+        )
+
+        persistence.saveSettings(settings)
+
+        #expect(persistence.loadSettings() == settings)
     }
 
     @MainActor

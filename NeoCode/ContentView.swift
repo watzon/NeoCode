@@ -23,6 +23,7 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .ignoresSafeArea(.container, edges: .top)
+        .preferredColorScheme(NeoCodeTheme.preferredColorScheme(from: store.appSettings.appearance))
         .background(NeoCodeTheme.canvas.ignoresSafeArea())
         .background(WindowChromeConfigurator())
         .overlay(alignment: .topTrailing) {
@@ -35,12 +36,15 @@ struct ContentView: View {
         }
         .task(id: selectionSyncTaskKey) {
             guard isRuntimeBootstrappingEnabled else { return }
+            guard !store.isSettingsSelected else { return }
             await store.syncSelection(using: runtime)
         }
         .task(id: dashboardRefreshTaskKey) {
             guard isRuntimeBootstrappingEnabled else { return }
 
-            if store.isDashboardSelected {
+            if store.isSettingsSelected {
+                store.suspendDashboardRefresh()
+            } else if store.isDashboardSelected {
                 await store.startDashboard(using: runtime)
             } else {
                 store.suspendDashboardRefresh()
@@ -80,10 +84,23 @@ struct ContentView: View {
     }
 
     private var dashboardRefreshTaskKey: String {
-        "\(store.isDashboardSelected)-\(store.dashboardProjectSignature)"
+        let mode: String
+        if store.isSettingsSelected {
+            mode = "settings"
+        } else if store.isDashboardSelected {
+            mode = "dashboard"
+        } else {
+            mode = "conversation"
+        }
+
+        return "\(mode)-\(store.dashboardProjectSignature)"
     }
 
     private var selectionSyncTaskKey: String {
+        if let settingsSection = store.selectedSettingsSection {
+            return "settings:\(settingsSection.rawValue)"
+        }
+
         let projectID = store.selectedProject?.id.uuidString ?? "none"
         let sessionID = store.selectedSessionID ?? "dashboard"
         return "\(projectID):\(sessionID)"

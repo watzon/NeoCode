@@ -13,6 +13,7 @@ nonisolated struct AppStorePerformanceOptions: Sendable {
 final class AppStore {
     private let logger = Logger(subsystem: "tech.watzon.NeoCode", category: "AppStore")
     private let projectPersistence = PersistedProjectsStore()
+    private let appSettingsPersistence = PersistedAppSettingsStore()
     private let promptDraftPersistence = PersistedPromptDraftsStore()
     private let yoloPreferencePersistence = PersistedYoloPreferencesStore()
     private let favoriteModelPersistence = PersistedFavoriteModelsStore()
@@ -83,7 +84,21 @@ final class AppStore {
 
     var projects: [ProjectSummary]
     var selectedProjectID: ProjectSummary.ID?
-    var selectedContent: AppContentSelection
+    var selectedContent: AppContentSelection {
+        didSet {
+            if case .settings = selectedContent {
+                return
+            }
+
+            lastWorkspaceSelection = selectedContent
+        }
+    }
+    var appSettings: NeoCodeAppSettings {
+        didSet {
+            NeoCodeTheme.configure(with: appSettings.appearance)
+            persistAppSettingsIfNeeded()
+        }
+    }
     var draft = "" {
         didSet {
             persistDraftIfNeeded()
@@ -193,19 +208,24 @@ final class AppStore {
     private var isDashboardActive = false
     private var queuedMessageDispatchingSessionIDs = Set<String>()
     private var sessionCreationTasksBySessionID: [String: Task<String?, Never>] = [:]
+    private var lastWorkspaceSelection: AppContentSelection = .dashboard
 
     init() {
         let normalizedProjects = Self.normalizedProjects(PersistedProjectsStore().loadProjects())
         let extractedState = Self.extractTranscriptState(from: normalizedProjects)
+        let loadedAppSettings = PersistedAppSettingsStore().loadSettings()
         self.projects = extractedState.projects
         self.transcriptStateBySessionID = extractedState.transcripts
         self.selectedProjectID = extractedState.projects.first?.id
         self.selectedContent = .dashboard
+        self.appSettings = loadedAppSettings
         self.loadingTranscriptSessionID = nil
         self.yoloSessionKeys = PersistedYoloPreferencesStore().loadYoloSessionKeys()
         self.favoriteModelIDs = favoriteModelPersistence.loadFavoriteModelIDs()
         self.performanceOptions = AppStorePerformanceOptions()
         self.isPersistenceEnabled = true
+        self.lastWorkspaceSelection = .dashboard
+        NeoCodeTheme.configure(with: loadedAppSettings.appearance)
         seedComposerDefaults()
     }
 
@@ -216,15 +236,19 @@ final class AppStore {
     ) {
         let normalizedProjects = Self.normalizedProjects(projects)
         let extractedState = Self.extractTranscriptState(from: normalizedProjects)
+        let loadedAppSettings = isPersistenceEnabled ? PersistedAppSettingsStore().loadSettings() : .init()
         self.projects = extractedState.projects
         self.transcriptStateBySessionID = extractedState.transcripts
         self.selectedProjectID = extractedState.projects.first?.id
         self.selectedContent = .dashboard
+        self.appSettings = loadedAppSettings
         self.loadingTranscriptSessionID = nil
         self.yoloSessionKeys = isPersistenceEnabled ? PersistedYoloPreferencesStore().loadYoloSessionKeys() : []
         self.favoriteModelIDs = isPersistenceEnabled ? favoriteModelPersistence.loadFavoriteModelIDs() : []
         self.performanceOptions = performanceOptions
         self.isPersistenceEnabled = isPersistenceEnabled
+        self.lastWorkspaceSelection = .dashboard
+        NeoCodeTheme.configure(with: loadedAppSettings.appearance)
         seedComposerDefaults()
     }
 
@@ -247,6 +271,18 @@ final class AppStore {
             return true
         }
         return false
+    }
+
+    var isSettingsSelected: Bool {
+        if case .settings = selectedContent {
+            return true
+        }
+        return false
+    }
+
+    var selectedSettingsSection: AppSettingsSection? {
+        guard case .settings(let section) = selectedContent else { return nil }
+        return section
     }
 
     var dashboardProjectSignature: String {
@@ -460,6 +496,33 @@ final class AppStore {
         scheduleGitRefreshLoop(for: selectedProject?.path)
     }
 
+    func openSettings(section: AppSettingsSection = .general) {
+        if !isSettingsSelected {
+            lastWorkspaceSelection = selectedContent
+        }
+
+        selectedContent = .settings(section)
+        suspendDashboardRefresh()
+    }
+
+    func closeSettings() {
+        switch lastWorkspaceSelection {
+        case .settings:
+            selectedContent = .dashboard
+        default:
+            selectedContent = lastWorkspaceSelection
+        }
+
+        scheduleGitRefreshLoop(for: selectedProject?.path)
+    }
+
+    func selectSettingsSection(_ section: AppSettingsSection) {
+        if !isSettingsSelected {
+            lastWorkspaceSelection = selectedContent
+        }
+        selectedContent = .settings(section)
+    }
+
     func selectSession(_ sessionID: String) {
         guard selectedSessionID != sessionID else { return }
         let destinationProjectID = projectID(for: sessionID)
@@ -507,6 +570,12 @@ final class AppStore {
 
     func isProjectCollapsed(_ projectID: ProjectSummary.ID) -> Bool {
         projects.first(where: { $0.id == projectID })?.settings.isCollapsedInSidebar ?? false
+    }
+
+    func updateAppearance(_ update: (inout NeoCodeAppearanceSettings) -> Void) {
+        var appearance = appSettings.appearance
+        update(&appearance)
+        appSettings.appearance = appearance
     }
 
     func connect(to runtime: OpenCodeRuntime) async {
@@ -4259,6 +4328,11 @@ final class AppStore {
             guard !Task.isCancelled else { return }
             self.flushPendingProjectPersistence()
         }
+    }
+
+    private func persistAppSettingsIfNeeded() {
+        guard isPersistenceEnabled else { return }
+        appSettingsPersistence.saveSettings(appSettings)
     }
 }
 

@@ -4,7 +4,21 @@ import UniformTypeIdentifiers
 
 struct AppSidebarView: View {
     @Environment(AppStore.self) private var store
-    @Environment(OpenCodeRuntime.self) private var runtime
+
+    var body: some View {
+        Group {
+            if store.isSettingsSelected {
+                SettingsSidebarView()
+            } else {
+                ThreadsSidebarView()
+            }
+        }
+        .background(SidebarChrome())
+    }
+}
+
+private struct ThreadsSidebarView: View {
+    @Environment(AppStore.self) private var store
     @State private var isPickingProject = false
 
     var body: some View {
@@ -17,7 +31,9 @@ struct AppSidebarView: View {
                 onDashboard: {
                     store.selectDashboard()
                 },
-                onSettings: {}
+                onSettings: {
+                    store.openSettings()
+                }
             )
 
             ScrollView {
@@ -336,17 +352,21 @@ struct SessionTreeRow: View {
     @ViewBuilder
     private var trailingAccessory: some View {
         HStack(spacing: 6) {
-            Text(relativeAge)
-                .font(.neoMonoSmall)
-                .foregroundStyle(NeoCodeTheme.textMuted)
-
             if let statusLabel {
                 SidebarSessionStatusBadge(label: statusLabel, tone: statusTone)
             }
 
-            sessionMenuButton
-                .opacity(isHovering ? 1 : 0)
-                .allowsHitTesting(isHovering)
+            ZStack(alignment: .trailing) {
+                Text(relativeAge)
+                    .font(.neoMonoSmall)
+                    .foregroundStyle(NeoCodeTheme.textMuted)
+                    .opacity(isHovering ? 0 : 1)
+
+                sessionMenuButton
+                    .opacity(isHovering ? 1 : 0)
+                    .allowsHitTesting(isHovering)
+            }
+            .fixedSize()
         }
         .fixedSize()
     }
@@ -486,4 +506,11 @@ struct SidebarSessionStatusBadge: View {
 private enum SidebarLayout {
     static let selectionCornerRadius: CGFloat = 6
     static let hoverFillOpacity: Double = 0.45
+}
+
+private struct SidebarChrome: View {
+    var body: some View {
+        Rectangle()
+            .fill(Color.clear)
+    }
 }

@@ -93,8 +93,8 @@ private struct AppSceneView: View {
             .frame(minWidth: 980, minHeight: 600)
             .environment(store)
             .environment(runtime)
-            .preferredColorScheme(.dark)
             .onAppear {
+                NeoCodeTheme.configure(with: store.appSettings.appearance)
                 appDelegate.onDidBecomeActive = {
                     store.handleApplicationDidBecomeActive()
                 }
