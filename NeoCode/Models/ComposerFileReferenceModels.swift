@@ -161,3 +161,36 @@ enum ComposerPromptFileReferenceBuilder {
         return matches
     }
 }
+
+enum ComposerPromptFileReferenceDeletion {
+    nonisolated static func backwardDeleteRange(
+        in text: String,
+        sourceTexts: [ComposerPromptFileReference.SourceText],
+        cursorLocation: Int
+    ) -> NSRange? {
+        let textLength = (text as NSString).length
+        guard cursorLocation > 0, cursorLocation <= textLength else { return nil }
+
+        let mentionRanges = sourceTexts
+            .map { NSRange(location: $0.start, length: $0.end - $0.start) }
+            .filter { $0.location >= 0 && NSMaxRange($0) <= textLength }
+
+        for range in mentionRanges {
+            if cursorLocation > range.location && cursorLocation <= NSMaxRange(range) {
+                return range
+            }
+        }
+
+        let nsText = text as NSString
+        let previousCharacterRange = NSRange(location: cursorLocation - 1, length: 1)
+        let previousCharacter = nsText.substring(with: previousCharacterRange)
+
+        guard previousCharacter == " " else { return nil }
+
+        for range in mentionRanges where NSMaxRange(range) == cursorLocation - 1 {
+            return NSRange(location: range.location, length: range.length + 1)
+        }
+
+        return nil
+    }
+}

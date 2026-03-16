@@ -159,6 +159,7 @@ struct ComposerView: View {
                 text: $text,
                 measuredHeight: $textViewHeight,
                 selectionRequest: $selectionRequest,
+                projectPath: store.selectedProject?.path,
                 onPrimaryAction: handlePrimaryAction,
                 onConfirmAuxiliarySelection: onConfirmAuxiliarySelection,
                 onMoveAuxiliarySelection: onMoveAuxiliarySelection,
@@ -648,6 +649,7 @@ struct GrowingTextView: NSViewRepresentable {
     @Binding var text: String
     @Binding var measuredHeight: CGFloat
     @Binding var selectionRequest: ComposerTextSelectionRequest?
+    let projectPath: String?
     let onPrimaryAction: () -> Void
     let onConfirmAuxiliarySelection: () -> Bool
     let onMoveAuxiliarySelection: (Int) -> Bool
@@ -679,6 +681,7 @@ struct GrowingTextView: NSViewRepresentable {
         textView.onConfirmAuxiliarySelection = onConfirmAuxiliarySelection
         textView.onMoveAuxiliarySelection = onMoveAuxiliarySelection
         textView.onCancelAuxiliaryUI = onCancelAuxiliaryUI
+        textView.projectPath = projectPath
 
         let scrollView = NSScrollView()
         scrollView.drawsBackground = false
@@ -703,6 +706,7 @@ struct GrowingTextView: NSViewRepresentable {
             textView.string = text
 
             if text.isEmpty {
+                textView.scheduleFileMentionHighlightUpdate()
                 context.coordinator.updateMeasuredHeight(minimumHeight)
                 return
             }
@@ -711,6 +715,7 @@ struct GrowingTextView: NSViewRepresentable {
         textView.onConfirmAuxiliarySelection = onConfirmAuxiliarySelection
         textView.onMoveAuxiliarySelection = onMoveAuxiliarySelection
         textView.onCancelAuxiliaryUI = onCancelAuxiliaryUI
+        textView.projectPath = projectPath
 
         if let selectionRequest, context.coordinator.lastSelectionRequestID != selectionRequest.id {
             context.coordinator.lastSelectionRequestID = selectionRequest.id
@@ -722,6 +727,8 @@ struct GrowingTextView: NSViewRepresentable {
                 self.selectionRequest = nil
             }
         }
+
+        textView.scheduleFileMentionHighlightUpdate()
 
         context.coordinator.recalculateHeight(for: textView)
     }
@@ -738,6 +745,10 @@ struct GrowingTextView: NSViewRepresentable {
             guard let textView = notification.object as? NSTextView else { return }
             parent.text = textView.string
             recalculateHeight(for: textView)
+
+            if let composerTextView = textView as? ComposerNSTextView {
+                composerTextView.scheduleFileMentionHighlightUpdate()
+            }
         }
 
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
@@ -806,6 +817,20 @@ private final class ComposerNSTextView: NSTextView {
     var onConfirmAuxiliarySelection: (() -> Bool)?
     var onMoveAuxiliarySelection: ((Int) -> Bool)?
     var onCancelAuxiliaryUI: (() -> Bool)?
+    var projectPath: String?
+
+    private var mentionHighlightTask: Task<Void, Never>?
+    private var promotedFileMentionSourceTexts: [ComposerPromptFileReference.SourceText] = []
+    private lazy var mentionHighlightAttributes: [NSAttributedString.Key: Any] = [
+        .foregroundColor: NSColor(NeoCodeTheme.accent),
+        .backgroundColor: NSColor(NeoCodeTheme.accentDim).withAlphaComponent(0.42),
+        .underlineStyle: NSUnderlineStyle.single.rawValue,
+        .underlineColor: NSColor(NeoCodeTheme.accent).withAlphaComponent(0.85)
+    ]
+
+    deinit {
+        mentionHighlightTask?.cancel()
+    }
 
     override func paste(_ sender: Any?) {
         let items = composerAttachmentItems(from: .general)
@@ -815,6 +840,91 @@ private final class ComposerNSTextView: NSTextView {
         }
 
         super.paste(sender)
+    }
+
+    override func deleteBackward(_ sender: Any?) {
+        if deletePromotedFileMentionIfNeeded() {
+            return
+        }
+
+        super.deleteBackward(sender)
+    }
+
+    func scheduleFileMentionHighlightUpdate() {
+        mentionHighlightTask?.cancel()
+
+        let textSnapshot = string
+        let projectPathSnapshot = projectPath
+        applyFileMentionHighlights([])
+
+        guard let projectPathSnapshot,
+              !textSnapshot.isEmpty
+        else {
+            return
+        }
+
+        mentionHighlightTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 80_000_000)
+            guard !Task.isCancelled else { return }
+
+            let references = await ProjectFileSearchService.shared.resolveFileReferences(
+                in: projectPathSnapshot,
+                text: textSnapshot
+            )
+            let sourceTexts = references.map(\.sourceText)
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                guard let self,
+                      self.string == textSnapshot,
+                      self.projectPath == projectPathSnapshot
+                else {
+                    return
+                }
+
+                self.applyFileMentionHighlights(sourceTexts)
+            }
+        }
+    }
+
+    private func applyFileMentionHighlights(_ sourceTexts: [ComposerPromptFileReference.SourceText]) {
+        guard let layoutManager else { return }
+
+        promotedFileMentionSourceTexts = sourceTexts
+
+        let fullRange = NSRange(location: 0, length: (string as NSString).length)
+        layoutManager.removeTemporaryAttribute(.foregroundColor, forCharacterRange: fullRange)
+        layoutManager.removeTemporaryAttribute(.backgroundColor, forCharacterRange: fullRange)
+        layoutManager.removeTemporaryAttribute(.underlineStyle, forCharacterRange: fullRange)
+        layoutManager.removeTemporaryAttribute(.underlineColor, forCharacterRange: fullRange)
+
+        for sourceText in sourceTexts {
+            let range = NSRange(location: sourceText.start, length: sourceText.end - sourceText.start)
+            guard range.location >= 0, NSMaxRange(range) <= fullRange.length else { continue }
+            layoutManager.addTemporaryAttributes(mentionHighlightAttributes, forCharacterRange: range)
+        }
+    }
+
+    private func deletePromotedFileMentionIfNeeded() -> Bool {
+        guard selectedRange.length == 0,
+              let deletionRange = ComposerPromptFileReferenceDeletion.backwardDeleteRange(
+                in: string,
+                sourceTexts: promotedFileMentionSourceTexts,
+                cursorLocation: selectedRange.location
+              )
+        else {
+            return false
+        }
+
+        guard shouldChangeText(in: deletionRange, replacementString: "") else {
+            return true
+        }
+
+        textStorage?.replaceCharacters(in: deletionRange, with: "")
+        didChangeText()
+        setSelectedRange(NSRange(location: deletionRange.location, length: 0))
+        scheduleFileMentionHighlightUpdate()
+        return true
     }
 
     private func composerAttachmentItems(from pasteboard: NSPasteboard) -> [ComposerAttachmentImportItem] {

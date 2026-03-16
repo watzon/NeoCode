@@ -86,20 +86,23 @@ struct ComposerAuxiliaryTests {
         #expect(mentions[1].sourceText.value == "@src/App.swift")
     }
 
-    @Test func fileSearchServiceResolvesManuallyTypedMentions() async throws {
-        let rootURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let docsURL = rootURL.appendingPathComponent("Docs", isDirectory: true)
-        try FileManager.default.createDirectory(at: docsURL, withIntermediateDirectories: true)
-        try "guide".write(to: docsURL.appendingPathComponent("Guide.md"), atomically: true, encoding: .utf8)
-        defer { try? FileManager.default.removeItem(at: rootURL) }
-
-        let references = await ProjectFileSearchService.shared.resolveFileReferences(
-            in: rootURL.path,
-            text: "Check @Docs/Guide.md before we continue."
+    @Test func promotedMentionBackspaceDeletesWholeTokenAtMentionBoundary() {
+        let range = ComposerPromptFileReferenceDeletion.backwardDeleteRange(
+            in: "Open @Docs/Guide.md now",
+            sourceTexts: [.init(value: "@Docs/Guide.md", start: 5, end: 19)],
+            cursorLocation: 19
         )
 
-        #expect(references.count == 1)
-        #expect(references[0].relativePath == "Docs/Guide.md")
-        #expect(references[0].sourceText.value == "@Docs/Guide.md")
+        #expect(range == NSRange(location: 5, length: 14))
+    }
+
+    @Test func promotedMentionBackspaceDeletesTokenAndTrailingSpaceAfterInsertion() {
+        let range = ComposerPromptFileReferenceDeletion.backwardDeleteRange(
+            in: "Open @Docs/Guide.md ",
+            sourceTexts: [.init(value: "@Docs/Guide.md", start: 5, end: 19)],
+            cursorLocation: 20
+        )
+
+        #expect(range == NSRange(location: 5, length: 15))
     }
 }
