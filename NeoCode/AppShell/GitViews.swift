@@ -174,7 +174,7 @@ struct GitCommitSheet: View {
                     title: "Commit and push",
                     systemImage: "arrow.up.circle",
                     isSelected: selectedAction == .commitAndPush,
-                    isDisabled: store.isPerformingGitOperation,
+                    isDisabled: store.isPerformingGitOperation || !store.gitStatus.hasRemote,
                     action: { selectedAction = .commitAndPush }
                 )
                 GitCommitActionButton(

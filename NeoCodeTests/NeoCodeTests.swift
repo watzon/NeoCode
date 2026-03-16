@@ -282,11 +282,28 @@ struct NeoCodeCoreTests {
     @Test func sessionSummaryOmitsPlaceholderTitlesWhenCreatingRemoteSessions() {
         let draft = SessionSummary(id: "draft", title: "New session", lastUpdatedAt: .distantPast, isEphemeral: true)
         let timestamped = SessionSummary(id: "draft-2", title: "New session - 2026-03-13T10:00:00Z", lastUpdatedAt: .distantPast, isEphemeral: true)
+        let capitalizedTimestamped = SessionSummary(id: "draft-4", title: "New Session - 2026-03-13T10:00:00Z", lastUpdatedAt: .distantPast, isEphemeral: true)
         let renamed = SessionSummary(id: "draft-3", title: "Scratchpad", lastUpdatedAt: .distantPast, isEphemeral: true)
 
         #expect(draft.requestedServerTitle == nil)
         #expect(timestamped.requestedServerTitle == nil)
+        #expect(capitalizedTimestamped.requestedServerTitle == nil)
         #expect(renamed.requestedServerTitle == "Scratchpad")
+    }
+
+    @Test func sessionSummaryInfersTitleFromCapitalizedPlaceholderThreadName() {
+        let session = SessionSummary(id: "ses_1", title: "New Session - 2026-03-13T10:00:00Z", lastUpdatedAt: .distantPast)
+        let transcript = [
+            ChatMessage(
+                id: "msg_1",
+                role: .user,
+                text: "Investigate optimistic sending latency",
+                timestamp: .distantPast,
+                emphasis: .normal
+            )
+        ]
+
+        #expect(session.applyingInferredTitle(from: transcript).title == "Investigate optimistic sending latency")
     }
 
     @Test func runtimeCapsStartupOutputBufferToRecentTail() {
@@ -845,15 +862,27 @@ struct NeoCodeMainActorTests {
     }
 
     @MainActor
-    @Test func appStoreCreatesEphemeralSessionsWithDefaultTitle() async throws {
+    @Test func appStoreEagerlyCreatesServerBackedSessionsWhenServiceIsAvailable() async throws {
         let store = AppStore(projects: [ProjectSummary(name: "NeoCode", path: "/tmp/NeoCode")])
+        let now = Date()
+        let service = MockOpenCodeService(
+            createdSession: OpenCodeSession(
+                id: "ses_created",
+                title: nil,
+                parentID: nil,
+                time: OpenCodeTimeContainer(created: now, updated: now, completed: nil)
+            )
+        )
 
-        await store.createSession(using: OpenCodeRuntime())
+        let createdSessionID = await store.createSession(in: store.projects[0].id, using: service)
 
+        #expect(createdSessionID == "ses_created")
         let session = try #require(store.selectedSession)
         #expect(session.title == "New session")
-        #expect(session.isEphemeral == true)
+        #expect(session.id == "ses_created")
+        #expect(session.isEphemeral == false)
         #expect(store.projects[0].sessions.count == 1)
+        #expect(service.createdSessionTitles == [nil])
     }
 
     @MainActor
@@ -1504,7 +1533,7 @@ struct NeoCodeMainActorTests {
     }
 
     @MainActor
-    @Test func appStoreDiscardsEphemeralSessionWhenSelectingAnotherSession() async throws {
+    @Test func appStoreKeepsPendingSessionWhenSelectingAnotherSession() async throws {
         let store = AppStore(projects: [
             ProjectSummary(
                 name: "NeoCode",
@@ -1521,8 +1550,8 @@ struct NeoCodeMainActorTests {
         store.selectSession("ses_existing")
 
         #expect(store.selectedSessionID == "ses_existing")
-        #expect(store.projects[0].sessions.count == 1)
-        #expect(store.projects[0].sessions.contains(where: { $0.id == ephemeralID }) == false)
+        #expect(store.projects[0].sessions.count == 2)
+        #expect(store.projects[0].sessions.contains(where: { $0.id == ephemeralID }) == true)
     }
 
     @MainActor
@@ -1955,9 +1984,14 @@ private final class MockOpenCodeService: OpenCodeServicing {
     var repliedQuestionIDs: [String] = []
     var rejectedQuestionIDs: [String] = []
     var sendPromptError: Error?
+    var createSessionError: Error?
+    var createdSession: OpenCodeSession?
+    var createdSessionTitles: [String?] = []
 
-    init(sendPromptError: Error? = nil) {
+    init(sendPromptError: Error? = nil, createSessionError: Error? = nil, createdSession: OpenCodeSession? = nil) {
         self.sendPromptError = sendPromptError
+        self.createSessionError = createSessionError
+        self.createdSession = createdSession
     }
 
     func listSessions() async throws -> [OpenCodeSession] { [] }
@@ -1965,7 +1999,16 @@ private final class MockOpenCodeService: OpenCodeServicing {
     func listPermissions() async throws -> [OpenCodePermissionRequest] { [] }
     func listQuestions() async throws -> [OpenCodeQuestionRequest] { [] }
     func listCommands() async throws -> [OpenCodeCommand] { [] }
-    func createSession(title: String?) async throws -> OpenCodeSession { fatalError("Unused in test") }
+    func createSession(title: String?) async throws -> OpenCodeSession {
+        createdSessionTitles.append(title)
+        if let createSessionError {
+            throw createSessionError
+        }
+        if let createdSession {
+            return createdSession
+        }
+        fatalError("Unused in test")
+    }
     func updateSession(sessionID: String, title: String) async throws -> OpenCodeSession { fatalError("Unused in test") }
     func deleteSession(sessionID: String) async throws -> Bool { true }
 

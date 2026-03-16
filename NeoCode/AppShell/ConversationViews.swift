@@ -359,11 +359,6 @@ struct ConversationView: View {
         applyComposerReplacement(trigger.applyingReplacement("@\(file.relativePath) ", to: store.draft))
     }
 
-    private func resolvePromptFileReferences() async -> [ComposerPromptFileReference] {
-        guard let projectPath = store.selectedProject?.path else { return [] }
-        return await ProjectFileSearchService.shared.resolveFileReferences(in: projectPath, text: store.draft)
-    }
-
     private func applyComposerReplacement(_ replacement: ComposerAuxiliaryReplacement) {
         dismissedAuxiliaryQuery = nil
         store.draft = replacement.text
@@ -418,7 +413,7 @@ struct ConversationView: View {
                             InlineStatusView(text: "Loading session transcript...", tone: .neutral)
                         }
 
-                        LazyVStack(alignment: .leading, spacing: 18) {
+                        VStack(alignment: .leading, spacing: 18) {
                             ForEach(renderedGroups) { group in
                                 transcriptGroupView(group)
                             }
@@ -588,8 +583,7 @@ struct ConversationView: View {
                         scrollToBottom(using: proxy, animated: false)
                     }
                     Task {
-                        let fileReferences = await resolvePromptFileReferences()
-                        await store.sendDraft(using: runtime, fileReferences: fileReferences)
+                        await store.sendDraft(using: runtime)
                     }
                 },
                 onStop: {

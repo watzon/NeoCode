@@ -698,6 +698,7 @@ private struct InlineMessageEditor: View {
                 text: $text,
                 measuredHeight: $measuredHeight,
                 selectionRequest: .constant(nil),
+                placeholder: nil,
                 projectPath: nil,
                 onPrimaryAction: onSubmit,
                 onConfirmAuxiliarySelection: { false },

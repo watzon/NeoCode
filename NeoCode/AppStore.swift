@@ -51,6 +51,13 @@ final class AppStore {
         let shouldStopAfterUse: Bool
     }
 
+    struct StagedSendUI {
+        let userMessageID: String?
+        let attachmentMessageIDs: [String]
+        let originalText: String
+        let originalAttachments: [ComposerAttachment]
+    }
+
     enum GitOperationState: Equatable {
         case initializingRepository
         case switchingBranch
@@ -182,6 +189,7 @@ final class AppStore {
     private var dashboardDirtySessions: [ProjectSummary.ID: Set<String>] = [:]
     private var isDashboardActive = false
     private var queuedMessageDispatchingSessionIDs = Set<String>()
+    private var sessionCreationTasksBySessionID: [String: Task<String?, Never>] = [:]
 
     init() {
         let normalizedProjects = Self.normalizedProjects(PersistedProjectsStore().loadProjects())
@@ -422,9 +430,6 @@ final class AppStore {
 
     func selectProject(_ destinationProjectID: ProjectSummary.ID) {
         guard projects.contains(where: { $0.id == destinationProjectID }) else { return }
-        if selectedProjectID != destinationProjectID {
-            discardSelectedEphemeralSessionIfNeeded()
-        }
         selectedProjectID = destinationProjectID
         if let projectPath = projectPath(for: destinationProjectID) {
             availableCommands = cachedCommandsByProjectPath[projectPath] ?? []
@@ -440,7 +445,6 @@ final class AppStore {
     }
 
     func selectDashboard() {
-        discardSelectedEphemeralSessionIfNeeded()
         selectedSessionID = nil
         loadingTranscriptSessionID = nil
         primePromptState(for: nil)
@@ -450,7 +454,6 @@ final class AppStore {
 
     func selectSession(_ sessionID: String) {
         guard selectedSessionID != sessionID else { return }
-        discardSelectedEphemeralSessionIfNeeded(excluding: sessionID)
         selectedSessionID = sessionID
         selectedProjectID = projectID(for: sessionID)
         if selectedSession?.isEphemeral == true {
@@ -468,7 +471,6 @@ final class AppStore {
         let projectPath = resolvedURL.path
 
         if let existingProject = projects.first(where: { $0.path == projectPath }) {
-            discardSelectedEphemeralSessionIfNeeded()
             selectedProjectID = existingProject.id
             selectedSessionID = existingProject.sessions.first?.id
             primePromptState(for: selectedSessionID)
@@ -476,7 +478,6 @@ final class AppStore {
             return
         }
 
-        discardSelectedEphemeralSessionIfNeeded()
         let project = ProjectSummary(name: resolvedURL.lastPathComponent, path: projectPath)
         projects.append(project)
         scheduleProjectPersistence()
@@ -510,15 +511,24 @@ final class AppStore {
         reevaluateRuntimeRetention(using: runtime)
     }
 
-    func createSession(using runtime: OpenCodeRuntime) async {
-        guard let projectID = selectedProject?.id else { return }
-        createEphemeralSession(in: projectID)
+    @discardableResult
+    func createSession(using runtime: OpenCodeRuntime) async -> String? {
+        guard let projectID = selectedProject?.id else { return nil }
+        return await createSession(in: projectID, using: runtime)
     }
 
-    func createSession(in projectID: ProjectSummary.ID, using runtime: OpenCodeRuntime) async {
-        _ = runtime
+    @discardableResult
+    func createSession(in projectID: ProjectSummary.ID, using runtime: OpenCodeRuntime) async -> String? {
         selectedProjectID = projectID
-        createEphemeralSession(in: projectID)
+        let pendingSessionID = stagePendingSession(in: projectID)
+        return await ensureServerSession(for: pendingSessionID, in: projectID, using: runtime)
+    }
+
+    @discardableResult
+    func createSession(in projectID: ProjectSummary.ID, using service: any OpenCodeServicing) async -> String? {
+        selectedProjectID = projectID
+        let pendingSessionID = stagePendingSession(in: projectID)
+        return await ensureServerSession(for: pendingSessionID, in: projectID, using: service)
     }
 
     func refreshSessions(in projectID: ProjectSummary.ID, using runtime: OpenCodeRuntime) async {
@@ -929,9 +939,10 @@ final class AppStore {
         return nil
     }
 
-    func sendDraft(using runtime: OpenCodeRuntime, fileReferences: [ComposerPromptFileReference] = []) async {
+    func sendDraft(using runtime: OpenCodeRuntime) async {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty || !attachedFiles.isEmpty,
+        let attachments = attachedFiles
+        guard !trimmed.isEmpty || !attachments.isEmpty,
               let projectID = selectedProject?.id
         else { return }
 
@@ -956,18 +967,71 @@ final class AppStore {
             return
         }
 
-        guard let service = await liveService(for: projectID, runtime: runtime) else {
-            logger.error("Cannot send draft because live service is unavailable for project: \(projectID.uuidString, privacy: .public)")
+        guard let initialSessionID = selectedSessionID,
+              self.projectID(for: initialSessionID) == projectID
+        else {
+            logger.error("Cannot send draft because no session is selected for project: \(projectID.uuidString, privacy: .public)")
             return
         }
 
-        guard let sessionID = await resolveSessionForSend(projectID: projectID, service: service) else { return }
+        let queuedOptions = currentQueuedMessageOptions()
+        let options = OpenCodePromptOptions(
+            model: queuedOptions.model,
+            agentName: queuedOptions.agentName,
+            variant: queuedOptions.variant
+        )
+        let stagedUI = stageSendUI(
+            text: trimmed,
+            attachments: attachments,
+            shouldShowOptimisticUserMessage: remoteCommand == nil,
+            sessionID: initialSessionID,
+            projectID: projectID,
+            clearComposerOnSend: true
+        )
+
+        async let resolvedFileReferences = resolveSendFileReferences(for: trimmed, projectID: projectID)
+
+        guard let service = await liveService(for: projectID, runtime: runtime) else {
+            logger.error("Cannot send draft because live service is unavailable for project: \(projectID.uuidString, privacy: .public)")
+            revertFailedSend(
+                stagedUI,
+                sessionID: initialSessionID,
+                projectID: projectID,
+                restoreComposerOnFailure: true
+            )
+            isSending = false
+            if lastError == nil {
+                lastError = runtime.detailLabel(for: projectPath(for: projectID))
+            }
+            reevaluateRuntimeRetention(using: runtime)
+            return
+        }
+
+        guard let sessionID = await resolveSessionForSend(projectID: projectID, service: service) else {
+            revertFailedSend(
+                stagedUI,
+                sessionID: initialSessionID,
+                projectID: projectID,
+                restoreComposerOnFailure: true
+            )
+            isSending = false
+            reevaluateRuntimeRetention(using: runtime)
+            return
+        }
+
+        let fileReferences = await resolvedFileReferences
 
         let accepted = await sendDraft(
             using: service,
             projectID: projectID,
             sessionID: sessionID,
-            fileReferences: fileReferences
+            fileReferences: fileReferences,
+            stagedUI: stagedUI,
+            text: trimmed,
+            attachments: attachments,
+            options: options,
+            clearComposerOnSend: false,
+            restoreComposerOnFailure: true
         )
         if accepted {
             scheduleStreamingRecoveryCheck(for: sessionID, projectID: projectID, using: runtime)
@@ -982,10 +1046,16 @@ final class AppStore {
         projectID: ProjectSummary.ID,
         sessionID: String,
         fileReferences: [ComposerPromptFileReference] = [],
-        allowQueueIfRunning: Bool = false
+        allowQueueIfRunning: Bool = false,
+        stagedUI: StagedSendUI? = nil,
+        text: String? = nil,
+        attachments: [ComposerAttachment]? = nil,
+        options: OpenCodePromptOptions? = nil,
+        clearComposerOnSend: Bool = true,
+        restoreComposerOnFailure: Bool = true
     ) async -> Bool {
-        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        let attachments = attachedFiles
+        let trimmed = (text ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
+        let attachments = attachments ?? attachedFiles
         guard !trimmed.isEmpty || !attachments.isEmpty else { return false }
 
         if allowQueueIfRunning,
@@ -993,22 +1063,28 @@ final class AppStore {
             return enqueueDraft(in: sessionID)
         }
 
-        let queuedOptions = currentQueuedMessageOptions()
-        let options = OpenCodePromptOptions(
-            model: queuedOptions.model,
-            agentName: queuedOptions.agentName,
-            variant: queuedOptions.variant
-        )
+        let resolvedOptions: OpenCodePromptOptions
+        if let options {
+            resolvedOptions = options
+        } else {
+            let queuedOptions = currentQueuedMessageOptions()
+            resolvedOptions = OpenCodePromptOptions(
+                model: queuedOptions.model,
+                agentName: queuedOptions.agentName,
+                variant: queuedOptions.variant
+            )
+        }
         return await sendMessage(
             text: trimmed,
             attachments: attachments,
             fileReferences: fileReferences,
-            options: options,
+            options: resolvedOptions,
             using: service,
             projectID: projectID,
             sessionID: sessionID,
-            clearComposerOnSend: true,
-            restoreComposerOnFailure: true
+            clearComposerOnSend: clearComposerOnSend,
+            restoreComposerOnFailure: restoreComposerOnFailure,
+            stagedUI: stagedUI
         )
     }
 
@@ -1022,16 +1098,14 @@ final class AppStore {
         projectID: ProjectSummary.ID,
         sessionID: String,
         clearComposerOnSend: Bool,
-        restoreComposerOnFailure: Bool
+        restoreComposerOnFailure: Bool,
+        stagedUI: StagedSendUI? = nil
     ) async -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !attachments.isEmpty else { return false }
 
         let slashCommand = slashCommandInvocation(in: trimmed)
         let shouldShowOptimisticUserMessage = slashCommand == nil
-
-        isSending = true
-        lastError = nil
         if let slashCommand {
             logger.info(
                 "Sending slash command session=\(sessionID, privacy: .public) command=\(slashCommand.command.name, privacy: .public) argumentLength=\(slashCommand.arguments.count, privacy: .public) project=\(projectID.uuidString, privacy: .public)"
@@ -1042,36 +1116,14 @@ final class AppStore {
             )
         }
 
-        let optimisticID = "optimistic-user-\(UUID().uuidString)"
-        let now = Date()
-        if shouldShowOptimisticUserMessage && !trimmed.isEmpty {
-            upsertMessage(
-                ChatMessage(id: optimisticID, role: .user, text: trimmed, timestamp: now, emphasis: .normal),
-                in: sessionID,
-                projectID: projectID
-            )
-        }
-        if shouldShowOptimisticUserMessage {
-            for attachment in attachments {
-                upsertMessage(
-                    ChatMessage(
-                        id: "optimistic-user-attachment-\(UUID().uuidString)",
-                        role: .user,
-                        text: ChatAttachment(attachment: attachment).displayTitle,
-                        timestamp: now,
-                        emphasis: .normal,
-                        attachment: ChatAttachment(attachment: attachment)
-                    ),
-                    in: sessionID,
-                    projectID: projectID
-                )
-            }
-        }
-        if clearComposerOnSend {
-            draft = ""
-            attachedFiles = []
-        }
-        setSessionStatus(.running, sessionID: sessionID, projectID: projectID)
+        let stagedUI = stagedUI ?? stageSendUI(
+            text: trimmed,
+            attachments: attachments,
+            shouldShowOptimisticUserMessage: shouldShowOptimisticUserMessage,
+            sessionID: sessionID,
+            projectID: projectID,
+            clearComposerOnSend: clearComposerOnSend
+        )
 
         do {
             if let slashCommand {
@@ -1098,17 +1150,12 @@ final class AppStore {
             }
         } catch {
             logger.error("Failed to send draft for session \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")
-            if shouldShowOptimisticUserMessage && !trimmed.isEmpty {
-                removeMessage(id: optimisticID, sessionID: sessionID, projectID: projectID)
-            }
-            if shouldShowOptimisticUserMessage {
-                removeOptimisticAttachmentMessages(in: sessionID, projectID: projectID)
-            }
-            if restoreComposerOnFailure {
-                draft = text
-                attachedFiles = attachments
-            }
-            setSessionStatus(.attention, sessionID: sessionID, projectID: projectID)
+            revertFailedSend(
+                stagedUI,
+                sessionID: sessionID,
+                projectID: projectID,
+                restoreComposerOnFailure: restoreComposerOnFailure
+            )
             lastError = error.localizedDescription
             isSending = false
             return false
@@ -2248,7 +2295,7 @@ final class AppStore {
 
         switch invocation.command {
         case .new:
-            createEphemeralSession(in: projectID)
+            _ = await createSession(in: projectID, using: runtime)
             draft = invocation.arguments
             return true
 
@@ -2666,7 +2713,8 @@ final class AppStore {
         streamingRecoveryTasks[sessionID] = Task { [weak self] in
             guard let self else { return }
 
-            try? await Task.sleep(for: .seconds(2))
+            let recoveryDelay: Duration = baselineRevision == nil ? .milliseconds(750) : .seconds(2)
+            try? await Task.sleep(for: recoveryDelay)
             guard !Task.isCancelled,
                   let session = sessionSummary(for: sessionID, projectID: projectID),
                   session.status == .running
@@ -3003,6 +3051,7 @@ final class AppStore {
 
     private func removeSession(_ sessionID: String, in projectID: ProjectSummary.ID) {
         guard let projectIndex = projects.firstIndex(where: { $0.id == projectID }) else { return }
+        cancelPendingSessionCreation(for: sessionID)
         discardBufferedTextDeltas(for: sessionID, projectID: projectID)
         clearLocalSessionActivity(sessionID)
         queuedMessagesBySessionID.removeValue(forKey: sessionID)
@@ -3037,6 +3086,21 @@ final class AppStore {
         guard let indices = indices(for: sessionID, projectID: projectID) else { return }
         var transcript = transcript(for: sessionID)
         transcript.removeAll(where: { $0.id == id })
+        setTranscript(transcript, for: sessionID)
+        projects[indices.project].sessions[indices.session].lastUpdatedAt = transcript.last?.timestamp ?? projects[indices.project].sessions[indices.session].lastUpdatedAt
+        scheduleProjectPersistence()
+    }
+
+    private func removeMessages(ids: [String], sessionID: String, projectID: ProjectSummary.ID) {
+        guard !ids.isEmpty,
+              let indices = indices(for: sessionID, projectID: projectID)
+        else {
+            return
+        }
+
+        let idsToRemove = Set(ids)
+        var transcript = transcript(for: sessionID)
+        transcript.removeAll { idsToRemove.contains($0.id) }
         setTranscript(transcript, for: sessionID)
         projects[indices.project].sessions[indices.session].lastUpdatedAt = transcript.last?.timestamp ?? projects[indices.project].sessions[indices.session].lastUpdatedAt
         scheduleProjectPersistence()
@@ -3261,16 +3325,6 @@ final class AppStore {
         transcript.remove(at: optimisticIndex)
         setTranscript(transcript, for: sessionID)
         projects[indices.project].sessions[indices.session].lastUpdatedAt = message.timestamp
-    }
-
-    private func removeOptimisticAttachmentMessages(in sessionID: String, projectID: ProjectSummary.ID) {
-        guard let indices = indices(for: sessionID, projectID: projectID) else { return }
-        var transcript = transcript(for: sessionID)
-        transcript.removeAll(where: {
-            $0.id.hasPrefix("optimistic-user-attachment-")
-        })
-        setTranscript(transcript, for: sessionID)
-        projects[indices.project].sessions[indices.session].lastUpdatedAt = transcript.last?.timestamp ?? projects[indices.project].sessions[indices.session].lastUpdatedAt
     }
 
     private func streamingPlaceholder(for part: OpenCodePart, defaultRole: ChatMessage.Role) -> ChatMessage? {
@@ -3590,6 +3644,166 @@ final class AppStore {
         transcriptStateBySessionID[destinationSessionID] = existingState
     }
 
+    @discardableResult
+    private func ensureServerSession(
+        for sessionID: String,
+        in projectID: ProjectSummary.ID,
+        using runtime: OpenCodeRuntime
+    ) async -> String? {
+        if let task = sessionCreationTasksBySessionID[sessionID] {
+            return await task.value
+        }
+
+        let task = Task<String?, Never> { [weak self] in
+            guard let self else { return nil }
+            guard let service = await self.liveService(for: projectID, runtime: runtime) else {
+                return nil
+            }
+            return await self.ensureServerSession(for: sessionID, in: projectID, using: service)
+        }
+
+        sessionCreationTasksBySessionID[sessionID] = task
+        let createdSessionID = await task.value
+        sessionCreationTasksBySessionID.removeValue(forKey: sessionID)
+        reevaluateRuntimeRetention(using: runtime)
+        return createdSessionID
+    }
+
+    @discardableResult
+    private func ensureServerSession(
+        for sessionID: String,
+        in projectID: ProjectSummary.ID,
+        using service: any OpenCodeServicing
+    ) async -> String? {
+        guard let session = self.session(for: sessionID) else {
+            return nil
+        }
+
+        guard session.isEphemeral else {
+            return session.id
+        }
+
+        do {
+            logger.info("Creating server session for pending thread id: \(sessionID, privacy: .public)")
+            let created = try await service.createSession(title: self.session(for: sessionID)?.requestedServerTitle)
+
+            if Task.isCancelled {
+                _ = try? await service.deleteSession(sessionID: created.id)
+                return nil
+            }
+
+            guard let latestSession = self.session(for: sessionID) else {
+                _ = try? await service.deleteSession(sessionID: created.id)
+                return nil
+            }
+
+            guard latestSession.isEphemeral else {
+                return latestSession.id
+            }
+
+            logger.info("Created server session id: \(created.id, privacy: .public) for pending thread \(sessionID, privacy: .public)")
+            await promoteEphemeralSession(sessionID, in: projectID, to: created)
+            lastError = nil
+            return created.id
+        } catch is CancellationError {
+            return nil
+        } catch {
+            logger.error("Failed to create server session for pending thread \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            lastError = error.localizedDescription
+            return nil
+        }
+    }
+
+    private func cancelPendingSessionCreation(for sessionID: String) {
+        sessionCreationTasksBySessionID[sessionID]?.cancel()
+        sessionCreationTasksBySessionID.removeValue(forKey: sessionID)
+    }
+
+    private func stageSendUI(
+        text: String,
+        attachments: [ComposerAttachment],
+        shouldShowOptimisticUserMessage: Bool,
+        sessionID: String,
+        projectID: ProjectSummary.ID,
+        clearComposerOnSend: Bool
+    ) -> StagedSendUI {
+        isSending = true
+        lastError = nil
+
+        let now = Date()
+        var userMessageID: String?
+        var attachmentMessageIDs: [String] = []
+
+        if shouldShowOptimisticUserMessage && !text.isEmpty {
+            let optimisticID = "optimistic-user-\(UUID().uuidString)"
+            userMessageID = optimisticID
+            upsertMessage(
+                ChatMessage(id: optimisticID, role: .user, text: text, timestamp: now, emphasis: .normal),
+                in: sessionID,
+                projectID: projectID
+            )
+        }
+
+        if shouldShowOptimisticUserMessage {
+            for attachment in attachments {
+                let messageID = "optimistic-user-attachment-\(UUID().uuidString)"
+                attachmentMessageIDs.append(messageID)
+                upsertMessage(
+                    ChatMessage(
+                        id: messageID,
+                        role: .user,
+                        text: ChatAttachment(attachment: attachment).displayTitle,
+                        timestamp: now,
+                        emphasis: .normal,
+                        attachment: ChatAttachment(attachment: attachment)
+                    ),
+                    in: sessionID,
+                    projectID: projectID
+                )
+            }
+        }
+
+        if clearComposerOnSend {
+            draft = ""
+            attachedFiles = []
+        }
+
+        setSessionStatus(.running, sessionID: sessionID, projectID: projectID)
+        return StagedSendUI(
+            userMessageID: userMessageID,
+            attachmentMessageIDs: attachmentMessageIDs,
+            originalText: text,
+            originalAttachments: attachments
+        )
+    }
+
+    private func revertFailedSend(
+        _ stagedUI: StagedSendUI,
+        sessionID: String,
+        projectID: ProjectSummary.ID,
+        restoreComposerOnFailure: Bool
+    ) {
+        if let userMessageID = stagedUI.userMessageID {
+            removeMessage(id: userMessageID, sessionID: sessionID, projectID: projectID)
+        }
+        removeMessages(ids: stagedUI.attachmentMessageIDs, sessionID: sessionID, projectID: projectID)
+        if restoreComposerOnFailure {
+            draft = stagedUI.originalText
+            attachedFiles = stagedUI.originalAttachments
+        }
+        setSessionStatus(.attention, sessionID: sessionID, projectID: projectID)
+    }
+
+    private func resolveSendFileReferences(for text: String, projectID: ProjectSummary.ID) async -> [ComposerPromptFileReference] {
+        guard text.contains("@"),
+              let projectPath = projectPath(for: projectID)
+        else {
+            return []
+        }
+
+        return await ProjectFileSearchService.shared.resolveFileReferences(in: projectPath, text: text)
+    }
+
     private func markSessionLocallyActive(_ sessionID: String) {
         locallyActiveSessionIDs.insert(sessionID)
     }
@@ -3602,9 +3816,8 @@ final class AppStore {
         locallyActiveSessionIDs.contains(sessionID)
     }
 
-    private func createEphemeralSession(in projectID: ProjectSummary.ID) {
-        discardSelectedEphemeralSessionIfNeeded()
-
+    @discardableResult
+    private func stagePendingSession(in projectID: ProjectSummary.ID) -> String {
         let session = SessionSummary(
             id: "draft-session-\(UUID().uuidString)",
             title: newSessionTitle,
@@ -3614,21 +3827,11 @@ final class AppStore {
         upsert(session: session, in: projectID, preferTopInsertion: true)
         selectedProjectID = projectID
         selectedSessionID = session.id
+        loadingTranscriptSessionID = nil
         scheduleGitRefreshLoop(for: projectPath(for: projectID))
         primePromptState(for: session.id)
         lastError = nil
-    }
-
-    private func discardSelectedEphemeralSessionIfNeeded(excluding sessionID: String? = nil) {
-        guard let selectedSessionID,
-              selectedSessionID != sessionID,
-              let projectID = projectID(for: selectedSessionID),
-              session(for: selectedSessionID)?.isEphemeral == true
-        else {
-            return
-        }
-
-        removeSession(selectedSessionID, in: projectID)
+        return session.id
     }
 
     private func updateEphemeralSessionTitleIfNeeded(sessionID: String, projectID: ProjectSummary.ID, title: String) -> Bool {
@@ -3661,18 +3864,12 @@ final class AppStore {
             return session.id
         }
 
-        do {
-            logger.info("Persisting draft session in project id: \(projectID.uuidString, privacy: .public)")
-            let created = try await service.createSession(title: session.requestedServerTitle)
-            logger.info("Persisted draft session as id: \(created.id, privacy: .public)")
-            await promoteEphemeralSession(session.id, in: projectID, to: created)
-            lastError = nil
-            return created.id
-        } catch {
-            logger.error("Failed to persist draft session: \(error.localizedDescription, privacy: .public)")
-            lastError = error.localizedDescription
-            return nil
+        if let task = sessionCreationTasksBySessionID[currentSessionID],
+           let createdSessionID = await task.value {
+            return createdSessionID
         }
+
+        return await ensureServerSession(for: currentSessionID, in: projectID, using: service)
     }
 
     func promoteEphemeralSession(_ ephemeralSessionID: String, in projectID: ProjectSummary.ID, to created: OpenCodeSession) async {

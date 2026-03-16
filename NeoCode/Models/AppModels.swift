@@ -104,7 +104,9 @@ struct SessionSummary: Codable, Identifiable, Hashable {
 
     static func isPlaceholderTitle(_ title: String) -> Bool {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed == defaultTitle || trimmed.hasPrefix("\(defaultTitle) - ")
+        let normalized = trimmed.lowercased()
+        let placeholder = defaultTitle.lowercased()
+        return normalized == placeholder || normalized.hasPrefix("\(placeholder) - ")
     }
 
     static func inferredTitle(from transcript: [ChatMessage], maximumLength: Int = 72) -> String? {

@@ -159,6 +159,7 @@ struct ComposerView: View {
                 text: $text,
                 measuredHeight: $textViewHeight,
                 selectionRequest: $selectionRequest,
+                placeholder: "Build me a $1M SaaS. Make no mistakes.",
                 projectPath: store.selectedProject?.path,
                 onPrimaryAction: handlePrimaryAction,
                 onConfirmAuxiliarySelection: onConfirmAuxiliarySelection,
@@ -723,6 +724,7 @@ struct GrowingTextView: NSViewRepresentable {
     @Binding var text: String
     @Binding var measuredHeight: CGFloat
     @Binding var selectionRequest: ComposerTextSelectionRequest?
+    let placeholder: String?
     let projectPath: String?
     let onPrimaryAction: () -> Void
     let onConfirmAuxiliarySelection: () -> Bool
@@ -751,6 +753,7 @@ struct GrowingTextView: NSViewRepresentable {
         textView.textContainerInset = NSSize(width: 0, height: 4)
         textView.textContainer?.lineFragmentPadding = 0
         textView.string = text
+        textView.placeholder = placeholder
         textView.onImportAttachments = onImportAttachments
         textView.onConfirmAuxiliarySelection = onConfirmAuxiliarySelection
         textView.onMoveAuxiliarySelection = onMoveAuxiliarySelection
@@ -770,6 +773,7 @@ struct GrowingTextView: NSViewRepresentable {
         DispatchQueue.main.async {
             context.coordinator.recalculateHeight(for: textView)
             textView.scheduleFileMentionHighlightUpdate()
+            textView.updatePlaceholderVisibility()
         }
 
         return scrollView
@@ -783,6 +787,7 @@ struct GrowingTextView: NSViewRepresentable {
         if textView.string != text {
             textView.string = text
             needsHighlightRefresh = true
+            textView.updatePlaceholderVisibility()
 
             if text.isEmpty {
                 textView.scheduleFileMentionHighlightUpdate()
@@ -790,6 +795,7 @@ struct GrowingTextView: NSViewRepresentable {
                 return
             }
         }
+        textView.placeholder = placeholder
         textView.onImportAttachments = onImportAttachments
         textView.onConfirmAuxiliarySelection = onConfirmAuxiliarySelection
         textView.onMoveAuxiliarySelection = onMoveAuxiliarySelection
@@ -830,6 +836,7 @@ struct GrowingTextView: NSViewRepresentable {
 
             if let composerTextView = textView as? ComposerNSTextView {
                 composerTextView.scheduleFileMentionHighlightUpdate()
+                composerTextView.updatePlaceholderVisibility()
             }
         }
 
@@ -905,6 +912,7 @@ private final class ComposerNSTextView: NSTextView {
     var onMoveAuxiliarySelection: ((Int) -> Bool)?
     var onCancelAuxiliaryUI: (() -> Bool)?
     var projectPath: String?
+    var placeholder: String?
 
     private var mentionHighlightTask: Task<Void, Never>?
     private var pendingMentionHighlightRequest: MentionHighlightRequest?
@@ -916,9 +924,46 @@ private final class ComposerNSTextView: NSTextView {
         .underlineStyle: NSUnderlineStyle.single.rawValue,
         .underlineColor: NSColor(NeoCodeTheme.accent).withAlphaComponent(0.85)
     ]
+    private weak var placeholderLabel: NSTextField?
 
     deinit {
         mentionHighlightTask?.cancel()
+    }
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        setupPlaceholderLabel()
+    }
+
+    private func setupPlaceholderLabel() {
+        guard placeholderLabel == nil else { return }
+
+        let label = NSTextField(labelWithString: placeholder ?? "")
+        label.font = NSFont.systemFont(ofSize: 13)
+        label.textColor = NSColor(NeoCodeTheme.textMuted)
+        label.isEditable = false
+        label.isSelectable = false
+        label.backgroundColor = .clear
+        label.isBordered = false
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(label)
+        placeholderLabel = label
+
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: textContainerInset.width + (textContainer?.lineFragmentPadding ?? 5)),
+            label.topAnchor.constraint(equalTo: topAnchor, constant: textContainerInset.height),
+        ])
+
+        updatePlaceholderVisibility()
+    }
+
+    func updatePlaceholderVisibility() {
+        guard let placeholderLabel = placeholderLabel else { return }
+        placeholderLabel.isHidden = !string.isEmpty
+        if let placeholder = placeholder {
+            placeholderLabel.stringValue = placeholder
+        }
     }
 
     override func paste(_ sender: Any?) {
