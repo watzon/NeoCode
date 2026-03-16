@@ -335,22 +335,18 @@ struct SessionTreeRow: View {
 
     @ViewBuilder
     private var trailingAccessory: some View {
-        ZStack(alignment: .trailing) {
+        HStack(spacing: 6) {
             Text(relativeAge)
                 .font(.neoMonoSmall)
                 .foregroundStyle(NeoCodeTheme.textMuted)
-                .opacity(statusLabel == nil && !isHovering ? 1 : 0)
 
-            HStack(spacing: 6) {
-                if let statusLabel {
-                    SidebarSessionStatusBadge(label: statusLabel, tone: statusTone)
-                }
-
-                sessionMenuButton
-                    .opacity(isHovering ? 1 : 0)
-                    .allowsHitTesting(isHovering)
+            if let statusLabel {
+                SidebarSessionStatusBadge(label: statusLabel, tone: statusTone)
             }
-            .opacity(statusLabel != nil || isHovering ? 1 : 0)
+
+            sessionMenuButton
+                .opacity(isHovering ? 1 : 0)
+                .allowsHitTesting(isHovering)
         }
         .fixedSize()
     }
