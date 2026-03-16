@@ -997,6 +997,7 @@ struct NeoCodeMainActorTests {
                     content: .dataURL("data:image/png;base64,AAAA")
                 ),
             ],
+            fileReferences: [],
             options: nil
         )
 
@@ -1074,6 +1075,7 @@ struct NeoCodeMainActorTests {
                     content: .dataURL("data:image/png;base64,AAAA")
                 ),
             ],
+            fileReferences: [],
             options: OpenCodePromptOptions(
                 model: ComposerModelOption(
                     id: "openai/gpt-5.4",
@@ -1126,6 +1128,71 @@ struct NeoCodeMainActorTests {
         case .dataURL:
             Issue.record("Expected pasted images to be stored as files")
         }
+    }
+
+    @MainActor
+    @Test func openCodeClientPostsMentionFileReferences() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { MockURLProtocol.requestHandler = nil }
+        var capturedRequest: URLRequest?
+
+        MockURLProtocol.requestHandler = { request in
+            capturedRequest = request
+
+            guard let url = request.url,
+                  let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)
+            else {
+                throw URLError(.badServerResponse)
+            }
+
+            return (response, Data("{}".utf8))
+        }
+
+        let baseURL = try #require(URL(string: "http://127.0.0.1:4000"))
+        let client = OpenCodeClient(
+            connection: OpenCodeRuntime.Connection(
+                projectPath: "/tmp/NeoCode",
+                baseURL: baseURL,
+                username: "user",
+                password: "pass",
+                version: "1.0.0"
+            ),
+            session: session
+        )
+
+        try await client.sendPromptAsync(
+            sessionID: "ses_1",
+            text: "Review @Docs/Guide.md",
+            attachments: [],
+            fileReferences: [
+                ComposerPromptFileReference(
+                    relativePath: "Docs/Guide.md",
+                    absolutePath: "/tmp/NeoCode/Docs/Guide.md",
+                    sourceText: .init(value: "@Docs/Guide.md", start: 7, end: 21)
+                ),
+            ],
+            options: nil
+        )
+
+        let request = try #require(capturedRequest)
+        let bodyData = try requestBodyData(from: request)
+        let payloadData = try #require(bodyData)
+        let payload = try #require(JSONSerialization.jsonObject(with: payloadData) as? [String: Any])
+        let parts = try #require(payload["parts"] as? [[String: Any]])
+        #expect(parts.count == 2)
+        #expect(parts[1]["type"] as? String == "file")
+        #expect(parts[1]["filename"] as? String == "Docs/Guide.md")
+        #expect(parts[1]["url"] as? String == "file:///tmp/NeoCode/Docs/Guide.md")
+
+        let source = try #require(parts[1]["source"] as? [String: Any])
+        let textSource = try #require(source["text"] as? [String: Any])
+        #expect(source["type"] as? String == "file")
+        #expect(source["path"] as? String == "/tmp/NeoCode/Docs/Guide.md")
+        #expect(textSource["value"] as? String == "@Docs/Guide.md")
+        #expect(textSource["start"] as? Int == 7)
+        #expect(textSource["end"] as? Int == 21)
     }
 
     @MainActor
@@ -1782,7 +1849,13 @@ private final class MockOpenCodeService: OpenCodeServicing {
     func listAgents() async throws -> [OpenCodeAgent] { [] }
     func listMessages(sessionID: String) async throws -> [OpenCodeMessageEnvelope] { [] }
 
-    func sendPromptAsync(sessionID: String, text: String, attachments: [ComposerAttachment], options: OpenCodePromptOptions?) async throws {
+    func sendPromptAsync(
+        sessionID: String,
+        text: String,
+        attachments: [ComposerAttachment],
+        fileReferences: [ComposerPromptFileReference],
+        options: OpenCodePromptOptions?
+    ) async throws {
         if let sendPromptError {
             throw sendPromptError
         }
@@ -1794,6 +1867,7 @@ private final class MockOpenCodeService: OpenCodeServicing {
         command: String,
         arguments: String,
         attachments: [ComposerAttachment],
+        fileReferences: [ComposerPromptFileReference],
         options: OpenCodePromptOptions?
     ) async throws {
         if let sendPromptError {

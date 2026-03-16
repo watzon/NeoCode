@@ -55,10 +55,12 @@ struct ConversationView: View {
     @State private var isLoadingOlderMessages = false
     @State private var editingMessageID: String?
     @State private var editingText = ""
-    @State private var slashSelectionIndex = 0
-    @State private var slashScrollTargetID: String?
-    @State private var dismissedSlashQuery: String?
-    @State private var slashSelectionRequest: ComposerTextSelectionRequest?
+    @State private var auxiliarySelectionIndex = 0
+    @State private var auxiliaryScrollTargetID: String?
+    @State private var dismissedAuxiliaryQuery: ComposerAuxiliaryDismissal?
+    @State private var composerSelectionRequest: ComposerTextSelectionRequest?
+    @State private var fileMentionResults: [ProjectFileSearchResult] = []
+    @State private var fileSearchTask: Task<Void, Never>?
 
     private let bottomAnchorSpacerHeight: CGFloat = 1
     private let autoScrollThreshold: CGFloat = 72
@@ -98,6 +100,7 @@ struct ConversationView: View {
             .onAppear {
                 composerFocused = promptSurface.isComposer
                 prepareSessionPresentation(using: proxy)
+                refreshFileMentionResults()
             }
             .task(id: sessionID) {
                 await store.preparePrompt(for: sessionID)
@@ -156,27 +159,33 @@ struct ConversationView: View {
                 maintainPinnedPosition(using: proxy, animated: false)
             }
             .onChange(of: store.draft) { _, _ in
-                if rawSlashQuery == nil {
-                    dismissedSlashQuery = nil
+                if rawAuxiliaryTrigger == nil {
+                    dismissedAuxiliaryQuery = nil
                 }
             }
-            .onChange(of: activeSlashQuery) { _, _ in
-                slashSelectionIndex = 0
-                slashScrollTargetID = nil
+            .onChange(of: activeAuxiliaryTrigger) { _, _ in
+                auxiliarySelectionIndex = 0
+                auxiliaryScrollTargetID = nil
             }
-            .onChange(of: showsSlashPopover) { _, isShowing in
+            .onChange(of: showsAuxiliaryPopover) { _, isShowing in
                 if isShowing {
-                    slashSelectionIndex = 0
-                    slashScrollTargetID = nil
+                    auxiliarySelectionIndex = 0
+                    auxiliaryScrollTargetID = nil
                 }
             }
-            .onChange(of: filteredSlashCommandIDs) { _, ids in
+            .onChange(of: filteredAuxiliaryItemIDs) { _, ids in
                 guard !ids.isEmpty else {
-                    slashSelectionIndex = 0
-                    slashScrollTargetID = nil
+                    auxiliarySelectionIndex = 0
+                    auxiliaryScrollTargetID = nil
                     return
                 }
-                slashSelectionIndex = min(slashSelectionIndex, ids.count - 1)
+                auxiliarySelectionIndex = min(auxiliarySelectionIndex, ids.count - 1)
+            }
+            .onChange(of: activeFileSearchKey) { _, _ in
+                refreshFileMentionResults()
+            }
+            .onDisappear {
+                fileSearchTask?.cancel()
             }
         }
     }
@@ -192,30 +201,44 @@ struct ConversationView: View {
         store.selectedSession?.status == .running
     }
 
-    private var rawSlashQuery: String? {
+    private var rawAuxiliaryTrigger: ComposerAuxiliaryTrigger? {
         guard promptSurface.isComposer,
-              !isStopMode,
-              store.draft.hasPrefix("/")
+              !isStopMode
         else {
             return nil
         }
 
-        let remainder = store.draft.dropFirst()
-        guard !remainder.contains(where: { $0.isWhitespace }) else {
+        return ComposerAuxiliaryParser.activeTrigger(in: store.draft)
+    }
+
+    private var activeAuxiliaryTrigger: ComposerAuxiliaryTrigger? {
+        guard let rawAuxiliaryTrigger,
+              rawAuxiliaryTrigger.dismissal != dismissedAuxiliaryQuery
+        else {
             return nil
         }
 
-        return String(remainder)
+        return rawAuxiliaryTrigger
     }
 
     private var activeSlashQuery: String? {
-        guard let rawSlashQuery,
-              rawSlashQuery != dismissedSlashQuery
+        guard let activeAuxiliaryTrigger,
+              activeAuxiliaryTrigger.kind == .slashCommand
         else {
             return nil
         }
 
-        return rawSlashQuery
+        return activeAuxiliaryTrigger.query
+    }
+
+    private var activeFileMentionQuery: String? {
+        guard let activeAuxiliaryTrigger,
+              activeAuxiliaryTrigger.kind == .fileMention
+        else {
+            return nil
+        }
+
+        return activeAuxiliaryTrigger.query
     }
 
     private var slashCommands: [ComposerSlashCommand] {
@@ -260,41 +283,119 @@ struct ConversationView: View {
         filteredSlashCommands.map(\.id)
     }
 
-    private var showsSlashPopover: Bool {
-        activeSlashQuery != nil
+    private var filteredFileMentionIDs: [String] {
+        filteredFileMentions.map(\.id)
     }
 
-    private func dismissSlashPopover() -> Bool {
-        guard let activeSlashQuery else { return false }
-        dismissedSlashQuery = activeSlashQuery
+    private var filteredFileMentions: [ProjectFileSearchResult] {
+        guard activeFileMentionQuery != nil else { return [] }
+        return fileMentionResults
+    }
+
+    private var filteredAuxiliaryItemIDs: [String] {
+        guard let activeAuxiliaryTrigger else { return [] }
+
+        switch activeAuxiliaryTrigger.kind {
+        case .slashCommand:
+            return filteredSlashCommandIDs
+        case .fileMention:
+            return filteredFileMentionIDs
+        }
+    }
+
+    private var activeFileSearchKey: String? {
+        guard let query = activeFileMentionQuery,
+              let projectPath = store.selectedProject?.path
+        else {
+            return nil
+        }
+
+        return "\(projectPath)|\(query)"
+    }
+
+    private var showsAuxiliaryPopover: Bool {
+        activeAuxiliaryTrigger != nil
+    }
+
+    private func dismissAuxiliaryPopover() -> Bool {
+        guard let activeAuxiliaryTrigger else { return false }
+        dismissedAuxiliaryQuery = activeAuxiliaryTrigger.dismissal
         return true
     }
 
-    private func moveSlashCommandSelection(_ delta: Int) -> Bool {
-        guard showsSlashPopover else { return false }
-        guard !filteredSlashCommands.isEmpty else { return true }
+    private func moveAuxiliarySelection(_ delta: Int) -> Bool {
+        guard showsAuxiliaryPopover else { return false }
+        guard !filteredAuxiliaryItemIDs.isEmpty else { return true }
 
-        let count = filteredSlashCommands.count
-        slashSelectionIndex = (slashSelectionIndex + delta + count) % count
-        slashScrollTargetID = filteredSlashCommands[slashSelectionIndex].id
+        let count = filteredAuxiliaryItemIDs.count
+        auxiliarySelectionIndex = (auxiliarySelectionIndex + delta + count) % count
+        auxiliaryScrollTargetID = filteredAuxiliaryItemIDs[auxiliarySelectionIndex]
         return true
     }
 
-    private func confirmSlashCommandSelection() -> Bool {
-        guard showsSlashPopover else { return false }
-        guard !filteredSlashCommands.isEmpty else { return true }
+    private func confirmAuxiliarySelection() -> Bool {
+        guard let activeAuxiliaryTrigger else { return false }
 
-        let index = min(slashSelectionIndex, filteredSlashCommands.count - 1)
-        insertSlashCommand(filteredSlashCommands[index])
+        switch activeAuxiliaryTrigger.kind {
+        case .slashCommand:
+            guard !filteredSlashCommands.isEmpty else { return true }
+            let index = min(auxiliarySelectionIndex, filteredSlashCommands.count - 1)
+            insertSlashCommand(filteredSlashCommands[index])
+        case .fileMention:
+            guard !filteredFileMentions.isEmpty else { return true }
+            let index = min(auxiliarySelectionIndex, filteredFileMentions.count - 1)
+            insertFileMention(filteredFileMentions[index], trigger: activeAuxiliaryTrigger)
+        }
+
         return true
     }
 
     private func insertSlashCommand(_ command: ComposerSlashCommand) {
         let updatedText = "/\(command.name) "
-        dismissedSlashQuery = nil
-        store.draft = updatedText
-        slashSelectionIndex = 0
-        slashSelectionRequest = ComposerTextSelectionRequest(text: updatedText, cursorLocation: updatedText.count)
+        applyComposerReplacement(ComposerAuxiliaryReplacement(text: updatedText, cursorLocation: updatedText.count))
+    }
+
+    private func insertFileMention(_ file: ProjectFileSearchResult, trigger: ComposerAuxiliaryTrigger) {
+        applyComposerReplacement(trigger.applyingReplacement("@\(file.relativePath) ", to: store.draft))
+    }
+
+    private func resolvePromptFileReferences() async -> [ComposerPromptFileReference] {
+        guard let projectPath = store.selectedProject?.path else { return [] }
+        return await ProjectFileSearchService.shared.resolveFileReferences(in: projectPath, text: store.draft)
+    }
+
+    private func applyComposerReplacement(_ replacement: ComposerAuxiliaryReplacement) {
+        dismissedAuxiliaryQuery = nil
+        store.draft = replacement.text
+        auxiliarySelectionIndex = 0
+        auxiliaryScrollTargetID = nil
+        composerSelectionRequest = ComposerTextSelectionRequest(text: replacement.text, cursorLocation: replacement.cursorLocation)
+    }
+
+    private func refreshFileMentionResults() {
+        fileSearchTask?.cancel()
+
+        guard let query = activeFileMentionQuery,
+              let projectPath = store.selectedProject?.path
+        else {
+            fileMentionResults = []
+            return
+        }
+
+        fileSearchTask = Task {
+            let results = await ProjectFileSearchService.shared.searchFiles(in: projectPath, query: query)
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                guard activeFileMentionQuery == query,
+                      store.selectedProject?.path == projectPath
+                else {
+                    return
+                }
+
+                fileMentionResults = results
+            }
+        }
     }
 
     private func transcriptScrollView(using proxy: ScrollViewProxy) -> some View {
@@ -433,14 +534,27 @@ struct ConversationView: View {
 
     private func composerDock(using proxy: ScrollViewProxy) -> some View {
         VStack(alignment: .center, spacing: composerControlSpacing) {
-            if showsSlashPopover {
-                ComposerSlashCommandsPopover(
-                    commands: filteredSlashCommands,
-                    selectedIndex: slashSelectionIndex,
-                    scrollTargetID: slashScrollTargetID,
-                    onHoverIndex: { slashSelectionIndex = $0 },
-                    onSelect: insertSlashCommand
-                )
+            if let activeAuxiliaryTrigger {
+                Group {
+                    switch activeAuxiliaryTrigger.kind {
+                    case .slashCommand:
+                        ComposerSlashCommandsPopover(
+                            commands: filteredSlashCommands,
+                            selectedIndex: auxiliarySelectionIndex,
+                            scrollTargetID: auxiliaryScrollTargetID,
+                            onHoverIndex: { auxiliarySelectionIndex = $0 },
+                            onSelect: insertSlashCommand
+                        )
+                    case .fileMention:
+                        ComposerFileMentionsPopover(
+                            files: filteredFileMentions,
+                            selectedIndex: auxiliarySelectionIndex,
+                            scrollTargetID: auxiliaryScrollTargetID,
+                            onHoverIndex: { auxiliarySelectionIndex = $0 },
+                            onSelect: { insertFileMention($0, trigger: activeAuxiliaryTrigger) }
+                        )
+                    }
+                }
                 .frame(width: transcriptColumnWidth)
                 .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
                 .zIndex(2)
@@ -449,20 +563,21 @@ struct ConversationView: View {
             SessionPromptAreaView(
                 surface: promptSurface,
                 draftText: draftBinding,
-                slashSelectionRequest: $slashSelectionRequest,
+                selectionRequest: $composerSelectionRequest,
                 composerFocused: $composerFocused,
                 textInputHeight: $textInputHeight,
-                onConfirmAuxiliarySelection: confirmSlashCommandSelection,
-                onMoveAuxiliarySelection: moveSlashCommandSelection,
-                onCancelAuxiliaryUI: dismissSlashPopover,
+                onConfirmAuxiliarySelection: confirmAuxiliarySelection,
+                onMoveAuxiliarySelection: moveAuxiliarySelection,
+                onCancelAuxiliaryUI: dismissAuxiliaryPopover,
                 onSend: {
-                    _ = dismissSlashPopover()
+                    _ = dismissAuxiliaryPopover()
                     let shouldRemainPinned = isPinnedToBottom
                     if shouldRemainPinned {
                         scrollToBottom(using: proxy, animated: false)
                     }
                     Task {
-                        await store.sendDraft(using: runtime)
+                        let fileReferences = await resolvePromptFileReferences()
+                        await store.sendDraft(using: runtime, fileReferences: fileReferences)
                     }
                 },
                 onStop: {
@@ -488,7 +603,7 @@ struct ConversationView: View {
             guard abs(promptOverlayHeight - $0) > 0.5 else { return }
             promptOverlayHeight = $0
         }
-        .animation(.easeOut(duration: 0.16), value: showsSlashPopover)
+        .animation(.easeOut(duration: 0.16), value: showsAuxiliaryPopover)
     }
 
     private func backToBottomButton(using proxy: ScrollViewProxy) -> some View {

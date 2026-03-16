@@ -910,7 +910,7 @@ final class AppStore {
         return nil
     }
 
-    func sendDraft(using runtime: OpenCodeRuntime) async {
+    func sendDraft(using runtime: OpenCodeRuntime, fileReferences: [ComposerPromptFileReference] = []) async {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !attachedFiles.isEmpty,
               let projectID = selectedProject?.id
@@ -934,7 +934,7 @@ final class AppStore {
 
         guard let sessionID = await resolveSessionForSend(projectID: projectID, service: service) else { return }
 
-        let accepted = await sendDraft(using: service, projectID: projectID, sessionID: sessionID)
+        let accepted = await sendDraft(using: service, projectID: projectID, sessionID: sessionID, fileReferences: fileReferences)
         if accepted {
             scheduleStreamingRecoveryCheck(for: sessionID, projectID: projectID, using: runtime)
         }
@@ -943,7 +943,12 @@ final class AppStore {
     }
 
     @discardableResult
-    func sendDraft(using service: any OpenCodeServicing, projectID: ProjectSummary.ID, sessionID: String) async -> Bool {
+    func sendDraft(
+        using service: any OpenCodeServicing,
+        projectID: ProjectSummary.ID,
+        sessionID: String,
+        fileReferences: [ComposerPromptFileReference] = []
+    ) async -> Bool {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         let attachments = attachedFiles
         guard !trimmed.isEmpty || !attachments.isEmpty else { return false }
@@ -999,6 +1004,7 @@ final class AppStore {
                     command: slashCommand.command.name,
                     arguments: slashCommand.arguments,
                     attachments: attachments,
+                    fileReferences: fileReferences,
                     options: OpenCodePromptOptions(
                         model: selectedModel,
                         agentName: selectedAgent.isEmpty ? nil : selectedAgent,
@@ -1013,6 +1019,7 @@ final class AppStore {
                     sessionID: sessionID,
                     text: trimmed,
                     attachments: attachments,
+                    fileReferences: fileReferences,
                     options: OpenCodePromptOptions(
                         model: selectedModel,
                         agentName: selectedAgent.isEmpty ? nil : selectedAgent,
@@ -1121,6 +1128,7 @@ final class AppStore {
                 sessionID: sessionID,
                 text: trimmed,
                 attachments: [],
+                fileReferences: [],
                 options: OpenCodePromptOptions(
                     model: selectedModel,
                     agentName: selectedAgent.isEmpty ? nil : selectedAgent,

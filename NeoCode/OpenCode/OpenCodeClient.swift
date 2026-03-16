@@ -19,8 +19,21 @@ protocol OpenCodeServicing {
     func listProviders() async throws -> OpenCodeProviderResponse
     func listAgents() async throws -> [OpenCodeAgent]
     func listMessages(sessionID: String) async throws -> [OpenCodeMessageEnvelope]
-    func sendPromptAsync(sessionID: String, text: String, attachments: [ComposerAttachment], options: OpenCodePromptOptions?) async throws
-    func sendCommand(sessionID: String, command: String, arguments: String, attachments: [ComposerAttachment], options: OpenCodePromptOptions?) async throws
+    func sendPromptAsync(
+        sessionID: String,
+        text: String,
+        attachments: [ComposerAttachment],
+        fileReferences: [ComposerPromptFileReference],
+        options: OpenCodePromptOptions?
+    ) async throws
+    func sendCommand(
+        sessionID: String,
+        command: String,
+        arguments: String,
+        attachments: [ComposerAttachment],
+        fileReferences: [ComposerPromptFileReference],
+        options: OpenCodePromptOptions?
+    ) async throws
     func eventStream() throws -> AsyncThrowingStream<OpenCodeEvent, Error>
 }
 
@@ -128,16 +141,24 @@ final class OpenCodeClient: OpenCodeServicing {
         try await request(path: "/session/\(sessionID)/message", method: "GET")
     }
 
-    func sendPromptAsync(sessionID: String, text: String, attachments: [ComposerAttachment], options: OpenCodePromptOptions?) async throws {
+    func sendPromptAsync(
+        sessionID: String,
+        text: String,
+        attachments: [ComposerAttachment],
+        fileReferences: [ComposerPromptFileReference],
+        options: OpenCodePromptOptions?
+    ) async throws {
         let modelLabel = options?.model?.id ?? "default"
         let agentLabel = options?.agentName ?? "default"
         let variantLabel = options?.variant ?? "default"
         logger.info(
-            "POST /session/\(sessionID, privacy: .public)/prompt_async textLength=\(text.count, privacy: .public) attachments=\(attachments.count, privacy: .public) model=\(modelLabel, privacy: .public) agent=\(agentLabel, privacy: .public) variant=\(variantLabel, privacy: .public)"
+            "POST /session/\(sessionID, privacy: .public)/prompt_async textLength=\(text.count, privacy: .public) attachments=\(attachments.count, privacy: .public) fileRefs=\(fileReferences.count, privacy: .public) model=\(modelLabel, privacy: .public) agent=\(agentLabel, privacy: .public) variant=\(variantLabel, privacy: .public)"
         )
         let startedAt = Date()
         let body = SendPromptBody(
-            parts: [.text(text)] + attachments.map { .file(mime: $0.mimeType, filename: $0.name, url: $0.requestURL) },
+            parts: [.text(text)]
+                + fileReferences.map { .fileReference($0) }
+                + attachments.map { .file(mime: $0.mimeType, filename: $0.name, url: $0.requestURL) },
             model: options?.model.map { SendPromptBody.Model(providerID: $0.providerID, modelID: $0.modelID) },
             agent: options?.agentName,
             variant: options?.variant
@@ -153,13 +174,14 @@ final class OpenCodeClient: OpenCodeServicing {
         command: String,
         arguments: String,
         attachments: [ComposerAttachment],
+        fileReferences: [ComposerPromptFileReference],
         options: OpenCodePromptOptions?
     ) async throws {
         let modelLabel = options?.model?.id ?? "default"
         let agentLabel = options?.agentName ?? "default"
         let variantLabel = options?.variant ?? "default"
         logger.info(
-            "POST /session/\(sessionID, privacy: .public)/command name=\(command, privacy: .public) argumentLength=\(arguments.count, privacy: .public) attachments=\(attachments.count, privacy: .public) model=\(modelLabel, privacy: .public) agent=\(agentLabel, privacy: .public) variant=\(variantLabel, privacy: .public)"
+            "POST /session/\(sessionID, privacy: .public)/command name=\(command, privacy: .public) argumentLength=\(arguments.count, privacy: .public) attachments=\(attachments.count, privacy: .public) fileRefs=\(fileReferences.count, privacy: .public) model=\(modelLabel, privacy: .public) agent=\(agentLabel, privacy: .public) variant=\(variantLabel, privacy: .public)"
         )
         let startedAt = Date()
         let body = SendCommandBody(
@@ -168,7 +190,11 @@ final class OpenCodeClient: OpenCodeServicing {
             agent: options?.agentName,
             model: options?.model.map { "\($0.providerID)/\($0.modelID)" },
             variant: options?.variant,
-            parts: attachments.isEmpty ? nil : attachments.map { .file(mime: $0.mimeType, filename: $0.name, url: $0.requestURL) }
+            parts: {
+                let parts = fileReferences.map { SendPromptBody.Part.fileReference($0) }
+                    + attachments.map { .file(mime: $0.mimeType, filename: $0.name, url: $0.requestURL) }
+                return parts.isEmpty ? nil : parts
+            }()
         )
         let _: SendCommandResponse = try await request(path: "/session/\(sessionID)/command", method: "POST", body: body)
         logger.info(
@@ -353,6 +379,19 @@ private struct SendPromptBody: Encodable {
     enum Part: Encodable {
         case text(String)
         case file(mime: String, filename: String?, url: String)
+        case fileReference(ComposerPromptFileReference)
+
+        private struct SourceText: Encodable {
+            let value: String
+            let start: Int
+            let end: Int
+        }
+
+        private struct Source: Encodable {
+            let type: String
+            let text: SourceText
+            let path: String
+        }
 
         private enum CodingKeys: String, CodingKey {
             case type
@@ -360,6 +399,7 @@ private struct SendPromptBody: Encodable {
             case mime
             case filename
             case url
+            case source
         }
 
         func encode(to encoder: Encoder) throws {
@@ -373,6 +413,23 @@ private struct SendPromptBody: Encodable {
                 try container.encode(mime, forKey: .mime)
                 try container.encodeIfPresent(filename, forKey: .filename)
                 try container.encode(url, forKey: .url)
+            case .fileReference(let fileReference):
+                try container.encode("file", forKey: .type)
+                try container.encode("text/plain", forKey: .mime)
+                try container.encode(fileReference.relativePath, forKey: .filename)
+                try container.encode(fileReference.requestURL, forKey: .url)
+                try container.encode(
+                    Source(
+                        type: "file",
+                        text: SourceText(
+                            value: fileReference.sourceText.value,
+                            start: fileReference.sourceText.start,
+                            end: fileReference.sourceText.end
+                        ),
+                        path: fileReference.absolutePath
+                    ),
+                    forKey: .source
+                )
             }
         }
     }

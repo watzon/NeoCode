@@ -31,7 +31,7 @@ enum SessionPromptSurface: Equatable {
 struct SessionPromptAreaView: View {
     let surface: SessionPromptSurface
     @Binding var draftText: String
-    @Binding var slashSelectionRequest: ComposerTextSelectionRequest?
+    @Binding var selectionRequest: ComposerTextSelectionRequest?
     @FocusState.Binding var composerFocused: Bool
     @Binding var textInputHeight: CGFloat
     let onConfirmAuxiliarySelection: () -> Bool
@@ -46,7 +46,7 @@ struct SessionPromptAreaView: View {
             case .composer:
                 ComposerView(
                     text: $draftText,
-                    selectionRequest: $slashSelectionRequest,
+                    selectionRequest: $selectionRequest,
                     onConfirmAuxiliarySelection: onConfirmAuxiliarySelection,
                     onMoveAuxiliarySelection: onMoveAuxiliarySelection,
                     onCancelAuxiliaryUI: onCancelAuxiliaryUI,
