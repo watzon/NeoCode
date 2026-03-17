@@ -608,10 +608,7 @@ struct ConversationView: View {
                 onCancelAuxiliaryUI: dismissAuxiliaryPopover,
                 onSend: {
                     _ = dismissAuxiliaryPopover()
-                    let shouldRemainPinned = isPinnedToBottom
-                    if shouldRemainPinned {
-                        scrollToBottom(using: proxy, animated: false)
-                    }
+                    maintainPinnedPosition(using: proxy, animated: false)
                     Task {
                         await store.sendDraft(using: runtime)
                     }
