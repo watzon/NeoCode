@@ -11,38 +11,29 @@ struct SettingsSidebarView: View {
                 .frame(height: 52)
 
             VStack(alignment: .leading, spacing: 18) {
-                HStack(alignment: .top, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Settings")
-                            .font(.system(size: 22, weight: .semibold, design: .rounded))
-                            .foregroundStyle(NeoCodeTheme.textPrimary)
-
-                        Text("Tune NeoCode without leaving the main workspace.")
-                            .font(.neoBody)
-                            .foregroundStyle(NeoCodeTheme.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                Button(action: store.closeSettings) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 13, weight: .medium))
+                        Text("Back")
+                            .font(.neoAction)
                     }
-
-                    Spacer(minLength: 12)
-
-                    Button(action: store.closeSettings) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(NeoCodeTheme.textSecondary)
-                            .frame(width: 28, height: 28)
-                            .background(
-                                Circle()
-                                    .fill(NeoCodeTheme.panelSoft)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .help("Done")
+                    .foregroundStyle(NeoCodeTheme.textSecondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(NeoCodeTheme.panelSoft)
+                    )
                 }
+                .buttonStyle(.plain)
+                .help("Back to workspace")
 
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(AppSettingsSection.allCases) { section in
-                        SettingsSidebarButton(
-                            section: section,
+                        SidebarActionButton(
+                            label: section.title,
+                            systemImage: section.systemImage,
                             isSelected: store.selectedSettingsSection == section,
                             action: { store.selectSettingsSection(section) }
                         )
@@ -50,26 +41,6 @@ struct SettingsSidebarView: View {
                 }
 
                 Spacer(minLength: 0)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Release Prep")
-                        .font(.neoMeta)
-                        .foregroundStyle(NeoCodeTheme.textMuted)
-
-                    Text("General and Appearance are wired first so more sections can slot in without reworking the shell.")
-                        .font(.neoBody)
-                        .foregroundStyle(NeoCodeTheme.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(14)
-                .background(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(NeoCodeTheme.panelSoft)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .stroke(NeoCodeTheme.line, lineWidth: 1)
-                        )
-                )
             }
             .padding(.horizontal, 18)
             .padding(.bottom, 22)
@@ -558,45 +529,6 @@ private struct AppearanceThemeEditorCard: View {
                 )
             }
         }
-    }
-}
-
-private struct SettingsSidebarButton: View {
-    let section: AppSettingsSection
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: section.systemImage)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(isSelected ? NeoCodeTheme.accent : NeoCodeTheme.textSecondary)
-                    .frame(width: 20)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(section.title)
-                        .font(.neoAction)
-                        .foregroundStyle(isSelected ? NeoCodeTheme.textPrimary : NeoCodeTheme.textSecondary)
-
-                    Text(section.subtitle)
-                        .font(.neoMeta)
-                        .foregroundStyle(NeoCodeTheme.textMuted)
-                        .lineLimit(2)
-                }
-
-                Spacer(minLength: 8)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .contentShape(Rectangle())
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(isSelected ? NeoCodeTheme.panelSoft : Color.clear)
-            )
-        }
-        .buttonStyle(.plain)
     }
 }
 
