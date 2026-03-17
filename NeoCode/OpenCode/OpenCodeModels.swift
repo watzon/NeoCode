@@ -392,6 +392,10 @@ struct OpenCodePart: Decodable, Equatable, Sendable {
     nonisolated var updatedAt: Date? { time?.completed ?? time?.updated ?? time?.created }
     nonisolated var toolStatus: OpenCodeToolState.Status? { state?.status }
     nonisolated var trimmedText: String { (text ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
+    nonisolated var isSyntheticAttachmentReadSummary: Bool {
+        type == .text && trimmedText.hasPrefix("Called the Read tool with the following input:")
+    }
+
     nonisolated var attachment: ChatAttachment? {
         guard type == .file,
               let mime,

@@ -1,6 +1,47 @@
 import AppKit
 import SwiftUI
 
+func buildDisplayMessageGroups(from visibleMessages: [ChatMessage]) -> [DisplayMessageGroup] {
+    var groups: [DisplayMessageGroup] = []
+    var currentUserTurn: [ChatMessage] = []
+    var currentAssistantTurn: [ChatMessage] = []
+
+    func flushUserTurn() {
+        guard !currentUserTurn.isEmpty else { return }
+        groups.append(.userTurn(currentUserTurn))
+        currentUserTurn.removeAll(keepingCapacity: true)
+    }
+
+    func flushAssistantTurn() {
+        guard !currentAssistantTurn.isEmpty else { return }
+        groups.append(.assistantTurn(currentAssistantTurn))
+        currentAssistantTurn.removeAll(keepingCapacity: true)
+    }
+
+    for message in visibleMessages {
+        if message.role == .assistant || message.role == .tool {
+            flushUserTurn()
+            currentAssistantTurn.append(message)
+        } else if message.role == .user {
+            flushAssistantTurn()
+            if let previous = currentUserTurn.last,
+               previous.turnGroupID != message.turnGroupID {
+                flushUserTurn()
+            }
+            currentUserTurn.append(message)
+        } else {
+            flushUserTurn()
+            flushAssistantTurn()
+            groups.append(.message(message))
+        }
+    }
+
+    flushUserTurn()
+    flushAssistantTurn()
+
+    return groups
+}
+
 struct ConversationScreen: View {
     @Environment(AppStore.self) private var store
 
@@ -681,41 +722,7 @@ struct ConversationView: View {
     }
 
     private var renderedGroups: [DisplayMessageGroup] {
-        let visibleMessages = Array(transcript.suffix(loadedMessageCount))
-        var groups: [DisplayMessageGroup] = []
-        var currentUserTurn: [ChatMessage] = []
-        var currentAssistantTurn: [ChatMessage] = []
-
-        func flushUserTurn() {
-            guard !currentUserTurn.isEmpty else { return }
-            groups.append(.userTurn(currentUserTurn))
-            currentUserTurn.removeAll(keepingCapacity: true)
-        }
-
-        func flushAssistantTurn() {
-            guard !currentAssistantTurn.isEmpty else { return }
-            groups.append(.assistantTurn(currentAssistantTurn))
-            currentAssistantTurn.removeAll(keepingCapacity: true)
-        }
-
-        for message in visibleMessages {
-            if message.role == .assistant || message.role == .tool {
-                flushUserTurn()
-                currentAssistantTurn.append(message)
-            } else if message.role == .user {
-                flushAssistantTurn()
-                currentUserTurn.append(message)
-            } else {
-                flushUserTurn()
-                flushAssistantTurn()
-                groups.append(.message(message))
-            }
-        }
-
-        flushUserTurn()
-        flushAssistantTurn()
-
-        return groups
+        buildDisplayMessageGroups(from: Array(transcript.suffix(loadedMessageCount)))
     }
 
     private var session: SessionSummary? {

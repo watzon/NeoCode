@@ -383,6 +383,10 @@ struct ChatMessage: Codable, Identifiable, Hashable {
     var isInProgress: Bool
     var attachment: ChatAttachment?
 
+    nonisolated var turnGroupID: String {
+        messageID ?? id
+    }
+
     init(
         id: String,
         messageID: String? = nil,
@@ -421,8 +425,15 @@ struct ChatMessage: Codable, Identifiable, Hashable {
     static func makeTranscript(from messages: [OpenCodeMessageEnvelope]) -> [ChatMessage] {
         messages.flatMap { message in
             let timestamp = message.info.createdAt ?? message.info.updatedAt ?? Date()
-            return message.parts.filter(\.shouldDisplay).map { part in
-                ChatMessage(
+            let containsAttachment = message.parts.contains { $0.attachment != nil }
+
+            return message.parts.compactMap { part -> ChatMessage? in
+                guard part.shouldDisplay else { return nil }
+                guard !(message.info.chatRole == .user && containsAttachment && part.isSyntheticAttachmentReadSummary) else {
+                    return nil
+                }
+
+                return ChatMessage(
                     id: part.id,
                     messageID: message.info.id,
                     role: part.chatRole(defaultRole: message.info.chatRole),

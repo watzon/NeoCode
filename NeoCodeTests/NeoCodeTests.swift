@@ -100,6 +100,77 @@ struct NeoCodeCoreTests {
         #expect(transcript[1].text.contains("read completed"))
     }
 
+    @Test func transcriptDropsSyntheticReadSummaryForUserAttachmentMessages() throws {
+        let timestamp = Date(timeIntervalSince1970: 1_710_616_186)
+        let envelopes = [
+            OpenCodeMessageEnvelope(
+                info: OpenCodeMessageInfo(
+                    id: "msg_user_attachment",
+                    sessionID: "ses_1",
+                    role: "user",
+                    summary: nil,
+                    agent: nil,
+                    providerID: nil,
+                    modelID: nil,
+                    cost: nil,
+                    tokens: nil,
+                    time: OpenCodeTimeContainer(created: timestamp, updated: timestamp, completed: nil)
+                ),
+                parts: [
+                    OpenCodePart(
+                        id: "part_attachment",
+                        sessionID: "ses_1",
+                        messageID: "msg_user_attachment",
+                        type: .file,
+                        text: nil,
+                        tool: nil,
+                        mime: "image/png",
+                        filename: "CleanShot.png",
+                        url: "data:image/png;base64,AAAA",
+                        source: nil,
+                        state: nil,
+                        time: OpenCodeTimeContainer(created: timestamp, updated: timestamp, completed: nil)
+                    ),
+                    OpenCodePart(
+                        id: "part_prompt",
+                        sessionID: "ses_1",
+                        messageID: "msg_user_attachment",
+                        type: .text,
+                        text: "Ok one more test",
+                        tool: nil,
+                        mime: nil,
+                        filename: nil,
+                        url: nil,
+                        source: nil,
+                        state: nil,
+                        time: OpenCodeTimeContainer(created: timestamp, updated: timestamp, completed: nil)
+                    ),
+                    OpenCodePart(
+                        id: "part_read_summary",
+                        sessionID: "ses_1",
+                        messageID: "msg_user_attachment",
+                        type: .text,
+                        text: "Called the Read tool with the following input: {\"filePath\":\"/tmp/CleanShot.png\"}",
+                        tool: nil,
+                        mime: nil,
+                        filename: nil,
+                        url: nil,
+                        source: nil,
+                        state: nil,
+                        time: OpenCodeTimeContainer(created: timestamp, updated: timestamp, completed: nil)
+                    ),
+                ]
+            )
+        ]
+
+        let transcript = ChatMessage.makeTranscript(from: envelopes)
+
+        #expect(transcript.count == 2)
+        #expect(transcript.contains(where: { $0.text == "Ok one more test" }))
+        #expect(transcript.contains(where: { $0.attachment?.displayTitle == "CleanShot.png" }))
+        #expect(transcript.contains(where: { $0.text.contains("Called the Read tool") }) == false)
+    }
+
     @Test func parsesSSEFramesIntoDomainEvents() throws {
         var parser = OpenCodeSSEParser()
         #expect(parser.ingest(line: "event: message.part.updated") == nil)
@@ -1891,6 +1962,230 @@ struct NeoCodeMainActorTests {
         #expect(service.sentCommands.isEmpty)
         #expect(service.sentPrompts.count == 1)
         #expect(service.sentPrompts[0].text == "/unknown raw text")
+    }
+
+    @MainActor
+    @Test func appStoreKeepsConsecutiveOptimisticAttachmentSendsInSeparateUserTurns() async {
+        let projectID = UUID()
+        let store = AppStore(projects: [
+            ProjectSummary(
+                id: projectID,
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(id: "ses_1", title: "Existing", lastUpdatedAt: .distantPast),
+                ]
+            ),
+        ])
+        let service = MockOpenCodeService()
+        let firstAttachment = ComposerAttachment(
+            name: "first.png",
+            mimeType: "image/png",
+            content: .dataURL("data:image/png;base64,AAAA")
+        )
+        let secondAttachment = ComposerAttachment(
+            name: "second.png",
+            mimeType: "image/png",
+            content: .dataURL("data:image/png;base64,BBBB")
+        )
+
+        store.selectSession("ses_1")
+
+        let firstDidSend = await store.sendDraft(
+            using: service,
+            projectID: projectID,
+            sessionID: "ses_1",
+            text: "First image",
+            attachments: [firstAttachment],
+            clearComposerOnSend: false
+        )
+        let secondDidSend = await store.sendDraft(
+            using: service,
+            projectID: projectID,
+            sessionID: "ses_1",
+            text: "Second image",
+            attachments: [secondAttachment],
+            clearComposerOnSend: false
+        )
+
+        let userTurns = buildDisplayMessageGroups(from: store.selectedTranscript).compactMap { group -> [ChatMessage]? in
+            guard case .userTurn(let messages) = group else { return nil }
+            return messages
+        }
+
+        #expect(firstDidSend == true)
+        #expect(secondDidSend == true)
+        #expect(service.sentPrompts.count == 2)
+        #expect(userTurns.count == 2)
+        #expect(userTurns[0].contains(where: { $0.text == "First image" }))
+        #expect(userTurns[0].compactMap(\.attachment).map(\.displayTitle) == ["first.png"])
+        #expect(userTurns[1].contains(where: { $0.text == "Second image" }))
+        #expect(userTurns[1].compactMap(\.attachment).map(\.displayTitle) == ["second.png"])
+    }
+
+    @MainActor
+    @Test func appStoreIgnoresSyntheticReadSummaryDuringLiveAttachmentUpdates() async {
+        let projectID = UUID()
+        let now = Date(timeIntervalSince1970: 1_710_616_186)
+        let store = AppStore(projects: [
+            ProjectSummary(
+                id: projectID,
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(id: "ses_1", title: "Existing", lastUpdatedAt: .distantPast),
+                ]
+            ),
+        ])
+
+        store.selectSession("ses_1")
+        store.apply(event: .messageUpdated(OpenCodeMessageInfo(
+            id: "msg_1",
+            sessionID: "ses_1",
+            role: "user",
+            summary: nil,
+            agent: nil,
+            providerID: nil,
+            modelID: nil,
+            cost: nil,
+            tokens: nil,
+            time: OpenCodeTimeContainer(created: now, updated: now, completed: nil)
+        )))
+
+        store.apply(event: .messagePartUpdated(OpenCodePart(
+            id: "part_read_summary",
+            sessionID: "ses_1",
+            messageID: "msg_1",
+            type: .text,
+            text: "Called the Read tool with the following input: {\"filePath\":\"/tmp/CleanShot.png\"}",
+            tool: nil,
+            mime: nil,
+            filename: nil,
+            url: nil,
+            source: nil,
+            state: nil,
+            time: OpenCodeTimeContainer(created: now, updated: now, completed: nil)
+        )))
+
+        #expect(store.selectedTranscript.isEmpty)
+
+        store.apply(event: .messagePartUpdated(OpenCodePart(
+            id: "part_attachment",
+            sessionID: "ses_1",
+            messageID: "msg_1",
+            type: .file,
+            text: nil,
+            tool: nil,
+            mime: "image/png",
+            filename: "CleanShot.png",
+            url: "data:image/png;base64,AAAA",
+            source: nil,
+            state: nil,
+            time: OpenCodeTimeContainer(created: now, updated: now, completed: nil)
+        )))
+        store.apply(event: .messagePartUpdated(OpenCodePart(
+            id: "part_prompt",
+            sessionID: "ses_1",
+            messageID: "msg_1",
+            type: .text,
+            text: "Ok one more test",
+            tool: nil,
+            mime: nil,
+            filename: nil,
+            url: nil,
+            source: nil,
+            state: nil,
+            time: OpenCodeTimeContainer(created: now, updated: now, completed: nil)
+        )))
+
+        #expect(store.selectedTranscript.count == 2)
+        #expect(store.selectedTranscript.contains(where: { $0.text == "Ok one more test" }))
+        #expect(store.selectedTranscript.contains(where: { $0.attachment?.displayTitle == "CleanShot.png" }))
+        #expect(store.selectedTranscript.contains(where: { $0.text.contains("Called the Read tool") }) == false)
+    }
+
+    @MainActor
+    @Test func appStoreReconcilesOptimisticAttachmentWhenServerReturnsDifferentURLForSameFile() async {
+        let projectID = UUID()
+        let now = Date(timeIntervalSince1970: 1_710_616_186)
+        let filePath = "/tmp/CleanShot.png"
+        let store = AppStore(projects: [
+            ProjectSummary(
+                id: projectID,
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(id: "ses_1", title: "Existing", lastUpdatedAt: .distantPast),
+                ]
+            ),
+        ])
+        let service = MockOpenCodeService()
+
+        store.selectSession("ses_1")
+
+        let didSend = await store.sendDraft(
+            using: service,
+            projectID: projectID,
+            sessionID: "ses_1",
+            text: "Image test",
+            attachments: [
+                ComposerAttachment(
+                    name: "CleanShot.png",
+                    mimeType: "image/png",
+                    content: .file(path: filePath)
+                )
+            ],
+            clearComposerOnSend: false
+        )
+
+        #expect(didSend == true)
+        #expect(store.selectedTranscript.compactMap(\.attachment).count == 1)
+
+        store.apply(event: .messageUpdated(OpenCodeMessageInfo(
+            id: "msg_1",
+            sessionID: "ses_1",
+            role: "user",
+            summary: nil,
+            agent: nil,
+            providerID: nil,
+            modelID: nil,
+            cost: nil,
+            tokens: nil,
+            time: OpenCodeTimeContainer(created: now, updated: now, completed: nil)
+        )))
+        store.apply(event: .messagePartUpdated(OpenCodePart(
+            id: "part_attachment",
+            sessionID: "ses_1",
+            messageID: "msg_1",
+            type: .file,
+            text: nil,
+            tool: nil,
+            mime: "image/png",
+            filename: "CleanShot.png",
+            url: "data:image/png;base64,AAAA",
+            source: OpenCodeFileSource(text: nil, path: filePath, range: nil, clientName: nil, uri: nil),
+            state: nil,
+            time: OpenCodeTimeContainer(created: now, updated: now, completed: nil)
+        )))
+        store.apply(event: .messagePartUpdated(OpenCodePart(
+            id: "part_prompt",
+            sessionID: "ses_1",
+            messageID: "msg_1",
+            type: .text,
+            text: "Image test",
+            tool: nil,
+            mime: nil,
+            filename: nil,
+            url: nil,
+            source: nil,
+            state: nil,
+            time: OpenCodeTimeContainer(created: now, updated: now, completed: nil)
+        )))
+
+        let attachments = store.selectedTranscript.compactMap(\.attachment)
+        #expect(attachments.count == 1)
+        #expect(attachments.first?.sourcePath == filePath)
+        #expect(store.selectedTranscript.contains(where: { $0.text == "Image test" }))
     }
 
     @MainActor

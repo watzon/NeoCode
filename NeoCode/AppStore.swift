@@ -1359,7 +1359,8 @@ final class AppStore {
         let originalDraft = draft
         let originalAttachments = attachedFiles
         let originalQueue = queuedMessagesBySessionID[sessionID]
-        let truncatedTranscript = currentTranscript.filter { ($0.messageID ?? $0.id) < preview.upstreamMessageID }
+        let firstAffectedIndex = currentTranscript.firstIndex(where: { ($0.messageID ?? $0.id) == preview.upstreamMessageID }) ?? currentTranscript.endIndex
+        let truncatedTranscript = Array(currentTranscript.prefix(upTo: firstAffectedIndex))
         let allowedMessageIDs = Set(truncatedTranscript.compactMap { $0.messageID ?? $0.id })
 
         do {
@@ -3056,6 +3057,9 @@ final class AppStore {
         markSessionLocallyActive(sessionID)
         flushBufferedTextDeltas(for: sessionID, projectID: projectID)
         let defaultRole = part.messageID.flatMap { messageRoles[$0] } ?? .assistant
+        guard !shouldSuppressTranscriptPart(part, defaultRole: defaultRole) else {
+            return
+        }
         guard let message = ChatMessage(part: part, defaultRole: defaultRole) ?? streamingPlaceholder(for: part, defaultRole: defaultRole) else {
             return
         }
@@ -3591,7 +3595,7 @@ final class AppStore {
         guard let indices = indices(for: sessionID, projectID: projectID) else { return }
         var transcript = transcript(for: sessionID)
 
-        guard let optimisticIndex = transcript.firstIndex(where: {
+        guard let optimisticIndex = transcript.lastIndex(where: {
             $0.id.hasPrefix("optimistic-user-") && $0.role == .user && $0.text == message.text
         }) else {
             return
@@ -3610,8 +3614,14 @@ final class AppStore {
         }
 
         var transcript = transcript(for: sessionID)
-        guard let optimisticIndex = transcript.firstIndex(where: {
-            $0.id.hasPrefix("optimistic-user-attachment-") && $0.attachment?.optimisticKey == attachment.optimisticKey
+        guard let optimisticIndex = transcript.lastIndex(where: {
+            guard $0.id.hasPrefix("optimistic-user-attachment-"),
+                  let optimisticAttachment = $0.attachment
+            else {
+                return false
+            }
+
+            return optimisticAttachmentsMatch(optimisticAttachment, attachment)
         }) else {
             return
         }
@@ -3619,6 +3629,41 @@ final class AppStore {
         transcript.remove(at: optimisticIndex)
         setTranscript(transcript, for: sessionID)
         projects[indices.project].sessions[indices.session].lastUpdatedAt = message.timestamp
+    }
+
+    private func shouldSuppressTranscriptPart(_ part: OpenCodePart, defaultRole: ChatMessage.Role) -> Bool {
+        defaultRole == .user && part.isSyntheticAttachmentReadSummary
+    }
+
+    private func optimisticAttachmentsMatch(_ optimistic: ChatAttachment, _ incoming: ChatAttachment) -> Bool {
+        if optimistic.optimisticKey == incoming.optimisticKey {
+            return true
+        }
+
+        if let optimisticSourcePath = optimistic.sourcePath?.nonEmptyTrimmed,
+           let incomingSourcePath = incoming.sourcePath?.nonEmptyTrimmed,
+           optimisticSourcePath == incomingSourcePath {
+            return true
+        }
+
+        if let optimisticSourcePath = optimistic.sourcePath?.nonEmptyTrimmed,
+           incoming.url == URL(fileURLWithPath: optimisticSourcePath).absoluteString {
+            return true
+        }
+
+        if let incomingSourcePath = incoming.sourcePath?.nonEmptyTrimmed,
+           optimistic.url == URL(fileURLWithPath: incomingSourcePath).absoluteString {
+            return true
+        }
+
+        if let optimisticFilename = optimistic.filename?.nonEmptyTrimmed,
+           let incomingFilename = incoming.filename?.nonEmptyTrimmed,
+           optimisticFilename == incomingFilename,
+           optimistic.mimeType == incoming.mimeType {
+            return true
+        }
+
+        return optimistic.displayTitle == incoming.displayTitle && optimistic.mimeType == incoming.mimeType
     }
 
     private func streamingPlaceholder(for part: OpenCodePart, defaultRole: ChatMessage.Role) -> ChatMessage? {
@@ -4114,6 +4159,7 @@ final class AppStore {
         lastError = nil
 
         let now = Date()
+        let optimisticMessageID = "optimistic-user-message-\(UUID().uuidString)"
         var userMessageID: String?
         var attachmentMessageIDs: [String] = []
 
@@ -4121,7 +4167,7 @@ final class AppStore {
             let optimisticID = "optimistic-user-\(UUID().uuidString)"
             userMessageID = optimisticID
             upsertMessage(
-                ChatMessage(id: optimisticID, role: .user, text: text, timestamp: now, emphasis: .normal),
+                ChatMessage(id: optimisticID, messageID: optimisticMessageID, role: .user, text: text, timestamp: now, emphasis: .normal),
                 in: sessionID,
                 projectID: projectID
             )
@@ -4134,6 +4180,7 @@ final class AppStore {
                 upsertMessage(
                     ChatMessage(
                         id: messageID,
+                        messageID: optimisticMessageID,
                         role: .user,
                         text: ChatAttachment(attachment: attachment).displayTitle,
                         timestamp: now,
