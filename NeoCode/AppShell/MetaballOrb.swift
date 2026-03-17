@@ -82,14 +82,14 @@ struct MetaballOrb: View {
                 shaderDiameter: shaderDiameter,
                 visualizerPulse: pulse,
                 visualizerWarmth: warmth,
-                orbScale: 1 + pulse * 0.03 + intensity * 0.01
+                orbScale: 1 + pulse * 0.02 + intensity * 0.006
             )
         } else {
             TimelineView(.animation(minimumInterval: animationInterval)) { timeline in
                 let pulseBoost = beatContribution(from: reactiveBeat, at: timeline.date) + beatContribution(from: clickBeat, at: timeline.date)
                 let combinedPulse = min(1, max(0, pulse + pulseBoost))
                 let combinedWarmth = min(1, max(0, warmth + pulseBoost * 0.42))
-                let orbScale = 1 + combinedPulse * 0.04 + intensity * 0.012
+                let orbScale = 1 + combinedPulse * 0.03 + intensity * 0.008
 
                 shaderRect(
                     time: timeline.date.timeIntervalSince(animationStart),
@@ -134,8 +134,8 @@ struct MetaballOrb: View {
         }
 
         let envelope = exp(-elapsed * 2.35)
-        let primary = 0.52 + 0.48 * sin(elapsed * 13.5)
-        let secondary = 0.65 + 0.35 * sin(elapsed * 21.0 + 0.9)
+        let primary = 0.56 + 0.44 * sin(elapsed * 9.5)
+        let secondary = 0.70 + 0.30 * sin(elapsed * 14.0 + 0.9)
         return beat.strength * envelope * primary * secondary
     }
 }
@@ -147,8 +147,8 @@ struct DraftReactiveMetaballOrb: View {
     let internalResolutionScale: CGFloat
     let animationInterval: TimeInterval
 
-    @State private var typingBeatTrigger = 0
-    @State private var typingBeatStrength: CGFloat = 0
+    @State private var wakeLevel: CGFloat = 0
+    @State private var wakeStartedAt: Date = .distantPast
 
     init(
         size: CGFloat,
@@ -167,20 +167,26 @@ struct DraftReactiveMetaballOrb: View {
     var body: some View {
         let normalizedCount = text.trimmingCharacters(in: .whitespacesAndNewlines).count
         let steadyIntensity = min(1, sqrt(CGFloat(normalizedCount)) / 10)
-        let basePulse = min(0.32, steadyIntensity * 0.18)
+        let idleIntensity: CGFloat = 0.10
+        let idlePulse: CGFloat = 0.035
+        let basePulse = min(0.24, idlePulse + steadyIntensity * 0.10)
         let warmth = min(1, steadyIntensity * 0.42)
 
-        MetaballOrb(
-            size: size,
-            renderScale: renderScale,
-            internalResolutionScale: internalResolutionScale,
-            animationInterval: animationInterval,
-            intensity: steadyIntensity * 0.58,
-            pulse: basePulse,
-            warmth: warmth,
-            beatTrigger: typingBeatTrigger,
-            beatStrength: typingBeatStrength
-        )
+        TimelineView(.animation(minimumInterval: animationInterval)) { timeline in
+            let wake = wakeContribution(at: timeline.date)
+
+            MetaballOrb(
+                size: size,
+                renderScale: renderScale,
+                internalResolutionScale: internalResolutionScale,
+                animationInterval: animationInterval,
+                intensity: min(1, idleIntensity + steadyIntensity * 0.46 + wake * 0.34),
+                pulse: min(0.38, basePulse + wake * 0.16),
+                warmth: min(1, warmth + wake * 0.14),
+                beatTrigger: 0,
+                beatStrength: 0
+            )
+        }
         .onChange(of: text) { oldValue, newValue in
             triggerTypingBeat(from: oldValue, to: newValue)
         }
@@ -190,8 +196,17 @@ struct DraftReactiveMetaballOrb: View {
         guard oldValue != newValue else { return }
 
         let changeMagnitude = abs(newValue.count - oldValue.count)
-        let amplitude = min(1, max(0.22, CGFloat(changeMagnitude) / 6))
-        typingBeatStrength = amplitude
-        typingBeatTrigger += 1
+        let wakeBoost = min(0.26, 0.07 + CGFloat(changeMagnitude) * 0.035)
+
+        wakeLevel = min(1, wakeContribution(at: .now) + wakeBoost)
+        wakeStartedAt = .now
+    }
+
+    private func wakeContribution(at date: Date) -> CGFloat {
+        guard wakeLevel > 0 else { return 0 }
+
+        let elapsed = date.timeIntervalSince(wakeStartedAt)
+        guard elapsed > 0 else { return wakeLevel }
+        return wakeLevel * CGFloat(exp(-elapsed * 0.55))
     }
 }

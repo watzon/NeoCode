@@ -566,33 +566,43 @@ private struct ComposerActivityIndicator: View {
     @Environment(AppStore.self) private var store
     @State private var chatBeatTrigger = 0
     @State private var chatBeatStrength: CGFloat = 0
+    @State private var wakeLevel: CGFloat = 0
+    @State private var wakeStartedAt: Date = .distantPast
 
     let state: ComposerActivityState
 
     var body: some View {
-        MetaballOrb(
-            size: 32,
-            renderScale: 1.04,
-            internalResolutionScale: 1.0,
-            animationInterval: 1.0 / 18.0,
-            intensity: activityIntensity,
-            pulse: activityBasePulse,
-            warmth: activityWarmth,
-            beatTrigger: chatBeatTrigger,
-            beatStrength: chatBeatStrength
-        )
+        TimelineView(.animation(minimumInterval: 1.0 / 20.0)) { timeline in
+            let wake = wakeContribution(at: timeline.date)
+
+            MetaballOrb(
+                size: 32,
+                renderScale: 1.0,
+                internalResolutionScale: 1.0,
+                animationInterval: 1.0 / 20.0,
+                intensity: min(1, activityIntensity + wake * 0.42),
+                pulse: min(0.36, activityBasePulse + wake * 0.16),
+                warmth: min(1, activityWarmth + wake * 0.12),
+                beatTrigger: chatBeatTrigger,
+                beatStrength: chatBeatStrength
+            )
+        }
+            .frame(width: 40, height: 36)
             .help(state.helpText)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Agent activity")
             .accessibilityValue(state.accessibilityValue)
             .onAppear {
-                triggerChatBeat(amplitude: 0.42)
+                triggerChatBeat(amplitude: 0.18, wakeBoost: 0.22)
             }
             .onChange(of: transcriptRevision) { _, _ in
-                triggerChatBeat(amplitude: 0.30 + activityIntensity * 0.18)
+                triggerChatBeat(
+                    amplitude: 0.14 + activityIntensity * 0.10,
+                    wakeBoost: 0.10 + activityIntensity * 0.14
+                )
             }
             .onChange(of: activitySignature) { _, _ in
-                triggerChatBeat(amplitude: 0.72)
+                triggerChatBeat(amplitude: 0.42, wakeBoost: 0.28)
             }
     }
 
@@ -644,11 +654,11 @@ private struct ComposerActivityIndicator: View {
 
     private var activityIntensity: CGFloat {
         let base: CGFloat = switch state {
-        case .thinking: 0.48
-        case .retrying: 0.68
+        case .thinking: 0.18
+        case .retrying: 0.34
         }
-        let toolBoost = min(0.28, CGFloat(runningToolCount) * 0.1)
-        let streamBoost = min(0.2, CGFloat(inProgressMessageCount) * 0.06)
+        let toolBoost = min(0.34, CGFloat(runningToolCount) * 0.12)
+        let streamBoost = min(0.24, CGFloat(inProgressMessageCount) * 0.07)
         return min(1, base + toolBoost + streamBoost)
     }
 
@@ -662,12 +672,22 @@ private struct ComposerActivityIndicator: View {
     }
 
     private var activityBasePulse: CGFloat {
-        min(0.34, activityIntensity * 0.16 + CGFloat(runningToolCount) * 0.035)
+        min(0.22, activityIntensity * 0.06 + CGFloat(runningToolCount) * 0.02 + CGFloat(inProgressMessageCount) * 0.015)
     }
 
-    private func triggerChatBeat(amplitude: CGFloat) {
+    private func triggerChatBeat(amplitude: CGFloat, wakeBoost: CGFloat) {
+        wakeLevel = min(1, wakeContribution(at: .now) + wakeBoost)
+        wakeStartedAt = .now
         chatBeatStrength = min(1, amplitude)
         chatBeatTrigger += 1
+    }
+
+    private func wakeContribution(at date: Date) -> CGFloat {
+        guard wakeLevel > 0 else { return 0 }
+
+        let elapsed = date.timeIntervalSince(wakeStartedAt)
+        guard elapsed > 0 else { return wakeLevel }
+        return wakeLevel * CGFloat(exp(-elapsed * 0.35))
     }
 }
 
@@ -1383,10 +1403,11 @@ struct EmptyConversationView: View {
                 DraftReactiveMetaballOrb(
                     size: 88,
                     text: store.draft,
-                    renderScale: 1.1,
+                    renderScale: 1.0,
                     internalResolutionScale: 1.15,
                     animationInterval: 1.0 / 20.0
                 )
+                .frame(width: 106, height: 100)
 
                 VStack(spacing: 10) {
                     Text(store.projects.isEmpty ? "Add your first project" : "Start a thread")

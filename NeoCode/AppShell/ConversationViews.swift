@@ -1023,10 +1023,11 @@ private struct NewSessionEmptyStateView: View {
             DraftReactiveMetaballOrb(
                 size: 100,
                 text: store.draft,
-                renderScale: 1.1,
+                renderScale: 1.0,
                 internalResolutionScale: 1.15,
                 animationInterval: 1.0 / 20.0
             )
+            .frame(width: 120, height: 112)
 
             VStack(spacing: 10) {
                 Text("Build something cool")
