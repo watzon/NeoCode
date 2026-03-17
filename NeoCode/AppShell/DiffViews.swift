@@ -48,6 +48,12 @@ struct ToolCallItemCardView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
         .background(cardBackground)
+        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .onTapGesture {
+            withAnimation(.easeOut(duration: 0.16)) {
+                isExpanded.toggle()
+            }
+        }
         .onChange(of: toolStatus) { _, status in
             withAnimation(.easeOut(duration: 0.16)) {
                 isExpanded = item.defaultExpanded || status == .pending || status == .running
@@ -62,9 +68,20 @@ struct ToolCallItemCardView: View {
                 .foregroundStyle(NeoCodeTheme.textMuted)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.title)
-                    .font(.neoMonoSmall)
-                    .foregroundStyle(NeoCodeTheme.textSecondary)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    if let badgeText = item.badgeText, !badgeText.isEmpty {
+                        Text(badgeText)
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(NeoCodeTheme.accent)
+                    }
+
+                    if !item.title.isEmpty {
+                        Text(item.title)
+                            .font(.neoMonoSmall)
+                            .foregroundStyle(NeoCodeTheme.textSecondary)
+                            .lineLimit(1)
+                    }
+                }
 
                 if let subtitle = item.subtitle {
                     Text(subtitle)
@@ -78,12 +95,6 @@ struct ToolCallItemCardView: View {
             Text(toolStatus.label)
                 .font(.neoMonoSmall)
                 .foregroundStyle(statusColor)
-        }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            withAnimation(.easeOut(duration: 0.16)) {
-                isExpanded.toggle()
-            }
         }
     }
 

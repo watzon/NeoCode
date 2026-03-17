@@ -34,8 +34,10 @@ struct ToolCallPresentationTests {
         let presentation = ToolCallPresentation(toolCall: toolCall)
 
         #expect(presentation.items.count == 2)
-        #expect(presentation.items[0].title == "apply_patch - \(tempFileURL.path)")
-        #expect(presentation.items[1].title == "apply_patch - NeoCode/Models/Temp.swift")
+        #expect(presentation.items[0].badgeText == "apply_patch")
+        #expect(presentation.items[0].title == tempFileURL.path)
+        #expect(presentation.items[1].badgeText == "apply_patch")
+        #expect(presentation.items[1].title == "NeoCode/Models/Temp.swift")
 
         guard case .diff(let file, let style) = presentation.items[0].content else {
             Issue.record("Expected first item to render as a diff")
@@ -97,7 +99,8 @@ struct ToolCallPresentationTests {
         let presentation = ToolCallPresentation(toolCall: toolCall)
 
         #expect(presentation.items.count == 1)
-        #expect(presentation.items[0].title == "edit - NeoCode/AppStore.swift")
+        #expect(presentation.items[0].badgeText == "edit")
+        #expect(presentation.items[0].title == "NeoCode/AppStore.swift")
 
         guard case .diff(let file, let style) = presentation.items[0].content else {
             Issue.record("Expected edit tool to render as a changes-only diff")
@@ -121,7 +124,8 @@ struct ToolCallPresentationTests {
         let presentation = ToolCallPresentation(toolCall: toolCall)
 
         #expect(presentation.items.count == 1)
-        #expect(presentation.items[0].title == "read - README.md")
+        #expect(presentation.items[0].badgeText == "read")
+        #expect(presentation.items[0].title == "README.md")
 
         guard case .text(let text) = presentation.items[0].content else {
             Issue.record("Expected non-diff tool to render as text")
@@ -135,12 +139,15 @@ struct ToolCallPresentationTests {
         let toolCall = ChatMessage.ToolCall(
             name: "bash",
             status: .completed,
+            input: .object(["command": .string("xcodebuild test")]),
             output: .string("--- xcodebuild: WARNING: Using the first of multiple matching destinations:")
         )
 
         let presentation = ToolCallPresentation(toolCall: toolCall)
 
         #expect(presentation.items.count == 1)
+        #expect(presentation.items[0].badgeText == "bash")
+        #expect(presentation.items[0].title == "xcodebuild test")
 
         guard case .text(let text) = presentation.items[0].content else {
             Issue.record("Expected warning output to stay as plain text")
@@ -168,5 +175,23 @@ struct ToolCallPresentationTests {
         }
 
         #expect(text == "apply_patch running")
+    }
+
+    @Test func grepPresentationUsesPathInTitle() {
+        let toolCall = ChatMessage.ToolCall(
+            name: "grep",
+            status: .completed,
+            detail: "grep completed",
+            input: .object([
+                "pattern": .string("TODO"),
+                "path": .string("NeoCode/AppShell")
+            ])
+        )
+
+        let presentation = ToolCallPresentation(toolCall: toolCall)
+
+        #expect(presentation.items.count == 1)
+        #expect(presentation.items[0].badgeText == "grep")
+        #expect(presentation.items[0].title == "NeoCode/AppShell")
     }
 }

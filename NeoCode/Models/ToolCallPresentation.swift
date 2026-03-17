@@ -13,6 +13,7 @@ struct ToolCallPresentation: Hashable {
         }
 
         let id: String
+        let badgeText: String?
         let title: String
         let subtitle: String?
         let content: Content
@@ -30,9 +31,11 @@ private enum ToolCallPresentationBuilder {
     static func makeItems(for toolCall: ChatMessage.ToolCall) -> [ToolCallPresentation.Item] {
         if let bundle = changesOnlyDiffBundle(for: toolCall), !bundle.files.isEmpty {
             return bundle.files.map { file in
-                ToolCallPresentation.Item(
+                let header = toolHeader(for: toolCall.name, path: file.displayPath)
+                return ToolCallPresentation.Item(
                     id: "\(toolCall.name):\(file.id)",
-                    title: toolTitle(for: toolCall.name, path: file.displayPath),
+                    badgeText: header.badgeText,
+                    title: header.title,
                     subtitle: diffSubtitle(for: file),
                     content: .diff(file, ToolCallPresentation.Item.DiffStyle.changesOnly),
                     defaultExpanded: false
@@ -42,9 +45,11 @@ private enum ToolCallPresentationBuilder {
 
         if let bundle = unifiedDiffBundle(for: toolCall), !bundle.files.isEmpty {
             return bundle.files.map { file in
-                ToolCallPresentation.Item(
+                let header = toolHeader(for: toolCall.name, path: file.displayPath)
+                return ToolCallPresentation.Item(
                     id: "\(toolCall.name):\(file.id)",
-                    title: diffTitle(for: toolCall, file: file),
+                    badgeText: header.badgeText,
+                    title: header.title,
                     subtitle: diffSubtitle(for: file),
                     content: .diff(file, ToolCallPresentation.Item.DiffStyle.split),
                     defaultExpanded: false
@@ -52,10 +57,13 @@ private enum ToolCallPresentationBuilder {
             }
         }
 
+        let header = headerDetails(for: toolCall)
+
         return [
             ToolCallPresentation.Item(
                 id: "\(toolCall.name):detail",
-                title: toolTitle(for: toolCall.name, path: toolFilePath(for: toolCall)),
+                badgeText: header.badgeText,
+                title: header.title,
                 subtitle: nil,
                 content: .text(fallbackText(for: toolCall)),
                 defaultExpanded: toolCall.status == .pending || toolCall.status == .running
@@ -102,9 +110,23 @@ private enum ToolCallPresentationBuilder {
         return nil
     }
 
-    private static func toolTitle(for toolName: String, path: String?) -> String {
-        guard let path, !path.isEmpty else { return toolName }
-        return "\(toolName) - \(path)"
+    private static func toolHeader(for toolName: String, path: String?) -> (badgeText: String?, title: String) {
+        guard let path, !path.isEmpty else {
+            return (toolName, "")
+        }
+
+        return (toolName, path)
+    }
+
+    private static func headerDetails(for toolCall: ChatMessage.ToolCall) -> (badgeText: String?, title: String) {
+        let normalizedName = toolCall.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        switch normalizedName {
+        case "bash":
+            return toolHeader(for: toolCall.name, path: toolCommand(for: toolCall))
+        default:
+            return toolHeader(for: toolCall.name, path: toolFilePath(for: toolCall))
+        }
     }
 
     private static func unifiedDiffCandidates(for toolCall: ChatMessage.ToolCall) -> [String] {
@@ -124,32 +146,13 @@ private enum ToolCallPresentationBuilder {
         }
     }
 
-    private static func diffTitle(for toolCall: ChatMessage.ToolCall, file: DiffFile) -> String {
-        if let filePath = toolFilePath(for: toolCall), normalizedFilePath(filePath) == normalizedFilePath(file.displayPath) {
-            return toolTitle(for: toolCall.name, path: file.displayPath)
-        }
-
-        switch file.change {
-        case .added:
-            return "Added \(file.displayPath)"
-        case .deleted:
-            return "Deleted \(file.displayPath)"
-        case .renamed:
-            return "Renamed \(file.displayPath)"
-        case .copied:
-            return "Copied \(file.displayPath)"
-        case .modified, .unknown:
-            return "Patched \(file.displayPath)"
-        }
-    }
-
     private static func toolFilePath(for toolCall: ChatMessage.ToolCall) -> String? {
         let normalizedName = toolCall.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let preferredKeys = ["filepath", "filePath", "absolutePath"]
         let pathKeys = preferredKeys + ["path"]
         let keys: [String]
         switch normalizedName {
-        case "read", "edit", "write", "delete", "remove", "stat", "move", "copy":
+        case "read", "edit", "write", "delete", "remove", "stat", "move", "copy", "grep":
             keys = pathKeys
         default:
             keys = preferredKeys
@@ -158,6 +161,19 @@ private enum ToolCallPresentationBuilder {
         let candidates: [String?] = [
             toolCall.input.flatMap { $0.stringValue(forKeys: keys) },
             toolCall.output.flatMap { $0.stringValue(forKeys: keys) }
+        ]
+
+        return candidates.compactMap { candidate -> String? in
+            guard let candidate else { return nil }
+            let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }.first
+    }
+
+    private static func toolCommand(for toolCall: ChatMessage.ToolCall) -> String? {
+        let candidates: [String?] = [
+            toolCall.input.flatMap { $0.stringValue(forKey: "command") },
+            toolCall.output.flatMap { $0.stringValue(forKey: "command") }
         ]
 
         return candidates.compactMap { candidate -> String? in
