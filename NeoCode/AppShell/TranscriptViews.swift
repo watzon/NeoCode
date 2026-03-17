@@ -21,13 +21,8 @@ struct UserTurnView: View {
     private let attachmentGridSpacing: CGFloat = 12
     private let attachmentGridMaxWidth: CGFloat = 680
 
-    let sessionID: String
     let messages: [ChatMessage]
-    @Binding var editingText: String
-    let editingMessageID: String?
-    let onBeginEdit: (ChatMessage) -> Void
-    let onCancelEdit: () -> Void
-    let onFinishEdit: () -> Void
+    let onRevert: (ChatMessage) -> Void
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 8) {
@@ -73,16 +68,9 @@ struct UserTurnView: View {
 
                 ForEach(textMessages) { message in
                     MessageRowView(
-                        sessionID: sessionID,
                         message: message,
-                        editingText: $editingText,
-                        isEditing: editingMessageID == message.id,
                         showsMetadataHeader: false,
-                        onBeginEdit: {
-                            onBeginEdit(message)
-                        },
-                        onCancelEdit: onCancelEdit,
-                        onFinishEdit: onFinishEdit
+                        onRevert: { onRevert(message) }
                     )
                 }
             }
@@ -329,20 +317,13 @@ private struct CompactionMarkerRowView: View {
 
 struct MessageRowView: View {
     @Environment(AppStore.self) private var store
-    @Environment(OpenCodeRuntime.self) private var runtime
     @State private var isHovering = false
     @State private var isHoveringActions = false
     @State private var didCopy = false
-    @State private var editorHeight: CGFloat = 36
 
-    let sessionID: String
     let message: ChatMessage
-    @Binding var editingText: String
-    let isEditing: Bool
     let showsMetadataHeader: Bool
-    let onBeginEdit: () -> Void
-    let onCancelEdit: () -> Void
-    let onFinishEdit: () -> Void
+    let onRevert: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -386,43 +367,39 @@ struct MessageRowView: View {
 
     private var userMessageBody: some View {
         VStack(alignment: .trailing, spacing: 10) {
-            if isEditing {
-                InlineMessageEditor(
-                    text: $editingText,
-                    measuredHeight: $editorHeight,
-                    isSending: store.isSending,
-                    onCancel: onCancelEdit,
-                    onSubmit: resendEditedMessage
-                )
+            MarkdownMessageView(markdown: message.text, baseFont: .neoMono, textColor: textColor)
+                .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                MarkdownMessageView(markdown: message.text, baseFont: .neoMono, textColor: textColor)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                    .background(bubbleBackground)
-                    .overlay(alignment: .bottomTrailing) {
-                        if isHovering || isHoveringActions || didCopy {
-                            HStack(spacing: 6) {
-                                MessageHoverActionButton(systemImage: "pencil", isDisabled: !canEditMessage) {
-                                    onBeginEdit()
-                                }
-
-                                MessageHoverActionButton(systemImage: didCopy ? "checkmark" : "doc.on.doc") {
-                                    copyMessageText()
-                                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(bubbleBackground)
+                .overlay(alignment: .bottomTrailing) {
+                    if isHovering || isHoveringActions || didCopy {
+                        HStack(spacing: 6) {
+                            MessageHoverActionButton(
+                                systemImage: "arrow.uturn.backward",
+                                helpText: "Revert to this message",
+                                isDisabled: !canRevertMessage
+                            ) {
+                                onRevert()
                             }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 8)
-                            .background(Color.clear)
-                            .contentShape(Rectangle())
-                            .onHover { isHoveringActions = $0 }
-                            .offset(x: 6, y: 36)
-                            .transition(.scale(scale: 0.9).combined(with: .opacity))
+
+                            MessageHoverActionButton(
+                                systemImage: didCopy ? "checkmark" : "doc.on.doc",
+                                helpText: "Copy message"
+                            ) {
+                                copyMessageText()
+                            }
                         }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(Color.clear)
+                        .contentShape(Rectangle())
+                        .onHover { isHoveringActions = $0 }
+                        .offset(x: 6, y: 36)
+                        .transition(.scale(scale: 0.9).combined(with: .opacity))
                     }
-            }
+                }
         }
         .onHover { isHovering = $0 }
         .animation(.easeOut(duration: 0.16), value: isHovering)
@@ -491,7 +468,7 @@ struct MessageRowView: View {
         }
     }
 
-    private var canEditMessage: Bool {
+    private var canRevertMessage: Bool {
         store.selectedSession?.status != .running && !store.isSending
     }
 
@@ -503,15 +480,6 @@ struct MessageRowView: View {
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
             didCopy = false
-        }
-    }
-
-    private func resendEditedMessage() {
-        Task {
-            let didSend = await store.resendEditedMessage(messageID: message.id, newText: editingText, in: sessionID, using: runtime)
-            if didSend {
-                onFinishEdit()
-            }
         }
     }
 }
@@ -691,11 +659,13 @@ private enum TranscriptAttachmentImageCache {
 
 private struct MessageHoverActionButton: View {
     let systemImage: String
+    let helpText: String?
     let isDisabled: Bool
     let action: () -> Void
 
-    init(systemImage: String, isDisabled: Bool = false, action: @escaping () -> Void) {
+    init(systemImage: String, helpText: String? = nil, isDisabled: Bool = false, action: @escaping () -> Void) {
         self.systemImage = systemImage
+        self.helpText = helpText
         self.isDisabled = isDisabled
         self.action = action
     }
@@ -717,65 +687,6 @@ private struct MessageHoverActionButton: View {
         }
         .buttonStyle(.plain)
         .disabled(isDisabled)
-    }
-}
-
-private struct InlineMessageEditor: View {
-    @Binding var text: String
-    @Binding var measuredHeight: CGFloat
-
-    let isSending: Bool
-    let onCancel: () -> Void
-    let onSubmit: () -> Void
-
-    var body: some View {
-        VStack(alignment: .trailing, spacing: 12) {
-            GrowingTextView(
-                text: $text,
-                measuredHeight: $measuredHeight,
-                selectionRequest: .constant(nil),
-                placeholder: nil,
-                projectPath: nil,
-                onPrimaryAction: onSubmit,
-                onConfirmAuxiliarySelection: { false },
-                onMoveAuxiliarySelection: { _ in false },
-                onCancelAuxiliaryUI: { false },
-                allowsEmptyPrimaryAction: false,
-                onImportAttachments: { _ in }
-            )
-            .frame(height: measuredHeight)
-
-            HStack(spacing: 8) {
-                Button("Cancel", action: onCancel)
-                    .buttonStyle(.plain)
-                    .font(.neoMonoSmall)
-                    .foregroundStyle(NeoCodeTheme.textMuted)
-
-                Button(action: onSubmit) {
-                    Label(isSending ? "Sending..." : "Resend", systemImage: "arrow.up")
-                        .font(.neoMonoSmall)
-                        .foregroundStyle(NeoCodeTheme.canvas)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Capsule().fill(canSubmit ? NeoCodeTheme.textPrimary : NeoCodeTheme.accentDim))
-                }
-                .buttonStyle(.plain)
-                .disabled(!canSubmit)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 14)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(NeoCodeTheme.panel)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(NeoCodeTheme.line, lineWidth: 1)
-                )
-        )
-    }
-
-    private var canSubmit: Bool {
-        !isSending && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        .help(helpText ?? "")
     }
 }

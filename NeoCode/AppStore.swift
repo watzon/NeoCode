@@ -308,7 +308,7 @@ final class AppStore {
     }
 
     var selectedTranscript: [ChatMessage] {
-        transcript(for: selectedSessionID)
+        visibleTranscript(for: selectedSessionID)
     }
 
     var selectedQueuedMessages: [ComposerQueuedMessage] {
@@ -318,6 +318,16 @@ final class AppStore {
     func transcript(for sessionID: String?) -> [ChatMessage] {
         guard let sessionID else { return [] }
         return transcriptStateBySessionID[sessionID]?.messages ?? []
+    }
+
+    func visibleTranscript(for sessionID: String?) -> [ChatMessage] {
+        guard let sessionID else { return [] }
+        let transcript = transcript(for: sessionID)
+        guard let revertMessageID = session(for: sessionID)?.revert?.messageID else {
+            return transcript
+        }
+
+        return transcript.filter { ($0.messageID ?? $0.id) < revertMessageID }
     }
 
     func queuedMessages(for sessionID: String?) -> [ComposerQueuedMessage] {
@@ -1282,6 +1292,109 @@ final class AppStore {
 
         isSending = false
         return true
+    }
+
+    @discardableResult
+    func revertPreview(for messageID: String, in sessionID: String) -> SessionRevertPreview? {
+        let currentTranscript = transcript(for: sessionID)
+        guard let messageIndex = currentTranscript.firstIndex(where: { $0.id == messageID }),
+              currentTranscript[messageIndex].role == .user
+        else {
+            return nil
+        }
+
+        let targetMessage = currentTranscript[messageIndex]
+        let upstreamMessageID = targetMessage.messageID ?? targetMessage.id
+        let affectedPromptIDs = affectedPromptMessageIDs(from: messageIndex, in: currentTranscript)
+        let messageInfos = messageInfosBySessionID[sessionID] ?? [:]
+        let changedFiles = aggregatedRevertFileChanges(for: affectedPromptIDs, messageInfos: messageInfos)
+        let restoredAttachments = currentTranscript
+            .filter { ($0.messageID ?? $0.id) == upstreamMessageID }
+            .compactMap(\.attachment)
+            .compactMap(\.composerAttachment)
+
+        return SessionRevertPreview(
+            targetPartID: targetMessage.id,
+            upstreamMessageID: upstreamMessageID,
+            restoredText: targetMessage.text,
+            restoredAttachments: restoredAttachments,
+            affectedPromptCount: affectedPromptIDs.count,
+            changedFiles: changedFiles
+        )
+    }
+
+    @discardableResult
+    func revertMessage(messageID: String, in sessionID: String, using runtime: OpenCodeRuntime) async -> Bool {
+        guard let projectID = projectID(for: sessionID) else {
+            return false
+        }
+
+        guard session(for: sessionID)?.status != .running else {
+            lastError = "Wait for the current response to finish before reverting history."
+            return false
+        }
+
+        guard let service = await liveService(for: projectID, runtime: runtime) else {
+            logger.error("Cannot revert message because live service is unavailable for project: \(projectID.uuidString, privacy: .public)")
+            return false
+        }
+
+        return await revertMessage(messageID: messageID, in: sessionID, projectID: projectID, using: service)
+    }
+
+    @discardableResult
+    func revertMessage(
+        messageID: String,
+        in sessionID: String,
+        projectID: ProjectSummary.ID,
+        using service: any OpenCodeServicing
+    ) async -> Bool {
+        let currentTranscript = transcript(for: sessionID)
+        guard let preview = revertPreview(for: messageID, in: sessionID),
+              let session = sessionSummary(for: sessionID, projectID: projectID)
+        else {
+            return false
+        }
+
+        let originalDraft = draft
+        let originalAttachments = attachedFiles
+        let originalQueue = queuedMessagesBySessionID[sessionID]
+        let truncatedTranscript = currentTranscript.filter { ($0.messageID ?? $0.id) < preview.upstreamMessageID }
+        let allowedMessageIDs = Set(truncatedTranscript.compactMap { $0.messageID ?? $0.id })
+
+        do {
+            logger.info(
+                "Reverting message session=\(sessionID, privacy: .public) message=\(preview.upstreamMessageID, privacy: .public)"
+            )
+            let revertedSession = try await service.revertSession(
+                sessionID: sessionID,
+                messageID: preview.upstreamMessageID,
+                partID: nil
+            )
+
+            replaceTranscript(in: sessionID, projectID: projectID, with: truncatedTranscript)
+            pruneMessageMetadata(in: sessionID, keeping: allowedMessageIDs)
+
+            if (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachedFiles.isEmpty) {
+                _ = enqueueDraft(in: sessionID)
+            }
+
+            draft = preview.restoredText
+            attachedFiles = preview.restoredAttachments
+            upsert(session: SessionSummary(session: revertedSession, fallbackTitle: session.title), in: projectID, preferTopInsertion: false)
+            refreshSessionStats(sessionID: sessionID, projectID: projectID)
+            lastError = nil
+            return true
+        } catch {
+            draft = originalDraft
+            attachedFiles = originalAttachments
+            queuedMessagesBySessionID[sessionID] = originalQueue
+            logger.error(
+                "Failed to revert message for session \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+            lastError = error.localizedDescription
+            return false
+        }
     }
 
     @discardableResult
@@ -3772,6 +3885,75 @@ final class AppStore {
     private func sessionSummary(for sessionID: String, projectID: ProjectSummary.ID) -> SessionSummary? {
         guard let indices = indices(for: sessionID, projectID: projectID) else { return nil }
         return projects[indices.project].sessions[indices.session]
+    }
+
+    private func affectedPromptMessageIDs(from startIndex: Int, in transcript: [ChatMessage]) -> [String] {
+        var ids: [String] = []
+        var seen = Set<String>()
+
+        for message in transcript[startIndex...] where message.role == .user {
+            let id = message.messageID ?? message.id
+            if seen.insert(id).inserted {
+                ids.append(id)
+            }
+        }
+
+        return ids
+    }
+
+    private func aggregatedRevertFileChanges(
+        for messageIDs: [String],
+        messageInfos: [String: OpenCodeMessageInfo]
+    ) -> [RevertPreviewFileChange] {
+        var changesByPath: [String: RevertPreviewFileChange] = [:]
+
+        for messageID in messageIDs {
+            let diffs = messageInfos[messageID]?.summaryInfo?.diffs ?? []
+            for diff in diffs {
+                let nextStatus = RevertPreviewFileChange.Status(rawValue: diff.status?.rawValue ?? "") ?? .modified
+                if let existing = changesByPath[diff.file] {
+                    changesByPath[diff.file] = RevertPreviewFileChange(
+                        path: diff.file,
+                        additions: existing.additions + diff.additions,
+                        deletions: existing.deletions + diff.deletions,
+                        status: mergedRevertStatus(existing.status, nextStatus)
+                    )
+                } else {
+                    changesByPath[diff.file] = RevertPreviewFileChange(
+                        path: diff.file,
+                        additions: diff.additions,
+                        deletions: diff.deletions,
+                        status: nextStatus
+                    )
+                }
+            }
+        }
+
+        return changesByPath.values.sorted {
+            $0.path.localizedStandardCompare($1.path) == .orderedAscending
+        }
+    }
+
+    private func mergedRevertStatus(
+        _ existing: RevertPreviewFileChange.Status,
+        _ incoming: RevertPreviewFileChange.Status
+    ) -> RevertPreviewFileChange.Status {
+        if existing == incoming {
+            return existing
+        }
+
+        if existing == .modified || incoming == .modified {
+            return .modified
+        }
+
+        return .modified
+    }
+
+    private func pruneMessageMetadata(in sessionID: String, keeping allowedMessageIDs: Set<String>) {
+        if var infos = messageInfosBySessionID[sessionID] {
+            infos = infos.filter { allowedMessageIDs.contains($0.key) }
+            messageInfosBySessionID[sessionID] = infos
+        }
     }
 
     private func refreshSessionStats(sessionID: String, projectID: ProjectSummary.ID) {

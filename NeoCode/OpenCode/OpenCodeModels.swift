@@ -118,11 +118,66 @@ struct OpenCodePromptOptions: Sendable {
     let variant: String?
 }
 
+struct OpenCodeFileChangeSummary: Codable, Equatable, Hashable, Identifiable, Sendable {
+    enum Status: String, Codable, Equatable, Hashable, Sendable {
+        case added
+        case deleted
+        case modified
+    }
+
+    let file: String
+    let before: String?
+    let after: String?
+    let additions: Int
+    let deletions: Int
+    let status: Status?
+
+    var id: String { file }
+}
+
+struct OpenCodeMessageSummary: Codable, Equatable, Hashable, Sendable {
+    let title: String?
+    let body: String?
+    let diffs: [OpenCodeFileChangeSummary]?
+}
+
+struct OpenCodeSessionSummary: Codable, Equatable, Hashable, Sendable {
+    let additions: Int
+    let deletions: Int
+    let files: Int
+    let diffs: [OpenCodeFileChangeSummary]?
+}
+
+struct OpenCodeSessionRevert: Codable, Equatable, Hashable, Sendable {
+    let messageID: String
+    let partID: String?
+    let snapshot: String?
+    let diff: String?
+}
+
 struct OpenCodeSession: Decodable, Identifiable, Equatable, Sendable {
     let id: String
     let title: String?
     let parentID: String?
+    let summary: OpenCodeSessionSummary?
+    let revert: OpenCodeSessionRevert?
     let time: OpenCodeTimeContainer?
+
+    init(
+        id: String,
+        title: String?,
+        parentID: String?,
+        summary: OpenCodeSessionSummary? = nil,
+        revert: OpenCodeSessionRevert? = nil,
+        time: OpenCodeTimeContainer?
+    ) {
+        self.id = id
+        self.title = title
+        self.parentID = parentID
+        self.summary = summary
+        self.revert = revert
+        self.time = time
+    }
 
     nonisolated var createdAt: Date { time?.created ?? .distantPast }
     nonisolated var updatedAt: Date { time?.updated ?? time?.created ?? .distantPast }
@@ -195,6 +250,17 @@ struct OpenCodeMessageInfo: Decodable, Equatable, Sendable {
     nonisolated var isSummaryMessage: Bool {
         guard case .bool(true) = summary else { return false }
         return true
+    }
+
+    var summaryInfo: OpenCodeMessageSummary? {
+        guard case .object = summary,
+              let summary,
+              let data = try? JSONEncoder().encode(summary)
+        else {
+            return nil
+        }
+
+        return try? JSONDecoder.opencode.decode(OpenCodeMessageSummary.self, from: data)
     }
 
     nonisolated var chatRole: ChatMessage.Role {

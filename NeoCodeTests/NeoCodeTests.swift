@@ -1246,6 +1246,194 @@ struct NeoCodeMainActorTests {
     }
 
     @MainActor
+    @Test func appStoreBuildsRevertPreviewFromMessageSummaries() async {
+        let projectID = UUID()
+        let attachment = ChatAttachment(filename: "diagram.png", mimeType: "image/png", url: "data:image/png;base64,AAAA")
+        let transcript = [
+            ChatMessage(
+                id: "part_user_attachment_1",
+                messageID: "msg_user_1",
+                role: .user,
+                text: attachment.displayTitle,
+                timestamp: Date(timeIntervalSince1970: 100),
+                emphasis: .normal,
+                attachment: attachment
+            ),
+            ChatMessage(
+                id: "part_user_1",
+                messageID: "msg_user_1",
+                role: .user,
+                text: "Original prompt",
+                timestamp: Date(timeIntervalSince1970: 100),
+                emphasis: .normal
+            ),
+            ChatMessage(
+                id: "part_assistant_1",
+                messageID: "msg_assistant_1",
+                role: .assistant,
+                text: "Reply",
+                timestamp: Date(timeIntervalSince1970: 110),
+                emphasis: .normal
+            ),
+            ChatMessage(
+                id: "part_user_2",
+                messageID: "msg_user_2",
+                role: .user,
+                text: "Follow up",
+                timestamp: Date(timeIntervalSince1970: 120),
+                emphasis: .normal
+            ),
+        ]
+        let store = AppStore(projects: [
+            ProjectSummary(
+                id: projectID,
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(id: "ses_1", title: "Existing", lastUpdatedAt: Date(timeIntervalSince1970: 120), transcript: transcript),
+                ]
+            ),
+        ])
+
+        store.apply(event: .messageUpdated(OpenCodeMessageInfo(
+            id: "msg_user_1",
+            sessionID: "ses_1",
+            role: "user",
+            summary: .object([
+                "diffs": .array([
+                    .object([
+                        "file": .string("Sources/App.swift"),
+                        "before": .string(""),
+                        "after": .string(""),
+                        "additions": .number(3),
+                        "deletions": .number(1),
+                        "status": .string("modified")
+                    ])
+                ])
+            ]),
+            agent: nil,
+            providerID: nil,
+            modelID: nil,
+            cost: nil,
+            tokens: nil,
+            time: OpenCodeTimeContainer(created: Date(timeIntervalSince1970: 100), updated: Date(timeIntervalSince1970: 100), completed: nil)
+        )))
+        store.apply(event: .messageUpdated(OpenCodeMessageInfo(
+            id: "msg_user_2",
+            sessionID: "ses_1",
+            role: "user",
+            summary: .object([
+                "diffs": .array([
+                    .object([
+                        "file": .string("Sources/App.swift"),
+                        "before": .string(""),
+                        "after": .string(""),
+                        "additions": .number(2),
+                        "deletions": .number(0),
+                        "status": .string("modified")
+                    ]),
+                    .object([
+                        "file": .string("README.md"),
+                        "before": .string(""),
+                        "after": .string(""),
+                        "additions": .number(1),
+                        "deletions": .number(0),
+                        "status": .string("added")
+                    ])
+                ])
+            ]),
+            agent: nil,
+            providerID: nil,
+            modelID: nil,
+            cost: nil,
+            tokens: nil,
+            time: OpenCodeTimeContainer(created: Date(timeIntervalSince1970: 120), updated: Date(timeIntervalSince1970: 120), completed: nil)
+        )))
+
+        let preview = store.revertPreview(for: "part_user_1", in: "ses_1")
+
+        #expect(preview?.restoredText == "Original prompt")
+        #expect(preview?.restoredAttachments.count == 1)
+        #expect(preview?.affectedPromptCount == 2)
+        #expect(preview?.changedFiles.count == 2)
+        #expect(preview?.changedFiles.first(where: { $0.path == "Sources/App.swift" })?.additions == 5)
+        #expect(preview?.changedFiles.first(where: { $0.path == "Sources/App.swift" })?.deletions == 1)
+    }
+
+    @MainActor
+    @Test func appStoreRevertsMessageAndRestoresComposerDraft() async {
+        let projectID = UUID()
+        let attachment = ChatAttachment(filename: "diagram.png", mimeType: "image/png", url: "data:image/png;base64,AAAA")
+        let originalTranscript = [
+            ChatMessage(
+                id: "part_user_attachment_1",
+                messageID: "msg_user_1",
+                role: .user,
+                text: attachment.displayTitle,
+                timestamp: Date(timeIntervalSince1970: 100),
+                emphasis: .normal,
+                attachment: attachment
+            ),
+            ChatMessage(
+                id: "part_user_1",
+                messageID: "msg_user_1",
+                role: .user,
+                text: "Original prompt",
+                timestamp: Date(timeIntervalSince1970: 100),
+                emphasis: .normal
+            ),
+            ChatMessage(
+                id: "part_assistant_1",
+                messageID: "msg_assistant_1",
+                role: .assistant,
+                text: "Original reply",
+                timestamp: Date(timeIntervalSince1970: 110),
+                emphasis: .normal
+            ),
+            ChatMessage(
+                id: "part_user_2",
+                messageID: "msg_user_2",
+                role: .user,
+                text: "Later prompt",
+                timestamp: Date(timeIntervalSince1970: 120),
+                emphasis: .normal
+            ),
+        ]
+        let store = AppStore(projects: [
+            ProjectSummary(
+                id: projectID,
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(id: "ses_1", title: "Existing", lastUpdatedAt: Date(timeIntervalSince1970: 120), transcript: originalTranscript),
+                ]
+            ),
+        ])
+        let service = MockOpenCodeService()
+
+        store.selectSession("ses_1")
+        store.draft = "Current draft"
+        store.attachedFiles = [ComposerAttachment(name: "notes.txt", mimeType: "text/plain", content: .dataURL("data:text/plain;base64,QQ=="))]
+
+        let didRevert = await store.revertMessage(
+            messageID: "part_user_1",
+            in: "ses_1",
+            projectID: projectID,
+            using: service
+        )
+
+        #expect(didRevert == true)
+        #expect(service.revertedSessionID == "ses_1")
+        #expect(service.revertedMessageID == "msg_user_1")
+        #expect(store.transcript(for: "ses_1").isEmpty)
+        #expect(store.visibleTranscript(for: "ses_1").isEmpty)
+        #expect(store.draft == "Original prompt")
+        #expect(store.attachedFiles.count == 1)
+        #expect(store.queuedMessages(for: "ses_1").count == 1)
+        #expect(store.queuedMessages(for: "ses_1").first?.text == "Current draft")
+    }
+
+    @MainActor
     @Test func chatMessageFileAttachmentRoundTripsThroughCodable() async throws {
         let message = ChatMessage(
             id: "file_1",
@@ -1352,6 +1540,21 @@ struct NeoCodeMainActorTests {
                     "updated": "2026-03-13T10:05:00Z",
                     "completed": null
                   },
+                  "summary": {
+                    "additions": 4,
+                    "deletions": 1,
+                    "files": 1,
+                    "diffs": [
+                      {
+                        "file": "Sources/App.swift",
+                        "before": "",
+                        "after": "",
+                        "additions": 4,
+                        "deletions": 1,
+                        "status": "modified"
+                      }
+                    ]
+                  },
                   "revert": {
                     "messageID": "msg_user_1"
                   }
@@ -1383,6 +1586,8 @@ struct NeoCodeMainActorTests {
         let payload = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
         #expect(payload["messageID"] as? String == "msg_user_1")
         #expect(reverted.id == "ses_1")
+        #expect(reverted.revert?.messageID == "msg_user_1")
+        #expect(reverted.summary?.files == 1)
     }
 
     @MainActor
@@ -2591,7 +2796,13 @@ private final class MockOpenCodeService: OpenCodeServicing {
     func revertSession(sessionID: String, messageID: String, partID: String?) async throws -> OpenCodeSession {
         revertedSessionID = sessionID
         revertedMessageID = messageID
-        return OpenCodeSession(id: sessionID, title: nil, parentID: nil, time: nil)
+        return OpenCodeSession(
+            id: sessionID,
+            title: nil,
+            parentID: nil,
+            revert: OpenCodeSessionRevert(messageID: messageID, partID: partID, snapshot: nil, diff: nil),
+            time: nil
+        )
     }
 
     func unrevertSession(sessionID: String) async throws -> OpenCodeSession {

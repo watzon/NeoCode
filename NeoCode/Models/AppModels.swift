@@ -49,6 +49,8 @@ struct SessionSummary: Codable, Identifiable, Hashable {
     var title: String
     var lastUpdatedAt: Date
     var status: SessionStatus
+    var summary: OpenCodeSessionSummary?
+    var revert: OpenCodeSessionRevert?
     var stats: SessionStatsSnapshot?
     var transcript: [ChatMessage]
     var isEphemeral: Bool
@@ -59,6 +61,8 @@ struct SessionSummary: Codable, Identifiable, Hashable {
         title: String,
         lastUpdatedAt: Date,
         status: SessionStatus = .idle,
+        summary: OpenCodeSessionSummary? = nil,
+        revert: OpenCodeSessionRevert? = nil,
         stats: SessionStatsSnapshot? = nil,
         transcript: [ChatMessage] = [],
         isEphemeral: Bool = false
@@ -68,6 +72,8 @@ struct SessionSummary: Codable, Identifiable, Hashable {
         self.title = title
         self.lastUpdatedAt = lastUpdatedAt
         self.status = status
+        self.summary = summary
+        self.revert = revert
         self.stats = stats
         self.transcript = transcript
         self.isEphemeral = isEphemeral
@@ -80,6 +86,8 @@ struct SessionSummary: Codable, Identifiable, Hashable {
             title: session.title?.isEmpty == false ? session.title! : fallbackTitle,
             lastUpdatedAt: session.updatedAt,
             status: .idle,
+            summary: session.summary,
+            revert: session.revert,
             stats: nil,
             transcript: [],
             isEphemeral: false
@@ -143,6 +151,32 @@ struct SessionSummary: Codable, Identifiable, Hashable {
     }
 }
 
+struct RevertPreviewFileChange: Identifiable, Hashable {
+    enum Status: String, Hashable {
+        case added
+        case deleted
+        case modified
+    }
+
+    let path: String
+    let additions: Int
+    let deletions: Int
+    let status: Status
+
+    var id: String { path }
+}
+
+struct SessionRevertPreview: Identifiable, Hashable {
+    let targetPartID: String
+    let upstreamMessageID: String
+    let restoredText: String
+    let restoredAttachments: [ComposerAttachment]
+    let affectedPromptCount: Int
+    let changedFiles: [RevertPreviewFileChange]
+
+    var id: String { targetPartID }
+}
+
 struct ChatAttachment: Codable, Hashable {
     let filename: String?
     let mimeType: String
@@ -201,6 +235,22 @@ struct ChatAttachment: Codable, Hashable {
 
     nonisolated var optimisticKey: String {
         url
+    }
+
+    var composerAttachment: ComposerAttachment? {
+        if let sourcePath, !sourcePath.isEmpty {
+            return ComposerAttachment(name: displayTitle, mimeType: mimeType, content: .file(path: sourcePath))
+        }
+
+        if url.hasPrefix("data:") {
+            return ComposerAttachment(name: displayTitle, mimeType: mimeType, content: .dataURL(url))
+        }
+
+        if let parsedURL = URL(string: url), parsedURL.isFileURL {
+            return ComposerAttachment(name: displayTitle, mimeType: mimeType, content: .file(path: parsedURL.path))
+        }
+
+        return nil
     }
 }
 

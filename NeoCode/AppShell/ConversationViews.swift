@@ -53,8 +53,8 @@ struct ConversationView: View {
     @State private var isAwaitingInitialScroll = true
     @State private var loadedMessageCount = 120
     @State private var isLoadingOlderMessages = false
-    @State private var editingMessageID: String?
-    @State private var editingText = ""
+    @State private var pendingRevertPreview: SessionRevertPreview?
+    @State private var isPerformingRevert = false
     @State private var auxiliarySelectionIndex = 0
     @State private var auxiliaryScrollTargetID: String?
     @State private var dismissedAuxiliaryQuery: ComposerAuxiliaryDismissal?
@@ -137,14 +137,6 @@ struct ConversationView: View {
                 guard oldValue != newValue, isPinnedToBottom else { return }
                 maintainPinnedPosition(using: proxy, animated: true)
             }
-            .onChange(of: transcriptRevision) { _, _ in
-                guard let editingMessageID,
-                      transcript.contains(where: { $0.id == editingMessageID })
-                else {
-                    clearInlineEditing()
-                    return
-                }
-            }
             .onChange(of: store.loadingTranscriptSessionID) { _, _ in
                 guard isAwaitingInitialScroll, !shouldShowTranscriptLoadingState else { return }
 
@@ -186,6 +178,19 @@ struct ConversationView: View {
             }
             .onDisappear {
                 fileSearchTask?.cancel()
+            }
+            .sheet(item: $pendingRevertPreview) { preview in
+                RevertHistorySheet(
+                    preview: preview,
+                    isPerformingRevert: isPerformingRevert,
+                    onCancel: {
+                        guard !isPerformingRevert else { return }
+                        pendingRevertPreview = nil
+                    },
+                    onConfirm: {
+                        performRevert(using: preview)
+                    }
+                )
             }
         }
     }
@@ -474,32 +479,20 @@ struct ConversationView: View {
         switch group {
         case .message(let message):
             MessageRowView(
-                sessionID: sessionID,
                 message: message,
-                editingText: $editingText,
-                isEditing: editingMessageID == message.id,
                 showsMetadataHeader: true,
-                onBeginEdit: {
-                    editingMessageID = message.id
-                    editingText = message.text
+                onRevert: {
+                    beginRevertFlow(for: message)
                     composerFocused = false
-                },
-                onCancelEdit: clearInlineEditing,
-                onFinishEdit: clearInlineEditing
+                }
             )
         case .userTurn(let messages):
             UserTurnView(
-                sessionID: sessionID,
                 messages: messages,
-                editingText: $editingText,
-                editingMessageID: editingMessageID,
-                onBeginEdit: { message in
-                    editingMessageID = message.id
-                    editingText = message.text
+                onRevert: { message in
+                    beginRevertFlow(for: message)
                     composerFocused = false
-                },
-                onCancelEdit: clearInlineEditing,
-                onFinishEdit: clearInlineEditing
+                }
             )
         case .assistantTurn(let messages):
             AssistantTurnView(messages: messages)
@@ -730,7 +723,7 @@ struct ConversationView: View {
     }
 
     private var transcript: [ChatMessage] {
-        store.transcript(for: sessionID)
+        store.visibleTranscript(for: sessionID)
     }
 
     private var transcriptCount: Int {
@@ -833,7 +826,8 @@ struct ConversationView: View {
     }
 
     private func prepareSessionPresentation(using proxy: ScrollViewProxy) {
-        clearInlineEditing()
+        pendingRevertPreview = nil
+        isPerformingRevert = false
         isPinnedToBottom = true
         isMaintainingPinnedPosition = false
         isAwaitingInitialScroll = true
@@ -864,9 +858,153 @@ struct ConversationView: View {
         isAwaitingInitialScroll = false
     }
 
-    private func clearInlineEditing() {
-        editingMessageID = nil
-        editingText = ""
+    private func beginRevertFlow(for message: ChatMessage) {
+        guard let preview = store.revertPreview(for: message.id, in: sessionID) else {
+            return
+        }
+
+        if preview.changedFiles.isEmpty {
+            performRevert(using: preview)
+        } else {
+            pendingRevertPreview = preview
+        }
+    }
+
+    private func performRevert(using preview: SessionRevertPreview) {
+        guard !isPerformingRevert else { return }
+        isPerformingRevert = true
+
+        Task {
+            let didRevert = await store.revertMessage(messageID: preview.targetPartID, in: sessionID, using: runtime)
+            await MainActor.run {
+                isPerformingRevert = false
+                if didRevert {
+                    pendingRevertPreview = nil
+                    composerFocused = true
+                }
+            }
+        }
+    }
+}
+
+private struct RevertHistorySheet: View {
+    let preview: SessionRevertPreview
+    let isPerformingRevert: Bool
+    let onCancel: () -> Void
+    let onConfirm: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Revert to this point")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(NeoCodeTheme.textPrimary)
+
+                    Text(summaryText)
+                        .font(.neoBody)
+                        .foregroundStyle(NeoCodeTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+
+                Button(action: onCancel) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(NeoCodeTheme.textMuted)
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(NeoCodeTheme.panelSoft))
+                }
+                .buttonStyle(.plain)
+                .disabled(isPerformingRevert)
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("File changes that will be reverted")
+                    .font(.neoBody)
+                    .foregroundStyle(NeoCodeTheme.textPrimary)
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(preview.changedFiles) { change in
+                            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                Text(change.path)
+                                    .font(.neoMonoSmall)
+                                    .foregroundStyle(NeoCodeTheme.textPrimary)
+                                    .lineLimit(1)
+
+                                Spacer(minLength: 0)
+
+                                if change.additions > 0 {
+                                    Text("+\(change.additions)")
+                                        .font(.neoMonoSmall)
+                                        .foregroundStyle(NeoCodeTheme.success)
+                                }
+
+                                if change.deletions > 0 {
+                                    Text("-\(change.deletions)")
+                                        .font(.neoMonoSmall)
+                                        .foregroundStyle(NeoCodeTheme.warning)
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(NeoCodeTheme.panelRaised)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .stroke(NeoCodeTheme.line, lineWidth: 1)
+                                    )
+                            )
+                        }
+                    }
+                }
+                .frame(height: min(CGFloat(max(preview.changedFiles.count, 1)) * 46, 220))
+            }
+
+            Text("This matches the TUI behavior: the transcript rewinds, the prompt comes back into the composer, and file edits after that point are rolled back.")
+                .font(.neoMonoSmall)
+                .foregroundStyle(NeoCodeTheme.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 10) {
+                Button("Cancel", action: onCancel)
+                    .buttonStyle(.plain)
+                    .font(.neoAction)
+                    .foregroundStyle(NeoCodeTheme.textSecondary)
+                    .disabled(isPerformingRevert)
+
+                Spacer(minLength: 0)
+
+                Button(action: onConfirm) {
+                    Text(isPerformingRevert ? "Reverting..." : "Revert")
+                        .font(.neoAction)
+                        .foregroundStyle(NeoCodeTheme.canvas)
+                        .padding(.horizontal, 18)
+                        .frame(height: 36)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(isPerformingRevert ? NeoCodeTheme.textMuted : NeoCodeTheme.textPrimary)
+                        )
+                }
+                .buttonStyle(.plain)
+                .disabled(isPerformingRevert)
+            }
+        }
+        .padding(22)
+        .frame(width: 520, height: 420, alignment: .topLeading)
+        .background(NeoCodeTheme.panel)
+    }
+
+    private var summaryText: String {
+        let laterPrompts = max(preview.affectedPromptCount - 1, 0)
+        if laterPrompts == 0 {
+            return "This removes this prompt from the transcript and restores it to the composer."
+        }
+
+        return "This removes this prompt and \(laterPrompts) later \(laterPrompts == 1 ? "prompt" : "prompts") from the transcript and restores it to the composer."
     }
 }
 
