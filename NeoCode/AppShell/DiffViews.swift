@@ -171,11 +171,11 @@ private struct DiffRowView: View {
         case .note(let text):
             Text(text)
                 .font(.neoMonoSmall)
-                .foregroundStyle(NeoCodeTheme.diffHunkText)
+                .foregroundStyle(ToolCallDiffPalette.hunkText)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(NeoCodeTheme.diffHunkBackground)
+                .background(ToolCallDiffPalette.hunkBackground)
         case .split(let left, let right):
             HStack(alignment: .top, spacing: 0) {
                 DiffCellView(cell: left, lineNumberColumnWidth: lineNumberColumnWidth)
@@ -231,9 +231,9 @@ private struct DiffCellView: View {
         case .context:
             return .clear
         case .added:
-            return NeoCodeTheme.diffAddedBackground
+            return ToolCallDiffPalette.addedBackground
         case .removed:
-            return NeoCodeTheme.diffRemovedBackground
+            return ToolCallDiffPalette.removedBackground
         }
     }
 
@@ -246,9 +246,9 @@ private struct DiffCellView: View {
         case .context:
             return NeoCodeTheme.diffContextText
         case .added:
-            return NeoCodeTheme.diffAddedText
+            return ToolCallDiffPalette.addedText
         case .removed:
-            return NeoCodeTheme.diffRemovedText
+            return ToolCallDiffPalette.removedText
         }
     }
 }
@@ -316,9 +316,9 @@ private struct DiffChangeRowView: View {
         case .context:
             return .clear
         case .added:
-            return NeoCodeTheme.diffAddedBackground
+            return ToolCallDiffPalette.addedBackground
         case .removed:
-            return NeoCodeTheme.diffRemovedBackground
+            return ToolCallDiffPalette.removedBackground
         }
     }
 
@@ -327,11 +327,20 @@ private struct DiffChangeRowView: View {
         case .context:
             return NeoCodeTheme.diffContextText
         case .added:
-            return NeoCodeTheme.diffAddedText
+            return ToolCallDiffPalette.addedText
         case .removed:
-            return NeoCodeTheme.diffRemovedText
+            return ToolCallDiffPalette.removedText
         }
     }
+}
+
+private enum ToolCallDiffPalette {
+    static let addedBackground = Color(.sRGB, red: 0.18, green: 0.63, blue: 0.33, opacity: 0.22)
+    static let addedText = Color(.sRGB, red: 0.35, green: 0.85, blue: 0.49, opacity: 0.96)
+    static let hunkBackground = Color(.sRGB, red: 0.45, green: 0.49, blue: 0.55, opacity: 0.24)
+    static let hunkText = Color(.sRGB, red: 0.92, green: 0.94, blue: 0.97, opacity: 0.96)
+    static let removedBackground = Color(.sRGB, red: 0.81, green: 0.25, blue: 0.25, opacity: 0.20)
+    static let removedText = Color(.sRGB, red: 0.96, green: 0.46, blue: 0.46, opacity: 0.96)
 }
 
 private struct DiffDisplayRow: Identifiable {

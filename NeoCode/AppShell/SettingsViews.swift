@@ -50,7 +50,18 @@ struct SettingsSidebarView: View {
 }
 
 struct SettingsScreen: View {
+    @Environment(AppStore.self) private var store
     let section: AppSettingsSection
+
+    private var shellShape: UnevenRoundedRectangle {
+        UnevenRoundedRectangle(
+            topLeadingRadius: 18,
+            bottomLeadingRadius: 18,
+            bottomTrailingRadius: 0,
+            topTrailingRadius: 0,
+            style: .continuous
+        )
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -73,26 +84,14 @@ struct SettingsScreen: View {
                 .padding(.bottom, 28)
             }
         }
-        .background(
-            UnevenRoundedRectangle(
-                topLeadingRadius: 18,
-                bottomLeadingRadius: 18,
-                bottomTrailingRadius: 0,
-                topTrailingRadius: 0,
-                style: .continuous
-            )
-            .fill(NeoCodeTheme.panel)
-            .overlay(
-                UnevenRoundedRectangle(
-                    topLeadingRadius: 18,
-                    bottomLeadingRadius: 18,
-                    bottomTrailingRadius: 0,
-                    topTrailingRadius: 0,
-                    style: .continuous
-                )
-                .stroke(NeoCodeTheme.line, lineWidth: 1)
-            )
-        )
+        .background {
+            shellShape
+                .fill(NeoCodeTheme.panel)
+                .overlay {
+                    shellShape.stroke(NeoCodeTheme.line, lineWidth: 1)
+                }
+                .id(store.appSettings.appearance)
+        }
     }
 }
 
