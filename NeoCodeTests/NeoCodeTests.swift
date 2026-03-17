@@ -436,7 +436,7 @@ struct NeoCodeCoreTests {
                     "sessionID": "ses_summary",
                     "messageID": "msg_user_file_dump",
                     "type": "text",
-                    "text": "<path>/tmp/AGENTS.md</path>\n<type>file</type>\n<content>1: hello</content>",
+                    "text": "<path>/tmp/AGENTS.md</path>\\n<type>file</type>\\n<content>1: hello</content>",
                     "time": {
                       "created": 1741860000
                     }
@@ -2759,7 +2759,7 @@ struct NeoCodeMainActorTests {
             sessionID: "ses_1",
             messageID: "msg_1",
             type: .text,
-            text: "<path>/tmp/AGENTS.md</path>\n<type>file</type>\n<content>1: hello</content>",
+            text: "<path>/tmp/AGENTS.md</path>\\n<type>file</type>\\n<content>1: hello</content>",
             tool: nil,
             mime: nil,
             filename: nil,
