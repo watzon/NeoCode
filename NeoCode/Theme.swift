@@ -269,7 +269,7 @@ private struct ResolvedPalette {
 
         if isDark {
             canvas = background.darker(by: 0.12 + contrast * 0.08)
-            panel = background.lighter(by: 0.04 + contrast * 0.02)
+            panel = background.lighter(by: 0.01)
             panelRaised = background.lighter(by: 0.08 + contrast * 0.03)
             panelSoft = foreground.withAlphaComponent(0.035 + contrast * 0.03)
             line = foreground.withAlphaComponent(0.08 + contrast * 0.06)

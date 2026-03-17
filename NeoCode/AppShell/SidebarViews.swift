@@ -172,7 +172,9 @@ struct SidebarActionButton: View {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(isSelected ? NeoCodeTheme.panelSoft : Color.clear)
                 )
+                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .buttonStyle(.plain)
     }
 }
