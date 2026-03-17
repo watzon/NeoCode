@@ -780,6 +780,9 @@ private enum DashboardFormat {
     }()
 
     static func count(_ value: Int) -> String {
+        if value >= 1_000_000_000 {
+            return String(format: "%.1fB", Double(value) / 1_000_000_000).replacingOccurrences(of: ".0", with: "")
+        }
         if value >= 1_000_000 {
             return String(format: "%.1fM", Double(value) / 1_000_000).replacingOccurrences(of: ".0", with: "")
         }

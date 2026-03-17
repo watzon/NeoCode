@@ -485,12 +485,7 @@ final class AppStore {
     func selectProject(_ destinationProjectID: ProjectSummary.ID) {
         guard projects.contains(where: { $0.id == destinationProjectID }) else { return }
         selectedProjectID = destinationProjectID
-        if let projectPath = projectPath(for: destinationProjectID) {
-            availableModels = cachedModelsByProjectPath[projectPath] ?? availableModels
-            reconcileSelectedModel(using: availableModels)
-            refreshThinkingLevels()
-            availableCommands = cachedCommandsByProjectPath[projectPath] ?? []
-        }
+        restoreComposerOptionsFromCache(for: projectPath(for: destinationProjectID))
         if let selectedSessionID,
            projectID(for: selectedSessionID) != destinationProjectID {
             self.selectedSessionID = nil
@@ -540,6 +535,7 @@ final class AppStore {
         let destinationProjectID = projectID(for: sessionID)
         selectedSessionID = sessionID
         selectedProjectID = destinationProjectID
+        restoreComposerOptionsFromCache(for: destinationProjectID.flatMap { projectPath(for: $0) })
 
         if session(for: sessionID)?.isEphemeral == true {
             loadingTranscriptSessionID = nil
@@ -561,6 +557,7 @@ final class AppStore {
         if let existingProject = projects.first(where: { $0.path == projectPath }) {
             selectedProjectID = existingProject.id
             selectedSessionID = existingProject.sessions.first?.id
+            restoreComposerOptionsFromCache(for: existingProject.path)
             primePromptState(for: selectedSessionID)
             lastError = nil
             return
@@ -601,8 +598,7 @@ final class AppStore {
         }
 
         scheduleGitRefreshLoop(for: project.path)
-        availableModels = cachedModelsByProjectPath[project.path] ?? availableModels
-        availableCommands = cachedCommandsByProjectPath[project.path] ?? []
+        restoreComposerOptionsFromCache(for: project.path)
         _ = await connectProject(project.id, using: runtime, includeComposerOptions: true)
         reevaluateRuntimeRetention(using: runtime)
     }
@@ -2101,7 +2097,19 @@ final class AppStore {
     }
 
     private func shouldReloadComposerOptions(for projectPath: String) -> Bool {
-        composerOptionsProjectPath != projectPath || availableCommands.isEmpty
+        composerOptionsProjectPath != projectPath
+            || availableModels.isEmpty
+            || availableAgents.isEmpty
+            || availableCommands.isEmpty
+    }
+
+    private func restoreComposerOptionsFromCache(for projectPath: String?) {
+        guard let projectPath else { return }
+
+        availableModels = cachedModelsByProjectPath[projectPath] ?? availableModels
+        availableCommands = cachedCommandsByProjectPath[projectPath] ?? []
+        reconcileSelectedModel(using: availableModels)
+        refreshThinkingLevels()
     }
 
     func disconnectLiveState() {
@@ -2166,6 +2174,15 @@ final class AppStore {
         let agentsResult = await agentsTask
         let commandsResult = await commandsTask
 
+        guard !Task.isCancelled,
+              !providersResult.isCancelled,
+              !agentsResult.isCancelled,
+              !commandsResult.isCancelled
+        else {
+            logger.debug("Cancelled composer options load for project: \(projectPath, privacy: .public)")
+            return
+        }
+
         switch providersResult {
         case .success(let providersResponse):
             let models = providersResponse.providers
@@ -2200,6 +2217,8 @@ final class AppStore {
             logger.error("Failed to load composer models: \(message, privacy: .public)")
             availableModels = cachedModelsByProjectPath[projectPath] ?? []
             reconcileSelectedModel(using: availableModels)
+        case .cancelled:
+            return
         }
 
         switch agentsResult {
@@ -2220,6 +2239,8 @@ final class AppStore {
             availableAgentObjects = []
             availableAgents = []
             selectedAgent = ""
+        case .cancelled:
+            return
         }
 
         switch commandsResult {
@@ -2232,6 +2253,8 @@ final class AppStore {
         case .failure(let message):
             logger.error("Failed to load composer commands: \(message, privacy: .public)")
             availableCommands = cachedCommandsByProjectPath[projectPath] ?? []
+        case .cancelled:
+            return
         }
 
         logger.info(
@@ -2242,16 +2265,26 @@ final class AppStore {
         composerOptionsProjectPath = projectPath
     }
 
-    private enum ComposerOptionsLoadResult<T: Sendable>: Sendable {
+    enum ComposerOptionsLoadResult<T: Sendable>: Sendable {
         case success(T)
         case failure(String)
+        case cancelled
+
+        var isCancelled: Bool {
+            if case .cancelled = self {
+                return true
+            }
+            return false
+        }
     }
 
-    private static func captureResult<T: Sendable>(
+    static func captureResult<T: Sendable>(
         _ operation: @escaping @Sendable () async throws -> T
     ) async -> ComposerOptionsLoadResult<T> {
         do {
             return .success(try await operation())
+        } catch is CancellationError {
+            return .cancelled
         } catch {
             return .failure(error.localizedDescription)
         }
@@ -4256,6 +4289,7 @@ final class AppStore {
         )
         upsert(session: session, in: projectID, preferTopInsertion: true)
         selectedProjectID = projectID
+        restoreComposerOptionsFromCache(for: projectPath(for: projectID))
         selectedSessionID = session.id
         loadingTranscriptSessionID = nil
         scheduleGitRefreshLoop(for: projectPath(for: projectID))

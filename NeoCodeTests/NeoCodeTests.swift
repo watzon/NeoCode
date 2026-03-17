@@ -2656,6 +2656,25 @@ struct NeoCodeMainActorTests {
         #expect(store.selectedModelID == preferredModel.id)
     }
 
+    @Test func appStoreComposerOptionCaptureResultTreatsCancellationSeparately() async {
+        let task = Task {
+            await AppStore.captureResult {
+                try await Task.sleep(for: .seconds(5))
+                return 1
+            }
+        }
+
+        task.cancel()
+
+        let result = await task.value
+        switch result {
+        case .cancelled:
+            break
+        default:
+            Issue.record("Expected cancelled composer options result")
+        }
+    }
+
     @MainActor
     @Test func persistedAppSettingsStoreRoundTripsAppearanceSettings() {
         let suiteName = "tech.watzon.NeoCodeTests.app-settings.\(UUID().uuidString)"
