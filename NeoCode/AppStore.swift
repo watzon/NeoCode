@@ -4292,7 +4292,7 @@ final class AppStore {
     }
 
     private func yoloPreferenceKey(for sessionID: String) -> String? {
-        guard let project = selectedProject ?? project(for: sessionID) else { return nil }
+        guard let project = project(for: sessionID) else { return nil }
         return "\(project.path)::\(sessionID)"
     }
 

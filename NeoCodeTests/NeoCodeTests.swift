@@ -1283,6 +1283,34 @@ struct NeoCodeMainActorTests {
     }
 
     @MainActor
+    @Test func appStoreResolvesYoloModeForInactiveSessionAcrossProjects() async {
+        let store = AppStore(projects: [
+            ProjectSummary(
+                name: "Workspace A",
+                path: "/tmp/Workspace-A",
+                sessions: [
+                    SessionSummary(id: "ses_a", title: "Session A", lastUpdatedAt: .distantPast),
+                ]
+            ),
+            ProjectSummary(
+                name: "Workspace B",
+                path: "/tmp/Workspace-B",
+                sessions: [
+                    SessionSummary(id: "ses_b", title: "Session B", lastUpdatedAt: .distantPast),
+                ]
+            ),
+        ])
+
+        store.selectSession("ses_a")
+        store.setYoloMode(true, for: "ses_a")
+
+        store.selectSession("ses_b")
+
+        #expect(store.isYoloModeEnabled(for: "ses_a") == true)
+        #expect(store.isYoloModeEnabled(for: "ses_b") == false)
+    }
+
+    @MainActor
     @Test func appStoreTracksPendingQuestionsAndClearsThemAfterReply() async {
         let store = AppStore(projects: [
             ProjectSummary(
