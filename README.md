@@ -27,7 +27,7 @@ NeoCode provides a beautiful, native macOS interface for OpenCode, launching per
 
 NeoCode was built to provide a first-class macOS experience for OpenCode users. While OpenCode excels as a terminal-based AI coding assistant, NeoCode brings that power into a modern, native SwiftUI application with:
 
-- **Native macOS Interface**: Built with SwiftUI and designed for macOS 26.1+
+- **Native macOS Interface**: Built with SwiftUI and designed for macOS 14+
 - **Real-time Streaming**: Server-Sent Events (SSE) for live AI responses
 - **Per-Project Runtimes**: Isolated OpenCode instances for each project
 - **Deep Git Integration**: Branch management, commit workflows, and repository actions
@@ -38,7 +38,7 @@ NeoCode was built to provide a first-class macOS experience for OpenCode users. 
 
 ### Requirements
 
-- macOS 26.1 or later
+- macOS 14 or later
 - OpenCode CLI installed (`opencode` command available in PATH)
 - Xcode 16+ (for building from source)
 
@@ -70,14 +70,14 @@ just build
 
 ### Keyboard Shortcuts
 
-| Shortcut | Action |
-|----------|--------|
-| `⌘N` | New Session |
-| `⌘⇧N` | New Project |
-| `⌘W` | Close Current Session |
-| `⌘,` | Open Settings |
-| `⌘R` | Refresh Runtime Connection |
-| `⌘⌫` | Clear Conversation |
+| Shortcut | Action                     |
+| -------- | -------------------------- |
+| `⌘N`     | New Session                |
+| `⌘⇧N`    | New Project                |
+| `⌘W`     | Close Current Session      |
+| `⌘,`     | Open Settings              |
+| `⌘R`     | Refresh Runtime Connection |
+| `⌘⌫`     | Clear Conversation         |
 
 ## Features
 
@@ -133,13 +133,13 @@ NeoCode/
 
 ### Key Components
 
-| Component | Responsibility |
-|-----------|---------------|
-| `AppStore` | Main state container, session orchestration, persistence |
-| `OpenCodeRuntime` | Process management, health checks, runtime lifecycle |
-| `OpenCodeClient` | HTTP transport, request building, SSE handling |
-| `GitBranchService` | Git branch operations and management |
-| `WorkspaceToolService` | External editor and file manager discovery |
+| Component              | Responsibility                                           |
+| ---------------------- | -------------------------------------------------------- |
+| `AppStore`             | Main state container, session orchestration, persistence |
+| `OpenCodeRuntime`      | Process management, health checks, runtime lifecycle     |
+| `OpenCodeClient`       | HTTP transport, request building, SSE handling           |
+| `GitBranchService`     | Git branch operations and management                     |
+| `WorkspaceToolService` | External editor and file manager discovery               |
 
 ### State Management
 
@@ -223,14 +223,14 @@ See [BUILD.md](BUILD.md) and [RELEASING.md](RELEASING.md) for detailed release i
 
 ### Build Commands
 
-| Command | Description |
-|---------|-------------|
-| `just build` | Debug build |
-| `just build-release` | Release build |
-| `just test` | Run test suite |
-| `just archive` | Create signed archive |
-| `just dmg` | Build signed DMG |
-| `just notarize <dmg>` | Notarize DMG |
+| Command                  | Description           |
+| ------------------------ | --------------------- |
+| `just build`             | Debug build           |
+| `just build-release`     | Release build         |
+| `just test`              | Run test suite        |
+| `just archive`           | Create signed archive |
+| `just dmg`               | Build signed DMG      |
+| `just notarize <dmg>`    | Notarize DMG          |
 | `just release <version>` | Full release workflow |
 
 ## Contributing

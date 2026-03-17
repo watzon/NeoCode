@@ -92,6 +92,8 @@ struct ConversationView: View {
     @State private var isPinnedToBottom = true
     @State private var isMaintainingPinnedPosition = false
     @State private var isAwaitingInitialScroll = true
+    @State private var transcriptViewportHeight: CGFloat = 0
+    @State private var transcriptContentFrame: CGRect = .zero
     @State private var loadedMessageCount = 120
     @State private var isLoadingOlderMessages = false
     @State private var pendingRevertPreview: SessionRevertPreview?
@@ -122,6 +124,7 @@ struct ConversationView: View {
     private let composerBottomClearance: CGFloat = 180
     private let promptOverlayBottomClearance: CGFloat = 40
     private let scrollbarCompensation = ConversationLayout.scrollbarCompensation
+    private let transcriptScrollSpaceName = "ConversationTranscriptScrollSpace"
 
     let sessionID: String
 
@@ -472,33 +475,32 @@ struct ConversationView: View {
                 .padding(.bottom, 0)
                 .frame(maxWidth: transcriptColumnWidth, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .center)
+                .background(
+                    GeometryReader { geometry in
+                        Color.clear.preference(
+                            key: TranscriptContentFramePreferenceKey.self,
+                            value: geometry.frame(in: .named(transcriptScrollSpaceName))
+                        )
+                    }
+                )
             }
             .background(.clear)
-            .onScrollGeometryChange(for: TranscriptScrollMetrics.self) { geometry in
-                TranscriptScrollMetrics(
-                    contentOffsetY: geometry.contentOffset.y,
-                    contentHeight: geometry.contentSize.height,
-                    visibleMaxY: geometry.visibleRect.maxY
-                )
-            } action: { _, metrics in
-                guard !isAwaitingInitialScroll else { return }
-
-                if metrics.contentOffsetY <= olderMessagesLoadThreshold {
-                    DispatchQueue.main.async {
-                        loadOlderMessages(using: proxy)
-                    }
+            .coordinateSpace(name: transcriptScrollSpaceName)
+            .background(
+                GeometryReader { geometry in
+                    Color.clear.preference(
+                        key: TranscriptViewportHeightPreferenceKey.self,
+                        value: geometry.size.height
+                    )
                 }
-
-                let nextPinnedState: Bool
-                if isMaintainingPinnedPosition {
-                    nextPinnedState = true
-                } else {
-                    let distanceToBottom = max(0, metrics.contentHeight - metrics.visibleMaxY)
-                    nextPinnedState = distanceToBottom <= autoScrollThreshold
-                }
-                DispatchQueue.main.async {
-                    schedulePinnedStateUpdate(nextPinnedState)
-                }
+            )
+            .onPreferenceChange(TranscriptViewportHeightPreferenceKey.self) { viewportHeight in
+                transcriptViewportHeight = viewportHeight
+                updateTranscriptScrollMetrics(using: proxy)
+            }
+            .onPreferenceChange(TranscriptContentFramePreferenceKey.self) { contentFrame in
+                transcriptContentFrame = contentFrame
+                updateTranscriptScrollMetrics(using: proxy)
             }
 
             if showsNewSessionEmptyState {
@@ -807,6 +809,37 @@ struct ConversationView: View {
         isPinnedToBottom = nextPinnedState
     }
 
+    private func updateTranscriptScrollMetrics(using proxy: ScrollViewProxy) {
+        guard transcriptViewportHeight > 0 else { return }
+
+        let contentOffsetY = -transcriptContentFrame.minY
+        let metrics = TranscriptScrollMetrics(
+            contentOffsetY: contentOffsetY,
+            contentHeight: transcriptContentFrame.height,
+            visibleMaxY: contentOffsetY + transcriptViewportHeight
+        )
+
+        guard !isAwaitingInitialScroll else { return }
+
+        if metrics.contentOffsetY <= olderMessagesLoadThreshold {
+            DispatchQueue.main.async {
+                loadOlderMessages(using: proxy)
+            }
+        }
+
+        let nextPinnedState: Bool
+        if isMaintainingPinnedPosition {
+            nextPinnedState = true
+        } else {
+            let distanceToBottom = max(0, metrics.contentHeight - metrics.visibleMaxY)
+            nextPinnedState = distanceToBottom <= autoScrollThreshold
+        }
+
+        DispatchQueue.main.async {
+            schedulePinnedStateUpdate(nextPinnedState)
+        }
+    }
+
     private func loadOlderMessages(using proxy: ScrollViewProxy) {
         guard hasOlderMessages, !isLoadingOlderMessages, !isAwaitingInitialScroll else { return }
         isLoadingOlderMessages = true
@@ -1056,4 +1089,20 @@ enum ConversationLayout {
         for: .regular,
         scrollerStyle: NSScroller.preferredScrollerStyle
     )
+}
+
+private struct TranscriptContentFramePreferenceKey: PreferenceKey {
+    static var defaultValue: CGRect = .zero
+
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        value = nextValue()
+    }
+}
+
+private struct TranscriptViewportHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
 }
