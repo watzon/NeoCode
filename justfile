@@ -47,8 +47,8 @@ test:
         -destination 'platform=macOS'
 
 archive: sparkle-tools
-    @PUBLIC_KEY="$$(./bin/generate_keys --account {{sparkle_key_account}} -p 2>/dev/null || true)"; \
-    if [ -z "$${PUBLIC_KEY}" ]; then \
+    @PUBLIC_KEY="$(./bin/generate_keys --account {{sparkle_key_account}} -p 2>/dev/null || true)"; \
+    if [ -z "${PUBLIC_KEY}" ]; then \
         echo "Missing Sparkle key for account '{{sparkle_key_account}}'. Run: just sparkle-keygen"; \
         exit 1; \
     fi; \
@@ -58,7 +58,7 @@ archive: sparkle-tools
         -scheme {{scheme}} \
         -configuration Release \
         -archivePath "{{archive_path}}" \
-        SPARKLE_PUBLIC_ED_KEY="$${PUBLIC_KEY}" \
+        SPARKLE_PUBLIC_ED_KEY="${PUBLIC_KEY}" \
         -allowProvisioningUpdates
 
 export-app: archive
@@ -85,13 +85,13 @@ verify-signature:
 notarize dmg_path:
     @PROFILE="${NOTARYTOOL_PROFILE:-notarytool-password}"; \
     echo "Notarizing {{dmg_path}} with profile ${PROFILE}..."; \
-    result_file=$$(mktemp) && \
+    result_file=$(mktemp) && \
     xcrun notarytool submit "{{dmg_path}}" \
-        --keychain-profile "$${PROFILE}" \
+        --keychain-profile "${PROFILE}" \
         --wait \
-        --output-format json > "$${result_file}" && \
-    python3 -c "import json, sys; result=json.load(open(sys.argv[1], encoding='utf-8')); status=result.get('status'); summary=result.get('statusSummary', 'Unknown notarization failure'); ok=status == 'Accepted'; print(f\"Notarization failed: {status or 'unknown'} - {summary}\", file=sys.stderr) if not ok else None; sys.exit(0 if ok else 1)" "$${result_file}" && \
-    rm -f "$${result_file}"
+        --output-format json > "${result_file}" && \
+    python3 -c "import json, sys; result=json.load(open(sys.argv[1], encoding='utf-8')); status=result.get('status'); summary=result.get('statusSummary', 'Unknown notarization failure'); ok=status == 'Accepted'; print(f\"Notarization failed: {status or 'unknown'} - {summary}\", file=sys.stderr) if not ok else None; sys.exit(0 if ok else 1)" "${result_file}" && \
+    rm -f "${result_file}"
 
 staple dmg_path:
     xcrun stapler staple "{{dmg_path}}"
@@ -116,26 +116,26 @@ appcast dmg_path: sparkle-tools
         echo "DMG not found: {{dmg_path}}"; \
         exit 1; \
     fi
-    @TAG_VERSION="v$$(grep 'MARKETING_VERSION = ' {{xcode_project}}/project.pbxproj | head -1 | sed 's/.*= \(.*\);/\1/')"; \
-    DOWNLOAD_PREFIX="https://github.com/{{github_repo}}/releases/download/$${TAG_VERSION}/"; \
+    @TAG_VERSION="v$(grep 'MARKETING_VERSION = ' {{xcode_project}}/project.pbxproj | head -1 | sed 's/.*= \(.*\);/\1/')"; \
+    DOWNLOAD_PREFIX="https://github.com/{{github_repo}}/releases/download/${TAG_VERSION}/"; \
     rm -rf updates && mkdir -p updates && cp "{{dmg_path}}" updates/; \
     KEY_FILE=""; \
     APPCAST_ARGS=""; \
     if [ -n "${SPARKLE_PRIVATE_KEY:-}" ] && ./bin/generate_appcast --help 2>&1 | grep -q -- '--ed-key-file'; then \
-        KEY_FILE=$$(mktemp); \
-        printf '%s' "${SPARKLE_PRIVATE_KEY}" > "$${KEY_FILE}"; \
-        APPCAST_ARGS="--ed-key-file $${KEY_FILE}"; \
+        KEY_FILE=$(mktemp); \
+        printf '%s' "${SPARKLE_PRIVATE_KEY}" > "${KEY_FILE}"; \
+        APPCAST_ARGS="--ed-key-file ${KEY_FILE}"; \
     elif ./bin/generate_appcast --help 2>&1 | grep -q -- '--account'; then \
         APPCAST_ARGS="--account {{sparkle_key_account}}"; \
     fi; \
     if ./bin/generate_appcast --help 2>&1 | grep -q -- '--download-url-prefix'; then \
-        ./bin/generate_appcast $${APPCAST_ARGS} --download-url-prefix "$${DOWNLOAD_PREFIX}" updates/; \
+        ./bin/generate_appcast ${APPCAST_ARGS} --download-url-prefix "${DOWNLOAD_PREFIX}" updates/; \
     else \
-        ./bin/generate_appcast $${APPCAST_ARGS} updates/; \
+        ./bin/generate_appcast ${APPCAST_ARGS} updates/; \
     fi; \
     cp updates/appcast.xml appcast.xml; \
     rm -rf updates; \
-    if [ -n "$${KEY_FILE}" ]; then rm -f "$${KEY_FILE}"; fi
+    if [ -n "${KEY_FILE}" ]; then rm -f "${KEY_FILE}"; fi
 
 release-beta version:
     GITHUB_RELEASE_PRERELEASE=1 just release "{{version}}"
@@ -303,5 +303,5 @@ show-settings:
     xcodebuild -project {{xcode_project}} -scheme {{scheme}} -showBuildSettings
 
 version:
-    @echo "Marketing version:" && @grep 'MARKETING_VERSION = ' {{xcode_project}}/project.pbxproj | head -1
-    @echo "Build number:" && @grep 'CURRENT_PROJECT_VERSION = ' {{xcode_project}}/project.pbxproj | head -1
+    @echo "Marketing version:" && grep 'MARKETING_VERSION = ' {{xcode_project}}/project.pbxproj | head -1
+    @echo "Build number:" && grep 'CURRENT_PROJECT_VERSION = ' {{xcode_project}}/project.pbxproj | head -1
