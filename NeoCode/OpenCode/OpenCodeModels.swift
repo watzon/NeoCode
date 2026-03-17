@@ -565,6 +565,7 @@ enum OpenCodeEvent: Equatable, Sendable {
     case sessionCreated(OpenCodeSession)
     case sessionUpdated(OpenCodeSession)
     case sessionDeleted(String)
+    case sessionCompacted(String)
     case sessionStatusChanged(sessionID: String, status: OpenCodeSessionActivity)
     case permissionAsked(OpenCodePermissionRequest)
     case permissionReplied(OpenCodePermissionReplyEvent)
@@ -591,6 +592,8 @@ enum OpenCodeEvent: Equatable, Sendable {
             return "session.updated"
         case .sessionDeleted:
             return "session.deleted"
+        case .sessionCompacted:
+            return "session.compacted"
         case .sessionStatusChanged:
             return "session.status"
         case .permissionAsked:

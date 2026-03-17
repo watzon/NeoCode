@@ -127,6 +127,12 @@ struct SessionHeaderView: View {
     private var sessionMenuButton: some View {
         Menu {
             SessionActionMenuContent(
+                canCompact: store.canCompactSession(session.id),
+                onCompact: {
+                    Task {
+                        _ = await store.compactSession(session.id, using: runtime)
+                    }
+                },
                 onRename: {
                     renameTitle = session.title
                     isRenaming = true
@@ -203,11 +209,15 @@ struct SessionHeaderView: View {
 }
 
 struct SessionActionMenuContent: View {
+    let canCompact: Bool
+    let onCompact: () -> Void
     let onRename: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
         Button("Rename", action: onRename)
+        Button("Compact", action: onCompact)
+            .disabled(!canCompact)
         Divider()
         Button("Delete", role: .destructive, action: onDelete)
     }
@@ -438,11 +448,11 @@ private struct SessionStatsDropdown: View {
                             .foregroundStyle(NeoCodeTheme.textSecondary)
                     }
 
-                    statRow("Context used", value: count(stats.totalContextTokens))
+                    statRow("Context used", value: count(stats.contextUsedTokens))
                     statRow("Context limit", value: optionalCount(stats.contextWindow))
                     statRow("Context remaining", value: optionalCount(stats.remainingContextTokens))
                     statRow("Usage", value: optionalPercent(stats.percentUsed))
-                    statRow("Total tokens", value: count(stats.totalContextTokens))
+                    statRow(stats.isProjectedAfterCompaction ? "Last request" : "Total tokens", value: count(stats.totalContextTokens))
                     statRow("Input", value: count(stats.inputTokens))
                     statRow("Output", value: count(stats.outputTokens))
                     statRow("Reasoning", value: count(stats.reasoningTokens))
@@ -487,7 +497,9 @@ private struct SessionStatsDropdown: View {
     private func contextSummary(for stats: SessionStatsSnapshot) -> String {
         let remaining = optionalCount(stats.remainingContextTokens)
         let usage = optionalPercent(stats.percentUsed)
-        return "\(remaining) remaining - \(usage) used"
+        let summary = "\(remaining) remaining - \(usage) used"
+        guard stats.isProjectedAfterCompaction else { return summary }
+        return "\(summary) - projected after compaction"
     }
 
     private func count(_ value: Int) -> String {

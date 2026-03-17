@@ -204,6 +204,7 @@ struct ComposerModelOption: Identifiable, Hashable {
 
 enum LocalComposerSlashCommand: String, CaseIterable, Hashable, Identifiable {
     case new
+    case compact
     case model
     case agent
     case branch
@@ -219,6 +220,8 @@ enum LocalComposerSlashCommand: String, CaseIterable, Hashable, Identifiable {
         switch self {
         case .new:
             return "New Session"
+        case .compact:
+            return "Compact Session"
         case .model:
             return "Switch Model"
         case .agent:
@@ -238,6 +241,8 @@ enum LocalComposerSlashCommand: String, CaseIterable, Hashable, Identifiable {
         switch self {
         case .new:
             return "Create a new session. Add text after it to seed the new draft."
+        case .compact:
+            return "Summarize the current session to reduce context size."
         case .model:
             return "Change the selected model by name, provider, or model id."
         case .agent:
@@ -255,6 +260,8 @@ enum LocalComposerSlashCommand: String, CaseIterable, Hashable, Identifiable {
 
     nonisolated var aliases: [String] {
         switch self {
+        case .compact:
+            return ["summarize"]
         case .reasoning:
             return ["thinking"]
         default:

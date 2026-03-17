@@ -391,6 +391,7 @@ struct ChatMessage: Codable, Identifiable, Hashable {
     var kind: Kind
     var isInProgress: Bool
     var attachment: ChatAttachment?
+    var isSummaryMessage: Bool
 
     nonisolated var turnGroupID: String {
         messageID ?? id
@@ -405,7 +406,8 @@ struct ChatMessage: Codable, Identifiable, Hashable {
         emphasis: Emphasis,
         kind: Kind = .plain,
         isInProgress: Bool = false,
-        attachment: ChatAttachment? = nil
+        attachment: ChatAttachment? = nil,
+        isSummaryMessage: Bool = false
     ) {
         self.id = id
         self.messageID = messageID
@@ -416,6 +418,7 @@ struct ChatMessage: Codable, Identifiable, Hashable {
         self.kind = kind
         self.isInProgress = isInProgress
         self.attachment = attachment
+        self.isSummaryMessage = isSummaryMessage
     }
 
     init?(part: OpenCodePart, defaultRole: Role = .assistant) {
@@ -429,6 +432,7 @@ struct ChatMessage: Codable, Identifiable, Hashable {
         self.kind = part.chatMessageKind
         self.isInProgress = part.isInProgress
         self.attachment = part.attachment
+        self.isSummaryMessage = false
     }
 
     static func makeTranscript(from messages: [OpenCodeMessageEnvelope]) -> [ChatMessage] {
@@ -460,7 +464,8 @@ struct ChatMessage: Codable, Identifiable, Hashable {
                     emphasis: part.chatEmphasis,
                     kind: part.chatMessageKind,
                     isInProgress: part.isInProgress,
-                    attachment: part.attachment
+                    attachment: part.attachment,
+                    isSummaryMessage: message.info.isSummaryMessage
                 )
             }
 
@@ -491,6 +496,7 @@ struct SessionStatsSnapshot: Codable, Hashable, Sendable {
     let modelID: String?
     let modelTitle: String?
     let contextWindow: Int?
+    let projectedContextTokens: Int?
     let totalContextTokens: Int
     let inputTokens: Int
     let outputTokens: Int
@@ -500,14 +506,22 @@ struct SessionStatsSnapshot: Codable, Hashable, Sendable {
     let totalCost: Double
     let lastActivityAt: Date?
 
+    var contextUsedTokens: Int {
+        projectedContextTokens ?? totalContextTokens
+    }
+
+    var isProjectedAfterCompaction: Bool {
+        projectedContextTokens != nil
+    }
+
     var remainingContextTokens: Int? {
         guard let contextWindow else { return nil }
-        return max(contextWindow - totalContextTokens, 0)
+        return max(contextWindow - contextUsedTokens, 0)
     }
 
     var usedContextFraction: Double? {
         guard let contextWindow, contextWindow > 0 else { return nil }
-        return min(max(Double(totalContextTokens) / Double(contextWindow), 0), 1)
+        return min(max(Double(contextUsedTokens) / Double(contextWindow), 0), 1)
     }
 
     var remainingContextFraction: Double? {
@@ -532,7 +546,8 @@ struct SessionStatsSnapshot: Codable, Hashable, Sendable {
     static func make(
         sessionID: String,
         messageInfos: [OpenCodeMessageInfo],
-        models: [ComposerModelOption]
+        models: [ComposerModelOption],
+        transcript: [ChatMessage] = []
     ) -> SessionStatsSnapshot? {
         let assistantInfos = messageInfos
             .filter { $0.role == "assistant" }
@@ -562,6 +577,11 @@ struct SessionStatsSnapshot: Codable, Hashable, Sendable {
         let matchedModel = models.first {
             $0.providerID == referenceInfo.providerID && $0.modelID == referenceInfo.modelID
         }
+        let projectedContextTokens = projectedContextTokenCount(
+            from: transcript,
+            referenceInfo: referenceInfo,
+            summaryOutputTokens: outputTokens
+        )
 
         return SessionStatsSnapshot(
             sessionID: sessionID,
@@ -569,6 +589,7 @@ struct SessionStatsSnapshot: Codable, Hashable, Sendable {
             modelID: referenceInfo.modelID,
             modelTitle: matchedModel?.title,
             contextWindow: matchedModel?.contextWindow,
+            projectedContextTokens: projectedContextTokens,
             totalContextTokens: totalContextTokens,
             inputTokens: inputTokens,
             outputTokens: outputTokens,
@@ -578,6 +599,65 @@ struct SessionStatsSnapshot: Codable, Hashable, Sendable {
             totalCost: assistantInfos.reduce(0) { $0 + ($1.cost ?? 0) },
             lastActivityAt: messageInfos.compactMap { $0.updatedAt ?? $0.createdAt }.max()
         )
+    }
+
+    private static func projectedContextTokenCount(
+        from transcript: [ChatMessage],
+        referenceInfo: OpenCodeMessageInfo,
+        summaryOutputTokens: Int
+    ) -> Int? {
+        guard referenceInfo.isSummaryMessage else { return nil }
+
+        let compactedMessages: ArraySlice<ChatMessage>
+        if let boundary = transcript.lastIndex(where: { $0.kind.isCompactionMarker }) {
+            compactedMessages = transcript[boundary...]
+        } else {
+            compactedMessages = ArraySlice(transcript)
+        }
+
+        guard !compactedMessages.isEmpty else {
+            return summaryOutputTokens > 0 ? summaryOutputTokens : nil
+        }
+
+        var projected = 0
+        for message in compactedMessages {
+            if message.isSummaryMessage {
+                projected += max(summaryOutputTokens, estimateContextTokens(for: message))
+            } else {
+                projected += estimateContextTokens(for: message)
+            }
+        }
+
+        return projected > 0 ? projected : nil
+    }
+
+    private static func estimateContextTokens(for message: ChatMessage) -> Int {
+        if message.kind.isCompactionMarker {
+            return 5
+        }
+
+        let trimmedText = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let attachmentEstimate = message.attachment == nil ? 0 : 48
+        let textEstimate: Int
+        if trimmedText.isEmpty {
+            textEstimate = 4
+        } else {
+            let characterEstimate = Int(ceil(Double(trimmedText.count) / 4.0))
+            let wordEstimate = trimmedText.split(whereSeparator: \.isWhitespace).count
+            textEstimate = max(characterEstimate, wordEstimate)
+        }
+
+        let overhead: Int
+        switch message.role {
+        case .tool:
+            overhead = 12
+        case .assistant, .user:
+            overhead = 6
+        case .system:
+            overhead = 4
+        }
+
+        return max(textEstimate + attachmentEstimate + overhead, 1)
     }
 }
 

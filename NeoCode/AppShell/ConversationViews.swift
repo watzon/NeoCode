@@ -18,7 +18,28 @@ func buildDisplayMessageGroups(from visibleMessages: [ChatMessage]) -> [DisplayM
         currentAssistantTurn.removeAll(keepingCapacity: true)
     }
 
-    for message in visibleMessages {
+    var index = 0
+    while index < visibleMessages.count {
+        let message = visibleMessages[index]
+
+        if message.kind.isCompactionMarker {
+            flushUserTurn()
+            flushAssistantTurn()
+
+            var compactionMessages = [message]
+            index += 1
+
+            while index < visibleMessages.count {
+                let nextMessage = visibleMessages[index]
+                guard nextMessage.role == .assistant || nextMessage.role == .tool else { break }
+                compactionMessages.append(nextMessage)
+                index += 1
+            }
+
+            groups.append(.compaction(compactionMessages))
+            continue
+        }
+
         if message.role == .assistant || message.role == .tool {
             flushUserTurn()
             currentAssistantTurn.append(message)
@@ -34,6 +55,8 @@ func buildDisplayMessageGroups(from visibleMessages: [ChatMessage]) -> [DisplayM
             flushAssistantTurn()
             groups.append(.message(message))
         }
+
+        index += 1
     }
 
     flushUserTurn()
@@ -539,6 +562,8 @@ struct ConversationView: View {
             )
         case .assistantTurn(let messages):
             AssistantTurnView(messages: messages)
+        case .compaction(let messages):
+            CompactionSummarySectionView(messages: messages)
         }
     }
 

@@ -5,12 +5,13 @@ enum DisplayMessageGroup: Identifiable, Hashable {
     case message(ChatMessage)
     case userTurn([ChatMessage])
     case assistantTurn([ChatMessage])
+    case compaction([ChatMessage])
 
     var id: String {
         switch self {
         case .message(let message):
             return message.id
-        case .userTurn(let messages), .assistantTurn(let messages):
+        case .userTurn(let messages), .assistantTurn(let messages), .compaction(let messages):
             return messages.map(\.id).joined(separator: "-")
         }
     }
@@ -89,18 +90,26 @@ struct UserTurnView: View {
 
 struct AssistantTurnView: View {
     let messages: [ChatMessage]
+    let showsMetadataHeader: Bool
     private let contentWidth = ConversationLayout.assistantContentWidth
+
+    init(messages: [ChatMessage], showsMetadataHeader: Bool = true) {
+        self.messages = messages
+        self.showsMetadataHeader = showsMetadataHeader
+    }
 
     var body: some View {
         let turnBlocks = blocks
 
         VStack(alignment: .leading, spacing: 10) {
-            MessageMetadataHeaderView(
-                roleLabel: "assistant",
-                timestamp: messages.first?.timestamp,
-                roleColor: NeoCodeTheme.accent,
-                isTrailingAligned: false
-            )
+            if showsMetadataHeader {
+                MessageMetadataHeaderView(
+                    roleLabel: "assistant",
+                    timestamp: messages.first?.timestamp,
+                    roleColor: NeoCodeTheme.accent,
+                    isTrailingAligned: false
+                )
+            }
 
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(turnBlocks.enumerated()), id: \.element.id) { index, block in
@@ -293,33 +302,109 @@ struct ToolCallClusterRowView: View {
     }
 }
 
-private struct CompactionMarkerRowView: View {
+struct CompactionSummarySectionView: View {
+    let messages: [ChatMessage]
+    private let contentWidth = ConversationLayout.assistantContentWidth
+
+    @State private var isExpanded: Bool
+
+    init(messages: [ChatMessage]) {
+        self.messages = messages
+        _isExpanded = State(initialValue: false)
+    }
+
     var body: some View {
-        HStack(spacing: 12) {
-            Rectangle()
-                .fill(NeoCodeTheme.line)
-                .frame(maxWidth: .infinity, minHeight: 1, maxHeight: 1)
+        VStack(alignment: .leading, spacing: isExpanded && !summaryMessages.isEmpty ? 12 : 0) {
+            header
 
-            Text("Compaction")
-                .font(.neoMonoSmall)
-                .foregroundStyle(NeoCodeTheme.accent)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(NeoCodeTheme.panelRaised)
-                        .overlay(
-                            Capsule(style: .continuous)
-                                .stroke(NeoCodeTheme.lineStrong, lineWidth: 1)
-                        )
-                )
-
-            Rectangle()
-                .fill(NeoCodeTheme.line)
-                .frame(maxWidth: .infinity, minHeight: 1, maxHeight: 1)
+            if isExpanded {
+                if summaryMessages.isEmpty {
+                    Text("Generating compacted session summary...")
+                        .font(.neoMonoSmall)
+                        .foregroundStyle(NeoCodeTheme.textSecondary)
+                        .padding(.leading, 21)
+                } else {
+                    AssistantTurnView(messages: summaryMessages, showsMetadataHeader: false)
+                        .frame(maxWidth: contentWidth, alignment: .leading)
+                        .padding(.leading, 21)
+                }
+            }
         }
-        .padding(.vertical, 14)
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: contentWidth, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .background(cardBackground)
+        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .onTapGesture {
+            withAnimation(.easeOut(duration: 0.16)) {
+                isExpanded.toggle()
+            }
+        }
+    }
+
+    private var summaryMessages: [ChatMessage] {
+        messages.filter { !$0.kind.isCompactionMarker }
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(NeoCodeTheme.textMuted)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Compaction summary")
+                    .font(.neoMonoSmall)
+                    .foregroundStyle(NeoCodeTheme.textPrimary)
+
+                Text(subtitle)
+                    .font(.neoMonoSmall)
+                    .foregroundStyle(NeoCodeTheme.textMuted)
+            }
+
+            Spacer(minLength: 8)
+
+            if let timestamp = summaryMessages.first?.timestamp ?? messages.first?.timestamp {
+                Text(timestamp, style: .time)
+                    .font(.neoMonoSmall)
+                    .foregroundStyle(NeoCodeTheme.textMuted)
+            }
+
+            Text(statusText)
+                .font(.neoMonoSmall)
+                .foregroundStyle(statusColor)
+        }
+    }
+
+    private var subtitle: String {
+        if summaryMessages.isEmpty {
+            return "Summarizing the session into a smaller handoff context."
+        }
+
+        return isExpanded
+            ? "Tap to collapse the compacted handoff."
+            : "Tap to inspect the compacted handoff that future turns build on."
+    }
+
+    private var statusText: String {
+        if summaryMessages.isEmpty || summaryMessages.contains(where: \.isInProgress) {
+            return "running"
+        }
+
+        return "completed"
+    }
+
+    private var statusColor: Color {
+        statusText == "completed" ? NeoCodeTheme.success : NeoCodeTheme.accent
+    }
+
+    private var cardBackground: some View {
+        RoundedRectangle(cornerRadius: 16)
+            .fill(NeoCodeTheme.panelSoft)
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(NeoCodeTheme.line, lineWidth: 1)
+            )
     }
 }
 
@@ -345,7 +430,7 @@ struct MessageRowView: View {
             }
 
             if isCompactionMarker {
-                CompactionMarkerRowView()
+                CompactionSummarySectionView(messages: [message])
             } else if message.role == .tool {
                 EmptyView()
             } else if isThinking {

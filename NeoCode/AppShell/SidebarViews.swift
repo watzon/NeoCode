@@ -413,6 +413,12 @@ struct SessionTreeRow: View {
         .animation(.easeOut(duration: 0.16), value: isHovering)
         .contextMenu {
             SessionActionMenuContent(
+                canCompact: store.canCompactSession(session.id),
+                onCompact: {
+                    Task {
+                        _ = await store.compactSession(session.id, using: runtime)
+                    }
+                },
                 onRename: {
                     renameTitle = session.title
                     isRenaming = true
@@ -465,6 +471,12 @@ struct SessionTreeRow: View {
     private var sessionMenuButton: some View {
         Menu {
             SessionActionMenuContent(
+                canCompact: store.canCompactSession(session.id),
+                onCompact: {
+                    Task {
+                        _ = await store.compactSession(session.id, using: runtime)
+                    }
+                },
                 onRename: {
                     renameTitle = session.title
                     isRenaming = true

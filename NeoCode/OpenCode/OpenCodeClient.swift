@@ -10,6 +10,7 @@ protocol OpenCodeServicing {
     func createSession(title: String?) async throws -> OpenCodeSession
     func updateSession(sessionID: String, title: String) async throws -> OpenCodeSession
     func deleteSession(sessionID: String) async throws -> Bool
+    func summarizeSession(sessionID: String, providerID: String, modelID: String, auto: Bool) async throws
     func revertSession(sessionID: String, messageID: String, partID: String?) async throws -> OpenCodeSession
     func unrevertSession(sessionID: String) async throws -> OpenCodeSession
     func abortSession(sessionID: String) async throws
@@ -85,6 +86,17 @@ final class OpenCodeClient: OpenCodeServicing {
     func deleteSession(sessionID: String) async throws -> Bool {
         logger.info("DELETE /session/\(sessionID, privacy: .public)")
         return try await request(path: "/session/\(sessionID)", method: "DELETE")
+    }
+
+    func summarizeSession(sessionID: String, providerID: String, modelID: String, auto: Bool = false) async throws {
+        logger.info(
+            "POST /session/\(sessionID, privacy: .public)/summarize provider=\(providerID, privacy: .public) model=\(modelID, privacy: .public) auto=\(auto, privacy: .public)"
+        )
+        let _: Bool = try await request(
+            path: "/session/\(sessionID)/summarize",
+            method: "POST",
+            body: SummarizeSessionBody(providerID: providerID, modelID: modelID, auto: auto)
+        )
     }
 
     func revertSession(sessionID: String, messageID: String, partID: String? = nil) async throws -> OpenCodeSession {
@@ -368,6 +380,12 @@ private struct UpdateSessionBody: Encodable {
 private struct RevertSessionBody: Encodable {
     let messageID: String
     let partID: String?
+}
+
+private struct SummarizeSessionBody: Encodable {
+    let providerID: String
+    let modelID: String
+    let auto: Bool
 }
 
 private struct SendPromptBody: Encodable {

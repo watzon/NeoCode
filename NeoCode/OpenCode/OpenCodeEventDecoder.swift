@@ -122,6 +122,9 @@ enum OpenCodeEventDecoder {
         let sessionID: String
         let status: OpenCodeSessionActivity
     }
+    private struct SessionCompactedPayload: Decodable {
+        let sessionID: String
+    }
     private struct PermissionPayload: Decodable { let properties: OpenCodePermissionRequest }
     private struct QuestionPayload: Decodable { let properties: OpenCodeQuestionRequest }
     private struct MessagePayload: Decodable { let info: OpenCodeMessageInfo }
@@ -155,6 +158,8 @@ enum OpenCodeEventDecoder {
         case "session.deleted":
             let payload = try decoder.decode(SessionDeletedPayload.self, from: raw.properties.rawData)
             return .sessionDeleted(payload.id ?? payload.sessionID ?? "")
+        case "session.compacted":
+            return .sessionCompacted(try decoder.decode(SessionCompactedPayload.self, from: raw.properties.rawData).sessionID)
         case "session.status":
             let payload = try decoder.decode(SessionStatusPayload.self, from: raw.properties.rawData)
             return .sessionStatusChanged(sessionID: payload.sessionID, status: payload.status)

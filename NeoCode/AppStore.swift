@@ -1201,6 +1201,16 @@ final class AppStore {
         }
     }
 
+    @discardableResult
+    func compactSession(_ sessionID: String, using runtime: OpenCodeRuntime) async -> Bool {
+        guard let projectID = projectID(for: sessionID) else { return false }
+        guard let service = await liveService(for: projectID, runtime: runtime) else { return false }
+
+        let didCompact = await compactSession(sessionID, projectID: projectID, using: service)
+        reevaluateRuntimeRetention(using: runtime)
+        return didCompact
+    }
+
     func deleteSession(_ sessionID: String, using runtime: OpenCodeRuntime) async {
         guard let projectID = projectID(for: sessionID) else { return }
 
@@ -1222,6 +1232,18 @@ final class AppStore {
             lastError = error.localizedDescription
             reevaluateRuntimeRetention(using: runtime)
         }
+    }
+
+    func canCompactSession(_ sessionID: String) -> Bool {
+        guard let session = sessionSummary(for: sessionID),
+              session.isEphemeral == false,
+              session.status != .running,
+              resolvedCompactionModel(for: sessionID) != nil
+        else {
+            return false
+        }
+
+        return true
     }
 
     private func liveService(for projectID: ProjectSummary.ID, runtime: OpenCodeRuntime) async -> (any OpenCodeServicing)? {
@@ -1262,9 +1284,22 @@ final class AppStore {
               let projectID = selectedProject?.id
         else { return }
 
+        let localCommand = localSlashCommandInvocation(in: trimmed)
+        if let localCompactCommand = localCommand,
+           localCompactCommand.command == .compact {
+            let handled = await executeLocalSlashCommand(localCompactCommand, in: projectID, using: runtime)
+            if handled {
+                logger.info(
+                    "Handled local slash command project=\(projectID.uuidString, privacy: .public) command=\(localCompactCommand.command.name, privacy: .public)"
+                )
+            }
+            reevaluateRuntimeRetention(using: runtime)
+            return
+        }
+
         let remoteCommand = slashCommandInvocation(in: trimmed)
         if remoteCommand == nil,
-           let localCommand = localSlashCommandInvocation(in: trimmed) {
+           let localCommand {
             let handled = await executeLocalSlashCommand(localCommand, in: projectID, using: runtime)
             if handled {
                 logger.info(
@@ -2176,6 +2211,12 @@ final class AppStore {
             }
         case .sessionDeleted(let sessionID):
             removeSession(sessionID, in: projectID)
+        case .sessionCompacted(let sessionID):
+            if let service = liveServices[projectID] {
+                Task { [weak self] in
+                    await self?.loadMessages(for: sessionID, using: service, projectID: projectID, allowCachedFallback: true)
+                }
+            }
         case .sessionStatusChanged(let sessionID, let status):
             let previousStatus = liveSessionStatuses[sessionID]
             liveSessionStatuses[sessionID] = status
@@ -2813,6 +2854,22 @@ final class AppStore {
             draft = invocation.arguments
             return true
 
+        case .compact:
+            guard let sessionID = selectedSession?.id,
+                  self.projectID(for: sessionID) == projectID
+            else {
+                lastError = "Select a session before compacting it."
+                return false
+            }
+            guard let service = await connectProject(
+                projectID,
+                using: runtime,
+                includeComposerOptions: selectedProjectID == projectID
+            ) else {
+                return false
+            }
+            return await compactSession(sessionID, projectID: projectID, using: service)
+
         case .model:
             guard let query = invocation.arguments.nonEmptyTrimmed else {
                 lastError = "Usage: /model <name>"
@@ -2920,6 +2977,76 @@ final class AppStore {
         bestMatch(in: availableModels, query: query) { model in
             [model.title, model.providerID, model.modelID, model.id]
         }
+    }
+
+    @discardableResult
+    func compactSession(
+        _ sessionID: String,
+        projectID: ProjectSummary.ID,
+        using service: any OpenCodeServicing
+    ) async -> Bool {
+        guard let session = sessionSummary(for: sessionID, projectID: projectID) else {
+            return false
+        }
+
+        guard let model = resolvedCompactionModel(for: sessionID) else {
+            lastError = "Connect a provider to summarize this session."
+            return false
+        }
+
+        guard !session.isEphemeral else {
+            lastError = "Send at least one message before compacting this session."
+            return false
+        }
+
+        guard session.status != .running else {
+            lastError = "Wait for the current response to finish before compacting the session."
+            return false
+        }
+
+        isSending = true
+        lastError = nil
+        setSessionStatus(.running, sessionID: sessionID, projectID: projectID)
+
+        do {
+            try await service.summarizeSession(
+                sessionID: sessionID,
+                providerID: model.providerID,
+                modelID: model.modelID,
+                auto: false
+            )
+
+            draft = ""
+            clearLocalSessionActivity(sessionID)
+            liveSessionStatuses[sessionID] = .idle
+            await loadMessages(for: sessionID, using: service, projectID: projectID, allowCachedFallback: true)
+            refreshSessionStatus(sessionID: sessionID, projectID: projectID)
+            isSending = false
+            return true
+        } catch {
+            clearLocalSessionActivity(sessionID)
+            logger.error(
+                "Failed to compact session \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+            setSessionStatus(.attention, sessionID: sessionID, projectID: projectID)
+            lastError = error.localizedDescription
+            isSending = false
+            return false
+        }
+    }
+
+    private func resolvedCompactionModel(for sessionID: String) -> (providerID: String, modelID: String)? {
+        if let selectedModel {
+            return (selectedModel.providerID, selectedModel.modelID)
+        }
+
+        if let stats = sessionStats(for: sessionID),
+           let providerID = stats.providerID,
+           let modelID = stats.modelID {
+            return (providerID, modelID)
+        }
+
+        return nil
     }
 
     private func bestMatchingAgent(for query: String) -> String? {
@@ -3127,6 +3254,8 @@ final class AppStore {
                         case .sessionUpdated(let session):
                             self.noteDashboardChange(projectID: projectID, sessionID: session.id, using: runtime)
                         case .sessionDeleted(let sessionID):
+                            self.noteDashboardChange(projectID: projectID, sessionID: sessionID, using: runtime)
+                        case .sessionCompacted(let sessionID):
                             self.noteDashboardChange(projectID: projectID, sessionID: sessionID, using: runtime)
                         case .messageUpdated(let info):
                             self.noteDashboardChange(projectID: projectID, sessionID: info.sessionID, using: runtime)
@@ -3777,6 +3906,8 @@ final class AppStore {
 
     private func queueDispatchSessionID(for event: OpenCodeEvent) -> String? {
         switch event {
+        case .sessionCompacted(let sessionID):
+            return sessionID
         case .sessionStatusChanged(let sessionID, _):
             return sessionID
         case .permissionAsked(let request):
@@ -4424,10 +4555,12 @@ final class AppStore {
 
         let projectPath = projects[indices.project].path
         let models = cachedModelsByProjectPath[projectPath] ?? availableModels
+        let transcript = transcriptStateBySessionID[sessionID]?.messages ?? projects[indices.project].sessions[indices.session].transcript
         projects[indices.project].sessions[indices.session].stats = SessionStatsSnapshot.make(
             sessionID: sessionID,
             messageInfos: Array(infos.values),
-            models: models
+            models: models,
+            transcript: transcript
         )
     }
 

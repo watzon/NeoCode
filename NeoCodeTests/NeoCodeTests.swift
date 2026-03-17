@@ -188,6 +188,22 @@ struct NeoCodeCoreTests {
         }
     }
 
+    @Test func decodesSessionCompactedEvent() throws {
+        let event = try OpenCodeEventDecoder.decode(
+            frame: OpenCodeSSEFrame(
+                event: "session.compacted",
+                data: "{\"type\":\"session.compacted\",\"properties\":{\"sessionID\":\"ses_1\"}}"
+            )
+        )
+
+        switch event {
+        case .sessionCompacted(let sessionID):
+            #expect(sessionID == "ses_1")
+        default:
+            Issue.record("Expected session.compacted event")
+        }
+    }
+
     @Test func decodesAssistantUsageMetadataFromMessages() throws {
         let envelopes: [OpenCodeMessageEnvelope] = try decode(
             """
@@ -582,6 +598,7 @@ struct NeoCodeCoreTests {
         let resolved = try #require(stats)
         #expect(resolved.modelDisplayName == "GPT-5.4")
         #expect(resolved.totalContextTokens == 1200)
+        #expect(resolved.contextUsedTokens == 1200)
         #expect(resolved.remainingContextTokens == 800)
         #expect(resolved.percentUsed == 60)
         #expect(resolved.totalCost == 1.0)
@@ -590,6 +607,119 @@ struct NeoCodeCoreTests {
         #expect(resolved.reasoningTokens == 100)
         #expect(resolved.cacheReadTokens == 100)
         #expect(resolved.cacheWriteTokens == 50)
+    }
+
+    @Test func projectsContextUsageFromCompactionSummary() throws {
+        let envelopes: [OpenCodeMessageEnvelope] = try decode(
+            """
+            [
+              {
+                "info": {
+                  "id": "msg_compact_request",
+                  "sessionID": "ses_usage",
+                  "role": "user",
+                  "time": {
+                    "created": "2026-03-13T10:07:00Z",
+                    "completed": "2026-03-13T10:07:00Z"
+                  }
+                },
+                "parts": [
+                  {
+                    "id": "part_compact",
+                    "sessionID": "ses_usage",
+                    "messageID": "msg_compact_request",
+                    "type": "compaction",
+                    "time": {
+                      "created": "2026-03-13T10:07:00Z",
+                      "completed": "2026-03-13T10:07:00Z"
+                    }
+                  }
+                ]
+              },
+              {
+                "info": {
+                  "id": "msg_compact_summary",
+                  "sessionID": "ses_usage",
+                  "role": "assistant",
+                  "summary": true,
+                  "providerID": "openai",
+                  "modelID": "gpt-5.4",
+                  "cost": 0.6,
+                  "tokens": {
+                    "total": 238085,
+                    "input": 236945,
+                    "output": 1140,
+                    "reasoning": 0,
+                    "cache": {
+                      "read": 0,
+                      "write": 0
+                    }
+                  },
+                  "time": {
+                    "created": "2026-03-13T10:07:10Z",
+                    "completed": "2026-03-13T10:07:12Z"
+                  }
+                },
+                "parts": [
+                  {
+                    "id": "part_summary",
+                    "sessionID": "ses_usage",
+                    "messageID": "msg_compact_summary",
+                    "type": "text",
+                    "text": "## Goal\\nContinue the feature work.",
+                    "time": {
+                      "created": "2026-03-13T10:07:10Z",
+                      "completed": "2026-03-13T10:07:12Z"
+                    }
+                  }
+                ]
+              }
+            ]
+            """
+        )
+
+        let transcript = ChatMessage.makeTranscript(from: envelopes)
+        let stats = SessionStatsSnapshot.make(
+            sessionID: "ses_usage",
+            messageInfos: envelopes.map(\.info),
+            models: [
+                ComposerModelOption(
+                    id: "openai/gpt-5.4",
+                    providerID: "openai",
+                    modelID: "gpt-5.4",
+                    title: "GPT-5.4",
+                    contextWindow: 262_144,
+                    variants: ["high"]
+                )
+            ],
+            transcript: transcript
+        )
+
+        let resolved = try #require(stats)
+        #expect(resolved.isProjectedAfterCompaction)
+        #expect(resolved.totalContextTokens == 238085)
+        #expect(resolved.contextUsedTokens == 1145)
+        #expect(resolved.remainingContextTokens == 260999)
+        #expect(resolved.percentUsed == 0)
+    }
+
+    @Test func groupsCompactionMarkerAndSummaryIntoCompactionSection() {
+        let now = Date(timeIntervalSince1970: 1_710_616_186)
+        let groups = buildDisplayMessageGroups(from: [
+            ChatMessage(id: "part_user", messageID: "msg_user", role: .user, text: "Hello", timestamp: now, emphasis: .normal),
+            ChatMessage(id: "part_compact", messageID: "msg_compact", role: .system, text: "Session compacted", timestamp: now, emphasis: .subtle, kind: .compactionMarker),
+            ChatMessage(id: "part_summary", messageID: "msg_summary", role: .assistant, text: "## Goal\nContinue the feature work.", timestamp: now, emphasis: .normal, isSummaryMessage: true),
+        ])
+
+        #expect(groups.count == 2)
+        guard case .compaction(let messages) = groups[1] else {
+            Issue.record("Expected a compaction display group")
+            return
+        }
+
+        #expect(messages.count == 2)
+        #expect(messages[0].kind.isCompactionMarker)
+        #expect(messages[1].isSummaryMessage)
     }
 
     @Test func parsesMultiLineSSEPayloadsBeforeFlushing() throws {
@@ -1317,6 +1447,7 @@ struct NeoCodeMainActorTests {
             modelID: "gpt-5.4",
             modelTitle: "GPT-5.4",
             contextWindow: 200_000,
+            projectedContextTokens: nil,
             totalContextTokens: 40_000,
             inputTokens: 20_000,
             outputTokens: 15_000,
@@ -2200,6 +2331,45 @@ struct NeoCodeMainActorTests {
         #expect(store.draft.isEmpty)
         #expect(store.selectedTranscript.isEmpty == true)
         #expect(store.selectedSession?.status == .running)
+    }
+
+    @MainActor
+    @Test func appStoreCompactsSessionThroughSummarizeEndpoint() async {
+        let projectID = UUID()
+        let model = ComposerModelOption(
+            id: "openai/gpt-5.4",
+            providerID: "openai",
+            modelID: "gpt-5.4",
+            title: "GPT-5.4",
+            contextWindow: nil,
+            variants: []
+        )
+        let store = AppStore(projects: [
+            ProjectSummary(
+                id: projectID,
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(id: "ses_1", title: "Existing", lastUpdatedAt: .distantPast),
+                ]
+            ),
+        ])
+        let service = MockOpenCodeService()
+
+        store.availableModels = [model]
+        store.selectedModelID = model.id
+        store.selectSession("ses_1")
+        store.draft = "/compact"
+
+        let didCompact = await store.compactSession("ses_1", projectID: projectID, using: service)
+
+        #expect(didCompact == true)
+        #expect(service.sentSummaries.count == 1)
+        #expect(service.sentSummaries[0].sessionID == "ses_1")
+        #expect(service.sentSummaries[0].providerID == "openai")
+        #expect(service.sentSummaries[0].modelID == "gpt-5.4")
+        #expect(service.sentSummaries[0].auto == false)
+        #expect(store.draft.isEmpty)
     }
 
     @MainActor
@@ -3327,6 +3497,57 @@ struct NeoCodeMainActorTests {
     }
 
     @MainActor
+    @Test func openCodeClientPostsSessionSummarizeRequest() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { MockURLProtocol.requestHandler = nil }
+        var capturedRequest: URLRequest?
+
+        MockURLProtocol.requestHandler = { request in
+            capturedRequest = request
+
+            guard let url = request.url,
+                  let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)
+            else {
+                throw URLError(.badServerResponse)
+            }
+
+            return (response, Data("true".utf8))
+        }
+
+        let baseURL = try #require(URL(string: "http://127.0.0.1:4000"))
+        let client = OpenCodeClient(
+            connection: OpenCodeRuntime.Connection(
+                projectPath: "/tmp/NeoCode",
+                baseURL: baseURL,
+                username: "user",
+                password: "pass",
+                version: "1.0.0"
+            ),
+            session: session
+        )
+
+        try await client.summarizeSession(sessionID: "ses_1", providerID: "openai", modelID: "gpt-5.4", auto: false)
+
+        let request = try #require(capturedRequest)
+        #expect(request.httpMethod == "POST")
+        #expect(request.url?.path == "/session/ses_1/summarize")
+
+        let bodyData = try requestBodyData(from: request)
+        let body = try #require(bodyData)
+        let payload = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        #expect(payload["providerID"] as? String == "openai")
+        #expect(payload["modelID"] as? String == "gpt-5.4")
+        #expect(payload["auto"] as? Bool == false)
+    }
+
+    @Test func localCompactSlashCommandSupportsSummarizeAlias() {
+        #expect(LocalComposerSlashCommand.compact.matches(name: "compact"))
+        #expect(LocalComposerSlashCommand.compact.matches(name: "summarize"))
+    }
+
+    @MainActor
     @Test func openCodeClientRepliesToPermission() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MockURLProtocol.self]
@@ -3596,11 +3817,19 @@ private final class MockOpenCodeService: OpenCodeServicing {
         let attachments: [ComposerAttachment]
     }
 
+    struct SentSummary {
+        let sessionID: String
+        let providerID: String
+        let modelID: String
+        let auto: Bool
+    }
+
     var revertedSessionID: String?
     var revertedMessageID: String?
     var unrevertedSessionIDs: [String] = []
     var sentPrompts: [SentPrompt] = []
     var sentCommands: [SentCommand] = []
+    var sentSummaries: [SentSummary] = []
     var repliedPermissionIDs: [String] = []
     var repliedQuestionIDs: [String] = []
     var rejectedQuestionIDs: [String] = []
@@ -3632,6 +3861,9 @@ private final class MockOpenCodeService: OpenCodeServicing {
     }
     func updateSession(sessionID: String, title: String) async throws -> OpenCodeSession { fatalError("Unused in test") }
     func deleteSession(sessionID: String) async throws -> Bool { true }
+    func summarizeSession(sessionID: String, providerID: String, modelID: String, auto: Bool) async throws {
+        sentSummaries.append(SentSummary(sessionID: sessionID, providerID: providerID, modelID: modelID, auto: auto))
+    }
 
     func revertSession(sessionID: String, messageID: String, partID: String?) async throws -> OpenCodeSession {
         revertedSessionID = sessionID
