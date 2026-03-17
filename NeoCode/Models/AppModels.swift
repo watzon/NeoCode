@@ -451,7 +451,7 @@ struct ChatMessage: Codable, Identifiable, Hashable {
                 guard !(message.info.chatRole == .user && (containsAttachment || !promotedFileReferences.isEmpty) && part.isSyntheticUserFileContentDump) else {
                     return nil
                 }
-                guard !(message.info.chatRole == .user && part.isPromotedFileReference) else {
+                guard !(message.info.chatRole == .user && part.isPromotedFileReference && part.attachment == nil) else {
                     return nil
                 }
 
