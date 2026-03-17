@@ -375,7 +375,7 @@ struct MessageRowView: View {
 
     private var userMessageBody: some View {
         VStack(alignment: .trailing, spacing: 10) {
-            MarkdownMessageView(markdown: message.text, baseFont: .neoMono, textColor: textColor)
+            userMessageContent
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 14)
@@ -413,6 +413,18 @@ struct MessageRowView: View {
         .animation(.easeOut(duration: 0.16), value: isHovering)
         .animation(.easeOut(duration: 0.16), value: didCopy)
         .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+
+    @ViewBuilder
+    private var userMessageContent: some View {
+        if let highlightedText = highlightedUserMessageText {
+            Text(highlightedText)
+                .font(.neoMono)
+                .foregroundStyle(textColor)
+                .textSelection(.enabled)
+        } else {
+            MarkdownMessageView(markdown: message.text, baseFont: .neoMono, textColor: textColor)
+        }
     }
 
     private var alignment: Alignment {
@@ -478,6 +490,29 @@ struct MessageRowView: View {
 
     private var canRevertMessage: Bool {
         store.selectedSession?.status != .running && !store.isSending
+    }
+
+    private var highlightedUserMessageText: AttributedString? {
+        let sourceTexts = ComposerPromptFileReferenceBuilder.mentionSourceTexts(in: message.text)
+        guard !sourceTexts.isEmpty else { return nil }
+
+        var attributed = AttributedString(message.text)
+
+        for sourceText in sourceTexts {
+            let start = message.text.index(message.text.startIndex, offsetBy: sourceText.start)
+            let end = message.text.index(message.text.startIndex, offsetBy: sourceText.end)
+
+            guard let lowerBound = AttributedString.Index(start, within: attributed),
+                  let upperBound = AttributedString.Index(end, within: attributed)
+            else {
+                continue
+            }
+
+            attributed[lowerBound..<upperBound].foregroundColor = NeoCodeTheme.accent
+            attributed[lowerBound..<upperBound].backgroundColor = NeoCodeTheme.accentDim.opacity(0.42)
+        }
+
+        return attributed
     }
 
     private func copyMessageText() {

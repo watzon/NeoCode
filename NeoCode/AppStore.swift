@@ -3832,7 +3832,7 @@ final class AppStore {
     }
 
     private func shouldSuppressTranscriptPart(_ part: OpenCodePart, defaultRole: ChatMessage.Role) -> Bool {
-        defaultRole == .user && part.isSyntheticAttachmentReadSummary
+        defaultRole == .user && (part.isSyntheticAttachmentReadSummary || part.isSyntheticUserFileContentDump)
     }
 
     private func optimisticAttachmentsMatch(_ optimistic: ChatAttachment, _ incoming: ChatAttachment) -> Bool {

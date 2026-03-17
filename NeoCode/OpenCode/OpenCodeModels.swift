@@ -396,6 +396,30 @@ struct OpenCodePart: Decodable, Equatable, Sendable {
         type == .text && trimmedText.hasPrefix("Called the Read tool with the following input:")
     }
 
+    nonisolated var isSyntheticUserFileContentDump: Bool {
+        guard type == .text else { return false }
+        return trimmedText.hasPrefix("<path>")
+            && trimmedText.contains("</path>")
+            && trimmedText.contains("<type>")
+            && trimmedText.contains("</type>")
+            && trimmedText.contains("<content>")
+    }
+
+    nonisolated var promotedSourceText: String? {
+        guard type == .file,
+              let value = source?.text?.value.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty
+        else {
+            return nil
+        }
+
+        return value
+    }
+
+    nonisolated var isPromotedFileReference: Bool {
+        promotedSourceText != nil
+    }
+
     nonisolated var attachment: ChatAttachment? {
         guard type == .file,
               let mime,

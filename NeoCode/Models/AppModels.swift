@@ -435,10 +435,19 @@ struct ChatMessage: Codable, Identifiable, Hashable {
         messages.flatMap { message in
             let timestamp = message.info.createdAt ?? message.info.updatedAt ?? Date()
             let containsAttachment = message.parts.contains { $0.attachment != nil }
+            let promotedFileReferences = message.info.chatRole == .user
+                ? message.parts.compactMap(\.promotedSourceText)
+                : []
 
-            return message.parts.compactMap { part -> ChatMessage? in
+            let transcript = message.parts.compactMap { part -> ChatMessage? in
                 guard part.shouldDisplay else { return nil }
                 guard !(message.info.chatRole == .user && containsAttachment && part.isSyntheticAttachmentReadSummary) else {
+                    return nil
+                }
+                guard !(message.info.chatRole == .user && (containsAttachment || !promotedFileReferences.isEmpty) && part.isSyntheticUserFileContentDump) else {
+                    return nil
+                }
+                guard !(message.info.chatRole == .user && part.isPromotedFileReference) else {
                     return nil
                 }
 
@@ -454,6 +463,24 @@ struct ChatMessage: Codable, Identifiable, Hashable {
                     attachment: part.attachment
                 )
             }
+
+            guard transcript.isEmpty,
+                  message.info.chatRole == .user,
+                  !promotedFileReferences.isEmpty
+            else {
+                return transcript
+            }
+
+            return [
+                ChatMessage(
+                    id: "\(message.info.id)-promoted-file-reference",
+                    messageID: message.info.id,
+                    role: .user,
+                    text: promotedFileReferences.joined(separator: " "),
+                    timestamp: timestamp,
+                    emphasis: .normal
+                )
+            ]
         }
     }
 }

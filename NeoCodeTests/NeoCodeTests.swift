@@ -275,6 +275,169 @@ struct NeoCodeCoreTests {
         #expect(envelopes[0].parts.first?.text == "Please continue from here.")
     }
 
+    @Test func transcriptUsesInlineMentionTextForUserFileReferences() throws {
+        let envelopes: [OpenCodeMessageEnvelope] = try decode(
+            """
+            [
+              {
+                "info": {
+                  "id": "msg_user_file_reference",
+                  "sessionID": "ses_summary",
+                  "role": "user",
+                  "time": {
+                    "created": 1741860000
+                  }
+                },
+                "parts": [
+                  {
+                    "id": "part_text",
+                    "sessionID": "ses_summary",
+                    "messageID": "msg_user_file_reference",
+                    "type": "text",
+                    "text": "Review @Docs/Guide.md",
+                    "time": {
+                      "created": 1741860000
+                    }
+                  },
+                  {
+                    "id": "part_file",
+                    "sessionID": "ses_summary",
+                    "messageID": "msg_user_file_reference",
+                    "type": "file",
+                    "text": "# Guide\\nThis should not render as a separate transcript message.",
+                    "source": {
+                      "path": "Docs/Guide.md",
+                      "text": {
+                        "value": "@Docs/Guide.md",
+                        "start": 7,
+                        "end": 21
+                      }
+                    },
+                    "time": {
+                      "created": 1741860000
+                    }
+                  }
+                ]
+              }
+            ]
+            """
+        )
+
+        let transcript = ChatMessage.makeTranscript(from: envelopes)
+        #expect(transcript.count == 1)
+        #expect(transcript.first?.text == "Review @Docs/Guide.md")
+    }
+
+    @Test func transcriptFallsBackToMentionTokenWhenUserFileReferenceHasNoTextPart() throws {
+        let envelopes: [OpenCodeMessageEnvelope] = try decode(
+            """
+            [
+              {
+                "info": {
+                  "id": "msg_user_file_reference_only",
+                  "sessionID": "ses_summary",
+                  "role": "user",
+                  "time": {
+                    "created": 1741860000
+                  }
+                },
+                "parts": [
+                  {
+                    "id": "part_file",
+                    "sessionID": "ses_summary",
+                    "messageID": "msg_user_file_reference_only",
+                    "type": "file",
+                    "text": "# Guide\\nThis should not render as a separate transcript message.",
+                    "source": {
+                      "path": "Docs/Guide.md",
+                      "text": {
+                        "value": "@Docs/Guide.md",
+                        "start": 0,
+                        "end": 14
+                      }
+                    },
+                    "time": {
+                      "created": 1741860000
+                    }
+                  }
+                ]
+              }
+            ]
+            """
+        )
+
+        let transcript = ChatMessage.makeTranscript(from: envelopes)
+        #expect(transcript.count == 1)
+        #expect(transcript.first?.text == "@Docs/Guide.md")
+    }
+
+    @Test func transcriptDropsSerializedFileDumpForUserFileReferences() throws {
+        let envelopes: [OpenCodeMessageEnvelope] = try decode(
+            """
+            [
+              {
+                "info": {
+                  "id": "msg_user_file_dump",
+                  "sessionID": "ses_summary",
+                  "role": "user",
+                  "time": {
+                    "created": 1741860000
+                  }
+                },
+                "parts": [
+                  {
+                    "id": "part_text",
+                    "sessionID": "ses_summary",
+                    "messageID": "msg_user_file_dump",
+                    "type": "text",
+                    "text": "Ok this is just a test @AGENTS.md\\n\\nJust give a short response.",
+                    "time": {
+                      "created": 1741860000
+                    }
+                  },
+                  {
+                    "id": "part_file",
+                    "sessionID": "ses_summary",
+                    "messageID": "msg_user_file_dump",
+                    "type": "file",
+                    "mime": "text/plain",
+                    "filename": "AGENTS.md",
+                    "url": "file:///tmp/AGENTS.md",
+                    "source": {
+                      "path": "AGENTS.md",
+                      "text": {
+                        "value": "@AGENTS.md",
+                        "start": 24,
+                        "end": 34
+                      }
+                    },
+                    "time": {
+                      "created": 1741860000
+                    }
+                  },
+                  {
+                    "id": "part_dump",
+                    "sessionID": "ses_summary",
+                    "messageID": "msg_user_file_dump",
+                    "type": "text",
+                    "text": "<path>/tmp/AGENTS.md</path>\n<type>file</type>\n<content>1: hello</content>",
+                    "time": {
+                      "created": 1741860000
+                    }
+                  }
+                ]
+              }
+            ]
+            """
+        )
+
+        let transcript = ChatMessage.makeTranscript(from: envelopes)
+        #expect(transcript.count == 2)
+        #expect(transcript.contains(where: { $0.text.contains("Ok this is just a test @AGENTS.md") }))
+        #expect(transcript.contains(where: { $0.attachment?.displayTitle == "AGENTS.md" }))
+        #expect(transcript.contains(where: { $0.text.contains("<path>") }) == false)
+    }
+
     @Test func buildsTranscriptWithCompactionMarker() throws {
         let envelopes: [OpenCodeMessageEnvelope] = try decode(
             """
@@ -2105,6 +2268,93 @@ struct NeoCodeMainActorTests {
         #expect(store.selectedTranscript.contains(where: { $0.text == "Ok one more test" }))
         #expect(store.selectedTranscript.contains(where: { $0.attachment?.displayTitle == "CleanShot.png" }))
         #expect(store.selectedTranscript.contains(where: { $0.text.contains("Called the Read tool") }) == false)
+    }
+
+    @MainActor
+    @Test func appStoreIgnoresSerializedFileDumpDuringLiveAttachmentUpdates() async {
+        let projectID = UUID()
+        let now = Date(timeIntervalSince1970: 1_710_616_186)
+        let store = AppStore(projects: [
+            ProjectSummary(
+                id: projectID,
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(id: "ses_1", title: "Existing", lastUpdatedAt: .distantPast),
+                ]
+            ),
+        ])
+
+        store.selectSession("ses_1")
+        store.apply(event: .messageUpdated(OpenCodeMessageInfo(
+            id: "msg_1",
+            sessionID: "ses_1",
+            role: "user",
+            summary: nil,
+            agent: nil,
+            providerID: nil,
+            modelID: nil,
+            cost: nil,
+            tokens: nil,
+            time: OpenCodeTimeContainer(created: now, updated: now, completed: nil)
+        )))
+
+        store.apply(event: .messagePartUpdated(OpenCodePart(
+            id: "part_dump",
+            sessionID: "ses_1",
+            messageID: "msg_1",
+            type: .text,
+            text: "<path>/tmp/AGENTS.md</path>\n<type>file</type>\n<content>1: hello</content>",
+            tool: nil,
+            mime: nil,
+            filename: nil,
+            url: nil,
+            source: nil,
+            state: nil,
+            time: OpenCodeTimeContainer(created: now, updated: now, completed: nil)
+        )))
+
+        #expect(store.selectedTranscript.isEmpty)
+
+        store.apply(event: .messagePartUpdated(OpenCodePart(
+            id: "part_attachment",
+            sessionID: "ses_1",
+            messageID: "msg_1",
+            type: .file,
+            text: nil,
+            tool: nil,
+            mime: "text/plain",
+            filename: "AGENTS.md",
+            url: "file:///tmp/AGENTS.md",
+            source: OpenCodeFileSource(
+                text: OpenCodeFileSourceText(value: "@AGENTS.md", start: 24, end: 34),
+                path: "AGENTS.md",
+                range: nil,
+                clientName: nil,
+                uri: nil
+            ),
+            state: nil,
+            time: OpenCodeTimeContainer(created: now, updated: now, completed: nil)
+        )))
+        store.apply(event: .messagePartUpdated(OpenCodePart(
+            id: "part_prompt",
+            sessionID: "ses_1",
+            messageID: "msg_1",
+            type: .text,
+            text: "Ok this is just a test @AGENTS.md\n\nJust give a short response.",
+            tool: nil,
+            mime: nil,
+            filename: nil,
+            url: nil,
+            source: nil,
+            state: nil,
+            time: OpenCodeTimeContainer(created: now, updated: now, completed: nil)
+        )))
+
+        #expect(store.selectedTranscript.count == 2)
+        #expect(store.selectedTranscript.contains(where: { $0.text.contains("Ok this is just a test @AGENTS.md") }))
+        #expect(store.selectedTranscript.contains(where: { $0.attachment?.displayTitle == "AGENTS.md" }))
+        #expect(store.selectedTranscript.contains(where: { $0.text.contains("<path>") }) == false)
     }
 
     @MainActor
