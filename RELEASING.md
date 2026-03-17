@@ -10,6 +10,12 @@ just release X.Y.Z
 
 If the machine is already set up, that command should be all you need.
 
+For beta distribution, use:
+
+```bash
+just release-beta X.Y.Z
+```
+
 ## Release Model
 
 NeoCode ships outside the Mac App Store and uses:
@@ -18,6 +24,14 @@ NeoCode ships outside the Mac App Store and uses:
 - Developer ID signing for distribution
 - Apple notarization for DMG delivery
 - GitHub Releases for hosting both the DMG and `appcast.xml`
+
+Beta releases use the same signed/notarized pipeline, but are published to GitHub as prereleases.
+
+Important:
+
+- keep `MARKETING_VERSION` numeric (for example `0.1.0`)
+- do not use `1.0.0-beta.1` for the app bundle version; macOS bundle marketing versions are expected to remain numeric
+- use the GitHub prerelease flag to communicate beta status instead
 
 ## Sparkle Keys
 
@@ -81,6 +95,7 @@ Before cutting a release, make sure this machine has:
 
 - Xcode installed and logged into the correct Apple Developer account
 - automatic signing enabled for the `NeoCode` target
+- Developer ID Application certificate available locally for the correct team
 - `just`, `gh`, and `create-dmg` installed
 - Sparkle key present in Keychain for `tech.watzon.NeoCode`
 - `notarytool` credentials stored in Keychain
@@ -110,6 +125,12 @@ Example:
 just release 1.2.0
 ```
 
+Beta example:
+
+```bash
+just release-beta 0.1.0
+```
+
 What it does:
 
 1. Verifies Sparkle signing key access in Keychain
@@ -126,6 +147,7 @@ What it does:
 12. Generates `appcast.xml` from the final stapled DMG
 13. Creates the git tag if it does not exist
 14. Creates the GitHub release and uploads the DMG + appcast
+15. Marks the GitHub release as a prerelease when you use `just release-beta`
 
 ## Release Notes
 
@@ -162,6 +184,8 @@ gh release create vX.Y.Z dist/NeoCode.dmg appcast.xml \
   --notes-file release-notes/vX.Y.Z.md
 ```
 
+For a beta release, add `--prerelease` to the `gh release create` command.
+
 ## Appcast Hosting
 
 NeoCode release builds point Sparkle at:
@@ -183,6 +207,7 @@ These are part of the expected release contract:
 - Sparkle public key injection happens at archive time, not via a checked-in plain plist file
 - the same Sparkle signing key must continue to be used unless there is an intentional key rotation
 - notarization must happen before appcast generation so the signed bytes in the appcast match the stapled DMG users will download
+- public releases must use Developer ID signing plus notarization; ad hoc or self-signed binaries are not valid release artifacts
 
 ## Key Rotation
 
@@ -263,3 +288,5 @@ just release-notes X.Y.Z   # if notes do not already exist
 # edit release-notes/vX.Y.Z.md
 just release X.Y.Z
 ```
+
+For a beta channel release, swap the last command for `just release-beta X.Y.Z`.

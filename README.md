@@ -219,6 +219,14 @@ Output: `dist/NeoCode.dmg`
 just release X.Y.Z
 ```
 
+For a beta rollout with a numeric app version:
+
+```bash
+just release-beta X.Y.Z
+```
+
+Release artifacts are expected to be Developer ID signed and notarized before distribution.
+
 See [BUILD.md](BUILD.md) and [RELEASING.md](RELEASING.md) for detailed release instructions.
 
 ### Build Commands

@@ -137,6 +137,9 @@ appcast dmg_path: sparkle-tools
     rm -rf updates; \
     if [ -n "$${KEY_FILE}" ]; then rm -f "$${KEY_FILE}"; fi
 
+release-beta version:
+    GITHUB_RELEASE_PRERELEASE=1 just release "{{version}}"
+
 sparkle-public-key-value: sparkle-tools
 	@./bin/generate_keys --account {{sparkle_key_account}} -p
 
@@ -213,6 +216,13 @@ release version: sparkle-tools
     DMG_PATH="{{dmg_path}}"
     APPCAST_PATH="appcast.xml"
     NOTES_PATH="release-notes/${TAG}.md"
+    RELEASE_TITLE="NeoCode ${TAG}"
+    RELEASE_FLAGS=()
+
+    if [ "${GITHUB_RELEASE_PRERELEASE:-0}" = "1" ]; then
+        RELEASE_FLAGS+=(--prerelease)
+        RELEASE_TITLE="NeoCode ${TAG} Beta"
+    fi
 
     if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
         echo "Invalid version format: $VERSION"
@@ -280,8 +290,9 @@ release version: sparkle-tools
 
     gh release create "${TAG}" "${DMG_PATH}" "${APPCAST_PATH}" \
         --repo "{{github_repo}}" \
-        --title "NeoCode ${TAG}" \
-        --notes-file "${NOTES_PATH}"
+        --title "${RELEASE_TITLE}" \
+        --notes-file "${NOTES_PATH}" \
+        "${RELEASE_FLAGS[@]}"
 
 check-tools:
     @command -v xcodebuild >/dev/null 2>&1 || echo "xcodebuild not found"

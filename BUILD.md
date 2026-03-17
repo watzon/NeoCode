@@ -18,6 +18,8 @@ just build
 just build-release
 ```
 
+For distributable builds, use the release flow in `RELEASING.md` rather than shipping a plain local build.
+
 ### Run tests
 
 ```bash
@@ -69,6 +71,8 @@ tech.watzon.NeoCode
 - signed-in Xcode account with the correct Apple Developer team
 - automatic signing enabled for the `NeoCode` target
 - Developer ID Application certificate available locally
+- release artifacts must be Developer ID signed and notarized before distribution
+- do not ship ad hoc, self-signed, or locally re-signed builds as releases
 
 Check certificates:
 
@@ -94,6 +98,7 @@ just export-app
 ```
 
 This uses `scripts/ExportOptions.plist` with `method=developer-id`.
+That is the only supported signing path for release artifacts.
 
 ### Manual fallback signing
 
@@ -102,6 +107,7 @@ just sign
 ```
 
 This is only for manual bundle re-signing. The normal release path should use `just export-app`.
+It does not replace the Developer ID archive/export flow or notarization, so it is not sufficient for a public release on its own.
 
 ### Verify signatures
 
@@ -146,6 +152,8 @@ xcrun notarytool store-credentials "notarytool-password" \
 just notarize dist/NeoCode.dmg
 ```
 
+NeoCode release binaries are expected to go through notarization before they are distributed.
+
 ### Staple the ticket
 
 ```bash
@@ -188,10 +196,24 @@ That runs:
 
 Then you continue with notarization, stapling, and appcast manually.
 
+### Beta release
+
+```bash
+just release-beta 0.1.0
+```
+
+This keeps the bundle version numeric for macOS while publishing the GitHub release as a beta prerelease.
+
 ## Full Release Command
 
 ```bash
 just release X.Y.Z
+```
+
+For beta distribution with a numeric app version, use:
+
+```bash
+just release-beta X.Y.Z
 ```
 
 See `RELEASING.md` for the complete operational flow and expectations.

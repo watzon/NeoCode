@@ -30,3 +30,9 @@ Primary commands:
 - `just staple dist/NeoCode.dmg`
 - `just appcast dist/NeoCode.dmg`
 - `just release 1.0.0`
+- `just release-beta 0.1.0`
+
+Shipping note:
+
+- public NeoCode releases are expected to use the Developer ID archive/export flow plus notarization
+- do not distribute self-signed or ad hoc builds as release artifacts
