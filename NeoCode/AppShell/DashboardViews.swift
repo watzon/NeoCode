@@ -33,21 +33,29 @@ struct DashboardScreen: View {
 
                         HStack(alignment: .top, spacing: 12) {
                             DashboardStatCard(
+                                icon: "folder.fill",
+                                iconColor: NeoCodeTheme.accent,
                                 title: "Projects",
                                 value: DashboardFormat.count(snapshot.totalProjects),
                                 subtitle: "\(DashboardFormat.count(snapshot.indexedSessionCount)) of \(DashboardFormat.count(snapshot.knownSessionCount)) cached"
                             )
                             DashboardStatCard(
+                                icon: "sparkles",
+                                iconColor: NeoCodeTheme.warning,
                                 title: "Tokens",
                                 value: DashboardFormat.count(snapshot.tokens.total),
                                 subtitle: "Total usage"
                             )
                             DashboardStatCard(
+                                icon: "bubble.left.and.bubble.right.fill",
+                                iconColor: Color(red: 0.55, green: 0.65, blue: 0.85),
                                 title: "Messages",
                                 value: DashboardFormat.count(snapshot.totalMessages),
                                 subtitle: "\(DashboardFormat.count(snapshot.userMessages)) user · \(DashboardFormat.count(snapshot.assistantMessages)) assistant"
                             )
                             DashboardStatCard(
+                                icon: "dollarsign.circle.fill",
+                                iconColor: NeoCodeTheme.success,
                                 title: "Cost",
                                 value: DashboardFormat.currency(snapshot.totalCost),
                                 subtitle: snapshot.latestActivityAt.map { "Last activity \(DashboardFormat.relativeDate($0))" } ?? "No activity"
@@ -363,6 +371,8 @@ private struct StatusIndicator: View {
 // MARK: - Stat Cards
 
 private struct DashboardStatCard: View {
+    let icon: String
+    let iconColor: Color
     let title: String
     let value: String
     let subtitle: String
@@ -370,6 +380,19 @@ private struct DashboardStatCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: icon)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(iconColor)
+                    .frame(width: 32, height: 32)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(iconColor.opacity(0.12))
+                    )
+                
+                Spacer()
+            }
+            
             Text(value)
                 .font(.system(size: 24, weight: .semibold, design: .default))
                 .foregroundStyle(NeoCodeTheme.textPrimary)
@@ -390,9 +413,16 @@ private struct DashboardStatCard: View {
                 .fill(NeoCodeTheme.panelRaised)
                 .overlay(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(NeoCodeTheme.line, lineWidth: 1)
+                        .stroke(isHovered ? NeoCodeTheme.accent.opacity(0.5) : NeoCodeTheme.line, lineWidth: isHovered ? 1.5 : 1)
+                )
+                .shadow(
+                    color: isHovered ? NeoCodeTheme.accent.opacity(0.15) : .clear,
+                    radius: isHovered ? 8 : 0,
+                    x: 0,
+                    y: isHovered ? 4 : 0
                 )
         )
+        .scaleEffect(isHovered ? 1.02 : 1.0)
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.15)) {
                 isHovered = hovering
@@ -642,6 +672,7 @@ private struct DashboardGlassCard<Content: View>: View {
     let title: String
     let subtitle: String
     @ViewBuilder let content: Content
+    @State private var isHovered = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -663,9 +694,21 @@ private struct DashboardGlassCard<Content: View>: View {
                 .fill(NeoCodeTheme.panelRaised)
                 .overlay(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(NeoCodeTheme.line, lineWidth: 1)
+                        .stroke(isHovered ? NeoCodeTheme.accent.opacity(0.4) : NeoCodeTheme.line, lineWidth: isHovered ? 1.5 : 1)
+                )
+                .shadow(
+                    color: isHovered ? NeoCodeTheme.accent.opacity(0.1) : .clear,
+                    radius: isHovered ? 6 : 0,
+                    x: 0,
+                    y: isHovered ? 3 : 0
                 )
         )
+        .scaleEffect(isHovered ? 1.01 : 1.0)
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHovered = hovering
+            }
+        }
     }
 }
 
@@ -729,6 +772,7 @@ private struct DashboardInlineEmptyState: View {
 private struct DashboardEmptyState: View {
     let title: String
     let detail: String
+    @State private var isHovered = false
 
     var body: some View {
         VStack(alignment: .center, spacing: 12) {
@@ -751,9 +795,21 @@ private struct DashboardEmptyState: View {
                 .fill(NeoCodeTheme.panelRaised)
                 .overlay(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(NeoCodeTheme.line, lineWidth: 1)
+                        .stroke(isHovered ? NeoCodeTheme.accent.opacity(0.4) : NeoCodeTheme.line, lineWidth: isHovered ? 1.5 : 1)
+                )
+                .shadow(
+                    color: isHovered ? NeoCodeTheme.accent.opacity(0.1) : .clear,
+                    radius: isHovered ? 6 : 0,
+                    x: 0,
+                    y: isHovered ? 3 : 0
                 )
         )
+        .scaleEffect(isHovered ? 1.01 : 1.0)
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHovered = hovering
+            }
+        }
     }
 }
 
