@@ -3,6 +3,7 @@ import SwiftUI
 
 enum AppSettingsSection: String, Codable, CaseIterable, Hashable, Identifiable {
     case general
+    case updates
     case appearance
 
     var id: String { rawValue }
@@ -11,6 +12,8 @@ enum AppSettingsSection: String, Codable, CaseIterable, Hashable, Identifiable {
         switch self {
         case .general:
             return "General"
+        case .updates:
+            return "Updates"
         case .appearance:
             return "Appearance"
         }
@@ -20,6 +23,8 @@ enum AppSettingsSection: String, Codable, CaseIterable, Hashable, Identifiable {
         switch self {
         case .general:
             return "Startup, composer, autonomy, and notifications."
+        case .updates:
+            return "Sparkle delivery, release status, and update controls."
         case .appearance:
             return "Theme, fonts, and interface styling."
         }
@@ -29,6 +34,8 @@ enum AppSettingsSection: String, Codable, CaseIterable, Hashable, Identifiable {
         switch self {
         case .general:
             return "slider.horizontal.3"
+        case .updates:
+            return "arrow.triangle.2.circlepath"
         case .appearance:
             return "paintbrush"
         }

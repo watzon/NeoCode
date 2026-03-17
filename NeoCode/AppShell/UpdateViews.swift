@@ -1,0 +1,393 @@
+import SwiftUI
+
+struct UpdatesSettingsView: View {
+    @Environment(AppUpdateService.self) private var updateService
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            SettingsCard(
+                title: "Sparkle delivery",
+                detail: "NeoCode checks signed GitHub releases in the background and surfaces new versions in the titlebar instead of interrupting your flow with a modal window."
+            ) {
+                VStack(spacing: 0) {
+                    SettingsControlRow(
+                        title: "Current version",
+                        detail: "The build currently running on this Mac.",
+                        accessory: {
+                            Text(updateService.installedVersionDescription)
+                                .font(.neoMonoSmall)
+                                .foregroundStyle(NeoCodeTheme.textPrimary)
+                        }
+                    )
+
+                    SettingsDivider()
+
+                    SettingsControlRow(
+                        title: "Automatic checks",
+                        detail: "Let Sparkle keep an eye on the release feed and raise the blue titlebar control when a newer signed build appears.",
+                        accessory: {
+                            Toggle("Automatic checks", isOn: automaticChecksBinding)
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .disabled(!updateService.isAvailableInThisBuild)
+                        }
+                    )
+
+                    SettingsDivider()
+
+                    SettingsControlRow(
+                        title: "Status",
+                        detail: updateService.statusDetail,
+                        accessory: {
+                            UpdateStatusChip(phase: updateService.phase)
+                        }
+                    )
+
+                    if let availableVersionDescription = updateService.availableVersionDescription {
+                        SettingsDivider()
+
+                        SettingsControlRow(
+                            title: "Available version",
+                            detail: "The newest signed release Sparkle has found for this channel.",
+                            accessory: {
+                                Text(availableVersionDescription)
+                                    .font(.neoMonoSmall)
+                                    .foregroundStyle(NeoCodeTheme.textPrimary)
+                            }
+                        )
+                    }
+
+                    SettingsDivider()
+
+                    SettingsControlRow(
+                        title: "Last checked",
+                        detail: "The most recent time this Mac finished talking to the release feed.",
+                        accessory: {
+                            Text(lastCheckedDescription)
+                                .font(.neoMeta)
+                                .foregroundStyle(NeoCodeTheme.textSecondary)
+                        }
+                    )
+
+                    SettingsDivider()
+
+                    SettingsControlRow(
+                        title: "Check manually",
+                        detail: "Ask Sparkle to validate the newest available release right now.",
+                        accessory: {
+                            Button(updateService.manualCheckButtonTitle) {
+                                updateService.checkForUpdates()
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(!updateService.canCheckForUpdates)
+                            .modifier(SettingsAccessoryButtonStyle(isDisabled: !updateService.canCheckForUpdates))
+                        }
+                    )
+
+                    if let primaryActionTitle = updateService.primaryActionTitle {
+                        SettingsDivider()
+
+                        SettingsControlRow(
+                            title: "Apply available update",
+                            detail: "Download the new build now or finish installing the copy Sparkle has already staged.",
+                            accessory: {
+                                Button(primaryActionTitle) {
+                                    updateService.performPrimaryAction()
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(!updateService.canPerformPrimaryAction)
+                                .modifier(SettingsAccessoryButtonStyle(isDisabled: !updateService.canPerformPrimaryAction))
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private var automaticChecksBinding: Binding<Bool> {
+        Binding(
+            get: { updateService.automaticallyChecksForUpdates },
+            set: { updateService.automaticallyChecksForUpdates = $0 }
+        )
+    }
+
+    private var lastCheckedDescription: String {
+        guard let lastCheckedAt = updateService.lastCheckedAt else {
+            return "Never"
+        }
+
+        return lastCheckedAt.formatted(date: .abbreviated, time: .shortened)
+    }
+}
+
+struct WindowTitlebarUpdateButton: View {
+    @Environment(AppUpdateService.self) private var updateService
+    @State private var isHovering = false
+
+    private let blue = Color(red: 0.19, green: 0.53, blue: 0.97)
+
+    var body: some View {
+        Group {
+            if let model {
+                Button(action: updateService.performPrimaryAction) {
+                    HStack(spacing: expanded(for: model) ? 6 : 0) {
+                        indicator(for: model)
+
+                        if expanded(for: model) {
+                            Text(model.label)
+                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: false)
+                        }
+                    }
+                    .padding(.leading, expanded(for: model) ? 7 : 0)
+                    .padding(.trailing, expanded(for: model) ? 10 : 0)
+                    .frame(height: 18)
+                    .frame(minWidth: expanded(for: model) ? nil : 18)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(blue)
+                    )
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .stroke(Color.white.opacity(0.18), lineWidth: 0.75)
+                    )
+                    .shadow(color: blue.opacity(0.35), radius: expanded(for: model) ? 10 : 6, x: 0, y: 1)
+                }
+                .buttonStyle(.plain)
+                .disabled(!model.isInteractive)
+                .help(model.label)
+                .onHover { isHovering in
+                    withAnimation(.snappy(duration: 0.18, extraBounce: 0)) {
+                        self.isHovering = isHovering
+                    }
+                }
+            } else {
+                Color.clear
+                    .frame(width: 0, height: 0)
+            }
+        }
+    }
+
+    private var model: TitlebarUpdateModel? {
+        switch updateService.phase {
+        case .available(let release):
+            return .init(
+                label: "Update available \(release.displayVersion)",
+                state: .available,
+                progress: nil,
+                isInteractive: updateService.canPerformPrimaryAction,
+                collapsesWhenIdle: true
+            )
+        case .downloading(let progress):
+            return .init(
+                label: "Downloading: \(percentageString(for: progress.fractionCompleted))",
+                state: .progress,
+                progress: progress.fractionCompleted ?? 0,
+                isInteractive: false,
+                collapsesWhenIdle: false
+            )
+        case .extracting(let progress):
+            return .init(
+                label: "Preparing: \(percentageString(for: progress.fractionCompleted))",
+                state: .progress,
+                progress: progress.fractionCompleted ?? 0,
+                isInteractive: false,
+                collapsesWhenIdle: false
+            )
+        case .readyToInstall(let release):
+            return .init(
+                label: "Install update \(release.displayVersion)",
+                state: .ready,
+                progress: nil,
+                isInteractive: updateService.canPerformPrimaryAction,
+                collapsesWhenIdle: false
+            )
+        case .installing(let release):
+            return .init(
+                label: "Installing \(release.displayVersion)",
+                state: .installing,
+                progress: nil,
+                isInteractive: false,
+                collapsesWhenIdle: false
+            )
+        default:
+            return nil
+        }
+    }
+
+    private func expanded(for model: TitlebarUpdateModel) -> Bool {
+        !model.collapsesWhenIdle || isHovering
+    }
+
+    @ViewBuilder
+    private func indicator(for model: TitlebarUpdateModel) -> some View {
+        switch model.state {
+        case .available:
+            Circle()
+                .fill(Color.white)
+                .frame(width: 6, height: 6)
+                .shadow(color: Color.white.opacity(0.35), radius: 2, x: 0, y: 0)
+        case .progress:
+            UpdateProgressRing(progress: model.progress ?? 0)
+        case .ready:
+            Image(systemName: "arrow.down.circle.fill")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.white)
+        case .installing:
+            Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.white)
+        }
+    }
+
+    private func percentageString(for progress: Double?) -> String {
+        let normalized = min(max(progress ?? 0, 0), 1)
+        return "\(Int((normalized * 100).rounded()))%"
+    }
+}
+
+private struct UpdateStatusChip: View {
+    let phase: AppUpdateService.Phase
+
+    var body: some View {
+        Text(label)
+            .font(.neoMeta)
+            .foregroundStyle(foreground)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(background)
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(border, lineWidth: 1)
+            )
+    }
+
+    private var label: String {
+        switch phase {
+        case .unavailable:
+            return "Unavailable"
+        case .idle:
+            return "Idle"
+        case .checking:
+            return "Checking"
+        case .available:
+            return "Available"
+        case .downloading:
+            return "Downloading"
+        case .extracting:
+            return "Preparing"
+        case .readyToInstall:
+            return "Ready"
+        case .installing:
+            return "Installing"
+        case .upToDate:
+            return "Current"
+        case .error:
+            return "Error"
+        }
+    }
+
+    private var background: Color {
+        switch phase {
+        case .available:
+            return Color(red: 0.15, green: 0.31, blue: 0.56).opacity(0.42)
+        case .downloading, .extracting:
+            return Color(red: 0.12, green: 0.34, blue: 0.52).opacity(0.38)
+        case .readyToInstall, .upToDate:
+            return Color.green.opacity(0.16)
+        case .installing, .checking:
+            return NeoCodeTheme.panelSoft
+        case .error, .unavailable:
+            return Color.red.opacity(0.14)
+        case .idle:
+            return NeoCodeTheme.panelSoft
+        }
+    }
+
+    private var border: Color {
+        switch phase {
+        case .available, .downloading, .extracting:
+            return Color(red: 0.29, green: 0.58, blue: 0.96).opacity(0.48)
+        case .readyToInstall, .upToDate:
+            return NeoCodeTheme.success.opacity(0.45)
+        case .error, .unavailable:
+            return Color.red.opacity(0.35)
+        case .idle, .installing, .checking:
+            return NeoCodeTheme.line.opacity(0.8)
+        }
+    }
+
+    private var foreground: Color {
+        switch phase {
+        case .available, .downloading, .extracting:
+            return Color(red: 0.72, green: 0.86, blue: 1.0)
+        case .readyToInstall, .upToDate:
+            return NeoCodeTheme.success
+        case .error, .unavailable:
+            return Color(red: 1.0, green: 0.73, blue: 0.73)
+        case .idle, .installing, .checking:
+            return NeoCodeTheme.textSecondary
+        }
+    }
+}
+
+private struct SettingsAccessoryButtonStyle: ViewModifier {
+    let isDisabled: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .font(.neoAction)
+            .foregroundStyle(isDisabled ? NeoCodeTheme.textMuted : NeoCodeTheme.textPrimary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(NeoCodeTheme.panelSoft)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .stroke(isDisabled ? NeoCodeTheme.lineSoft : NeoCodeTheme.line, lineWidth: 1)
+            )
+    }
+}
+
+private struct UpdateProgressRing: View {
+    let progress: Double
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.white.opacity(0.24), lineWidth: 2)
+
+            Circle()
+                .trim(from: 0, to: max(progress, 0.04))
+                .stroke(
+                    Color.white,
+                    style: StrokeStyle(lineWidth: 2, lineCap: .round)
+                )
+                .rotationEffect(.degrees(-90))
+        }
+        .frame(width: 11, height: 11)
+    }
+}
+
+private struct TitlebarUpdateModel {
+    enum State {
+        case available
+        case progress
+        case ready
+        case installing
+    }
+
+    let label: String
+    let state: State
+    let progress: Double?
+    let isInteractive: Bool
+    let collapsesWhenIdle: Bool
+}

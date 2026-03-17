@@ -10,6 +10,7 @@ import SwiftUI
 struct ContentView: View {
     @Environment(AppStore.self) private var store
     @Environment(OpenCodeRuntime.self) private var runtime
+    @Environment(AppUpdateService.self) private var updateService
     @State private var toastMessage: String?
 
     private let uiTestModeKey = "NEOCODE_UI_TEST_MODE"
@@ -25,7 +26,7 @@ struct ContentView: View {
         .ignoresSafeArea(.container, edges: .top)
         .preferredColorScheme(NeoCodeTheme.preferredColorScheme(from: store.appSettings.appearance))
         .background(NeoCodeTheme.canvas.ignoresSafeArea())
-        .background(WindowChromeConfigurator())
+        .background(WindowChromeConfigurator(updateService: updateService))
         .overlay(alignment: .topTrailing) {
             if let toastMessage {
                 ErrorToast(message: toastMessage)
@@ -110,5 +111,7 @@ struct ContentView: View {
 #Preview {
     ContentView()
         .environment(AppStore())
+        .environment(OpenCodeRuntime())
+        .environment(AppUpdateService())
         .frame(width: 1440, height: 920)
 }

@@ -1,0 +1,223 @@
+# Building NeoCode
+
+This document covers the local build, signing, DMG, notarization, and release-related commands for NeoCode.
+
+For the full shipping checklist, see `RELEASING.md`.
+
+## Core Commands
+
+### Debug build
+
+```bash
+just build
+```
+
+### Release build
+
+```bash
+just build-release
+```
+
+### Run tests
+
+```bash
+just test
+```
+
+### Show current version/build
+
+```bash
+just version
+```
+
+## Sparkle Tooling
+
+### Download Sparkle CLI tools locally
+
+```bash
+just sparkle-tools
+```
+
+This installs the Sparkle utilities into `bin/`:
+
+- `generate_keys`
+- `generate_appcast`
+- `sign_update`
+
+### Generate or install the local Sparkle signing key
+
+```bash
+just sparkle-keygen
+```
+
+### Print the current Sparkle public key
+
+```bash
+just sparkle-public-key
+```
+
+NeoCode uses the Keychain account:
+
+```text
+tech.watzon.NeoCode
+```
+
+## Code Signing
+
+### Requirements
+
+- signed-in Xcode account with the correct Apple Developer team
+- automatic signing enabled for the `NeoCode` target
+- Developer ID Application certificate available locally
+
+Check certificates:
+
+```bash
+security find-identity -v -p codesigning
+```
+
+### Archive a release build
+
+```bash
+just archive
+```
+
+This command:
+
+- requires the Sparkle signing key to be available in Keychain
+- automatically reads the Sparkle public key and injects it into the archive build as `SUPublicEDKey`
+
+### Export the signed app bundle
+
+```bash
+just export-app
+```
+
+This uses `scripts/ExportOptions.plist` with `method=developer-id`.
+
+### Manual fallback signing
+
+```bash
+just sign
+```
+
+This is only for manual bundle re-signing. The normal release path should use `just export-app`.
+
+### Verify signatures
+
+```bash
+just verify-signature
+```
+
+## DMG Packaging
+
+### Build and package the signed DMG
+
+```bash
+just dmg
+```
+
+### Rebuild DMG without repeating archive/export
+
+```bash
+just dmg-quick
+```
+
+Output:
+
+```text
+dist/NeoCode.dmg
+```
+
+## Notarization
+
+### Store notarization credentials once
+
+```bash
+xcrun notarytool store-credentials "notarytool-password" \
+  --apple-id "your@email.com" \
+  --team-id "YOUR_TEAM_ID" \
+  --password "app-specific-password"
+```
+
+### Notarize the DMG
+
+```bash
+just notarize dist/NeoCode.dmg
+```
+
+### Staple the ticket
+
+```bash
+just staple dist/NeoCode.dmg
+```
+
+## Appcast Generation
+
+Generate an appcast from the final stapled DMG:
+
+```bash
+just appcast dist/NeoCode.dmg
+```
+
+Behavior:
+
+- uses the Sparkle key in Keychain by default
+- falls back to `SPARKLE_PRIVATE_KEY` only if you explicitly supply it
+- writes `appcast.xml` at the repo root
+
+The generated download prefix targets GitHub Releases:
+
+```text
+https://github.com/watzon/NeoCode/releases/download/vX.Y.Z/
+```
+
+## Local Release Helper
+
+If you want everything up to the publish step except GitHub release creation:
+
+```bash
+just release-local
+```
+
+That runs:
+
+1. `clean`
+2. `test`
+3. `dmg`
+
+Then you continue with notarization, stapling, and appcast manually.
+
+## Full Release Command
+
+```bash
+just release X.Y.Z
+```
+
+See `RELEASING.md` for the complete operational flow and expectations.
+
+## Troubleshooting
+
+### Missing Sparkle key
+
+```bash
+just sparkle-keygen
+```
+
+### Missing release tools
+
+```bash
+just check-tools
+```
+
+### Inspect build settings
+
+```bash
+just show-settings
+```
+
+### Start from clean state
+
+```bash
+just clean
+```

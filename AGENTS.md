@@ -11,6 +11,7 @@
 - Xcode project: `NeoCode.xcodeproj`
 - App scheme: `NeoCode`
 - Targets: `NeoCode`, `NeoCodeTests`, `NeoCodeUITests`
+- Release docs: `BUILD.md`, `RELEASING.md`, and `justfile`
 - No `Package.swift`, no SwiftLint config, no SwiftFormat config, no test plan file
 - Checked repo-local rules: no `.cursor/rules/`, no `.cursorrules`, and no `.github/copilot-instructions.md`
 
@@ -38,6 +39,7 @@
 - `NeoCode/Theme.swift`: canonical color and font tokens
 - `NeoCodeTests/NeoCodeTests.swift`: Swift `Testing` suite for decoding, store behavior, and request building
 - `NeoCodeUITests/`: XCTest smoke tests for launch behavior
+- `BUILD.md` and `RELEASING.md`: canonical release prep, Sparkle, signing, notarization, and GitHub release workflow
 
 ## Build And Test Commands
 

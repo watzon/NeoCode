@@ -73,6 +73,8 @@ struct SettingsScreen: View {
                     switch section {
                     case .general:
                         GeneralSettingsView()
+                    case .updates:
+                        UpdatesSettingsView()
                     case .appearance:
                         AppearanceSettingsView()
                     }
@@ -765,7 +767,7 @@ private struct AppearanceThemeEditorCard: View {
     }
 }
 
-private struct SettingsCard<Content: View>: View {
+struct SettingsCard<Content: View>: View {
     let title: String
     let detail: String
     let headerAccessory: (() -> AnyView)?
@@ -818,7 +820,7 @@ private struct SettingsCard<Content: View>: View {
     }
 }
 
-private struct SettingsControlRow<Accessory: View>: View {
+struct SettingsControlRow<Accessory: View>: View {
     let title: String
     let detail: String
     @ViewBuilder let accessory: () -> Accessory
@@ -844,7 +846,7 @@ private struct SettingsControlRow<Accessory: View>: View {
     }
 }
 
-private struct SettingsDivider: View {
+struct SettingsDivider: View {
     var body: some View {
         Rectangle()
             .fill(NeoCodeTheme.line)

@@ -86,6 +86,7 @@ private struct UnitTestHostView: View {
 private struct AppSceneView: View {
     @State private var store = AppStore()
     @State private var runtime = OpenCodeRuntime()
+    @State private var updateService = AppUpdateService()
     let appDelegate: AppDelegate
 
     var body: some View {
@@ -93,6 +94,7 @@ private struct AppSceneView: View {
             .frame(minWidth: 980, minHeight: 600)
             .environment(store)
             .environment(runtime)
+            .environment(updateService)
             .onAppear {
                 NeoCodeTheme.configure(with: store.appSettings.appearance)
                 appDelegate.onDidBecomeActive = {

@@ -1531,6 +1531,8 @@ private final class DragRegionView: NSView {
 }
 
 struct WindowChromeConfigurator: NSViewRepresentable {
+    let updateService: AppUpdateService
+
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         DispatchQueue.main.async {
@@ -1552,5 +1554,6 @@ struct WindowChromeConfigurator: NSViewRepresentable {
         window.isMovableByWindowBackground = false
         window.styleMask.insert(.fullSizeContentView)
         window.minSize = NSSize(width: 980, height: 600)
+        updateService.attach(to: window)
     }
 }
