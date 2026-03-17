@@ -531,7 +531,7 @@ struct NeoCodeCoreTests {
         #expect(commands[0].hints == ["$1"])
     }
 
-    @Test func projectSummaryLimitsDisplayedSessionsToEight() {
+    @Test func projectSummarySupportsShowingMoreThanDefaultSidebarLimit() {
         let sessions = (0..<10).map { index in
             SessionSummary(
                 id: "ses_\(index)",
@@ -542,8 +542,11 @@ struct NeoCodeCoreTests {
         let project = ProjectSummary(name: "NeoCode", path: "/tmp/NeoCode", sessions: sessions)
 
         #expect(project.sessions.count == 10)
-        #expect(project.displayedSessions.count == 8)
-        #expect(project.displayedSessions.map(\.id) == Array(sessions.prefix(8)).map(\.id))
+        #expect(project.displayedSessions().count == 8)
+        #expect(project.displayedSessions().map(\.id) == Array(sessions.prefix(8)).map(\.id))
+        #expect(project.hasHiddenSessions)
+        #expect(project.hiddenSessionCount == 2)
+        #expect(project.displayedSessions(showAll: true).map(\.id) == sessions.map(\.id))
     }
 
     @Test func sessionSummaryOmitsPlaceholderTitlesWhenCreatingRemoteSessions() {

@@ -26,8 +26,17 @@ struct ProjectSummary: Codable, Identifiable, Hashable {
         self.sessions = sessions
     }
 
-    var displayedSessions: [SessionSummary] {
-        Array(sessions.prefix(Self.displayedSessionLimit))
+    func displayedSessions(showAll: Bool = false) -> [SessionSummary] {
+        guard !showAll else { return sessions }
+        return Array(sessions.prefix(Self.displayedSessionLimit))
+    }
+
+    var hiddenSessionCount: Int {
+        max(0, sessions.count - Self.displayedSessionLimit)
+    }
+
+    var hasHiddenSessions: Bool {
+        hiddenSessionCount > 0
     }
 }
 

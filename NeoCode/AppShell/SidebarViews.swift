@@ -40,13 +40,13 @@ private struct ThreadsSidebarView: View {
             )
 
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 18) {
                     ThreadsSectionHeader(onAddProject: { isPickingProject = true })
 
                     if store.projects.isEmpty {
                         EmptyProjectsSidebarView(onAddProject: { isPickingProject = true })
                     } else {
-                        LazyVStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: 4) {
                             ForEach(store.projects) { project in
                                 ProjectTreeNode(
                                     project: project,
@@ -203,6 +203,7 @@ struct ProjectTreeNode: View {
     @Environment(AppStore.self) private var store
     @Environment(OpenCodeRuntime.self) private var runtime
     @State private var isHovering = false
+    @State private var showsAllSessions = false
 
     private let workspaceToolService = WorkspaceToolService()
 
@@ -243,11 +244,22 @@ struct ProjectTreeNode: View {
 
             if !store.isProjectCollapsed(project.id) {
                 VStack(alignment: .leading, spacing: 2) {
-                    ForEach(project.displayedSessions) { session in
+                    ForEach(project.displayedSessions(showAll: showsAllSessions)) { session in
                         SessionTreeRow(session: session, isSelected: store.selectedSessionID == session.id)
                             .onTapGesture {
                                 store.selectSession(session.id)
                             }
+                    }
+
+                    if project.hasHiddenSessions {
+                        Button(action: toggleSessionExpansion) {
+                            Text(sessionExpansionLabel)
+                                .font(.neoMonoSmall)
+                                .foregroundStyle(NeoCodeTheme.accent)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
                     }
                 }
                 .padding(.leading, 14)
@@ -326,6 +338,21 @@ struct ProjectTreeNode: View {
 
     private func toggleCollapsed() {
         store.toggleProjectCollapsed(project.id)
+    }
+
+    private func toggleSessionExpansion() {
+        withAnimation(.easeInOut(duration: 0.16)) {
+            showsAllSessions.toggle()
+        }
+    }
+
+    private var sessionExpansionLabel: String {
+        if showsAllSessions {
+            return "Show less"
+        }
+
+        let hiddenSessionLabel = project.hiddenSessionCount == 1 ? "1 more" : "\(project.hiddenSessionCount) more"
+        return "Show \(hiddenSessionLabel)"
     }
 
     private func openProject() {
