@@ -90,7 +90,7 @@ notarize dmg_path:
         --keychain-profile "$${PROFILE}" \
         --wait \
         --output-format json > "$${result_file}" && \
-    python3 -c 'import json, sys; result=json.load(open(sys.argv[1], encoding="utf-8")); status=result.get("status"); summary=result.get("statusSummary", "Unknown notarization failure"); sys.exit(0 if status == "Accepted" else (print(f"Notarization failed: {status or 'unknown'} - {summary}", file=sys.stderr) or 1))' "$${result_file}" && \
+    python3 -c "import json, sys; result=json.load(open(sys.argv[1], encoding='utf-8')); status=result.get('status'); summary=result.get('statusSummary', 'Unknown notarization failure'); ok=status == 'Accepted'; print(f\"Notarization failed: {status or 'unknown'} - {summary}\", file=sys.stderr) if not ok else None; sys.exit(0 if ok else 1)" "$${result_file}" && \
     rm -f "$${result_file}"
 
 staple dmg_path:
