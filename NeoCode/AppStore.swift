@@ -190,6 +190,7 @@ final class AppStore {
     private var cachedCommandsByProjectPath: [String: [OpenCodeCommand]] = [:]
     private let runtimeIdleTTL: Duration = .seconds(60)
     private let gitRefreshFallbackInterval: Duration = .seconds(90)
+    private let gitCommitPreviewRetryDelays: [Duration] = [.milliseconds(150), .milliseconds(500)]
     private var isRefreshingGitCommitPreview = false
     private var liveServices: [ProjectSummary.ID: any OpenCodeServicing] = [:]
     private var serviceConnectionIdentifiers: [ProjectSummary.ID: String] = [:]
@@ -221,6 +222,8 @@ final class AppStore {
     private var autoRespondedPermissionIDs: [String: Date] = [:]
     private var activeTranscriptLoadKeys = Set<String>()
     private var locallyActiveSessionIDs = Set<String>()
+    private var observedRunningSessionIDs = Set<String>()
+    private var finishedSessionIDs = Set<String>()
     private var bufferedTextDeltas: [BufferedTextDeltaKey: BufferedTextDelta] = [:]
     private var bufferedTextDeltaOrder: [BufferedTextDeltaKey] = []
     private var bufferedDeltaFlushTask: Task<Void, Never>?
@@ -305,6 +308,7 @@ final class AppStore {
         set {
             if let newValue {
                 selectedContent = .session(newValue)
+                clearFinishedIndicator(for: newValue)
             } else {
                 selectedContent = .dashboard
             }
@@ -468,6 +472,10 @@ final class AppStore {
 
     func pendingQuestion(for sessionID: String) -> OpenCodeQuestionRequest? {
         pendingQuestionsBySession[sessionID]?.first
+    }
+
+    func showsFinishedIndicator(for sessionID: String) -> Bool {
+        finishedSessionIDs.contains(sessionID)
     }
 
     func terminationWarningContext() -> AppTerminationWarningContext? {
@@ -2062,22 +2070,40 @@ final class AppStore {
         }
 
         do {
-            let preview = try await GitRepositoryService().commitPreview(in: projectPath)
+            let preview = try await loadGitCommitPreview(in: projectPath)
             guard !Task.isCancelled else { return }
             guard selectedProject?.path == projectPath || projectPathOverride != nil else { return }
             gitCommitPreview = preview
             cacheCurrentGitState(for: projectPath)
-            lastError = nil
         } catch is CancellationError {
             logger.debug("Cancelled git commit preview refresh for path=\(projectPath, privacy: .public)")
             return
         } catch {
             guard !Task.isCancelled else { return }
             guard selectedProject?.path == projectPath || projectPathOverride != nil else { return }
-            gitCommitPreview = nil
-            cacheCurrentGitState(for: projectPath)
-            lastError = error.localizedDescription
+            logger.warning(
+                "Git commit preview refresh failed path=\(projectPath, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+            )
         }
+    }
+
+    private func loadGitCommitPreview(in projectPath: String) async throws -> GitCommitPreview {
+        let repositoryService = GitRepositoryService()
+
+        for (attempt, delay) in gitCommitPreviewRetryDelays.enumerated() {
+            do {
+                return try await repositoryService.commitPreview(in: projectPath)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                logger.debug(
+                    "Retrying git commit preview path=\(projectPath, privacy: .public) attempt=\(attempt + 1, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+                )
+                try await Task.sleep(for: delay)
+            }
+        }
+
+        return try await repositoryService.commitPreview(in: projectPath)
     }
 
     func initializeGitRepository() async {
@@ -3233,7 +3259,10 @@ final class AppStore {
         do {
             let messages = try await service.listMessages(sessionID: sessionID)
             guard !Task.isCancelled else { return }
-            let transcript = ChatMessage.makeTranscript(from: messages)
+            let transcript = Self.reconcileLoadedTranscript(
+                existing: transcript(for: sessionID),
+                incoming: ChatMessage.makeTranscript(from: messages)
+            )
             messageInfosBySessionID[sessionID] = Dictionary(uniqueKeysWithValues: messages.map { ($0.info.id, $0.info) })
             for message in messages {
                 messageRoles[message.info.id] = message.info.chatRole
@@ -3804,6 +3833,8 @@ final class AppStore {
         projects[projectIndex].sessions.removeAll(where: { $0.id == sessionID })
         cancelStreamingRecoveryCheck(for: sessionID)
         liveSessionStatuses.removeValue(forKey: sessionID)
+        observedRunningSessionIDs.remove(sessionID)
+        finishedSessionIDs.remove(sessionID)
         pendingPermissionsBySession.removeValue(forKey: sessionID)
         pendingQuestionsBySession.removeValue(forKey: sessionID)
         if selectedSessionID == sessionID {
@@ -3852,6 +3883,7 @@ final class AppStore {
 
     private func setSessionStatus(_ status: SessionStatus, sessionID: String, projectID: ProjectSummary.ID) {
         guard let indices = indices(for: sessionID, projectID: projectID) else { return }
+        let previousStatus = projects[indices.project].sessions[indices.session].status
 
         switch status {
         case .running:
@@ -3861,6 +3893,7 @@ final class AppStore {
         }
 
         projects[indices.project].sessions[indices.session].status = status
+        updateFinishedIndicator(sessionID: sessionID, previousStatus: previousStatus, newStatus: status)
         refreshSystemSleepAssertion()
         if status != .running {
             cancelStreamingRecoveryCheck(for: sessionID)
@@ -3873,13 +3906,16 @@ final class AppStore {
     private func refreshSessionStatus(sessionID: String, projectID: ProjectSummary.ID) {
         guard let indices = indices(for: sessionID, projectID: projectID) else { return }
         let transcript = transcript(for: sessionID)
-        projects[indices.project].sessions[indices.session].status = resolvedSessionStatus(
+        let previousStatus = projects[indices.project].sessions[indices.session].status
+        let resolvedStatus = resolvedSessionStatus(
             sessionID: sessionID,
             transcript: transcript,
-            fallback: projects[indices.project].sessions[indices.session].status
+            fallback: previousStatus
         )
+        projects[indices.project].sessions[indices.session].status = resolvedStatus
+        updateFinishedIndicator(sessionID: sessionID, previousStatus: previousStatus, newStatus: resolvedStatus)
         refreshSystemSleepAssertion()
-        if projects[indices.project].sessions[indices.session].status != .running {
+        if resolvedStatus != .running {
             cancelStreamingRecoveryCheck(for: sessionID)
             flushPendingProjectPersistence()
             return
@@ -3970,6 +4006,38 @@ final class AppStore {
 
     private func hasBufferedTextDeltas(for sessionID: String) -> Bool {
         bufferedTextDeltas.keys.contains { $0.sessionID == sessionID }
+    }
+
+    private func clearFinishedIndicator(for sessionID: String?) {
+        guard let sessionID else { return }
+        finishedSessionIDs.remove(sessionID)
+    }
+
+    private func updateFinishedIndicator(sessionID: String, previousStatus: SessionStatus, newStatus: SessionStatus) {
+        if newStatus == .running {
+            observedRunningSessionIDs.insert(sessionID)
+            finishedSessionIDs.remove(sessionID)
+            return
+        }
+
+        if selectedSessionID == sessionID {
+            finishedSessionIDs.remove(sessionID)
+        }
+
+        guard observedRunningSessionIDs.contains(sessionID) else { return }
+
+        switch newStatus {
+        case .idle:
+            if previousStatus == .running, selectedSessionID != sessionID {
+                finishedSessionIDs.insert(sessionID)
+            }
+            observedRunningSessionIDs.remove(sessionID)
+        case .attention:
+            finishedSessionIDs.remove(sessionID)
+            observedRunningSessionIDs.remove(sessionID)
+        case .running:
+            break
+        }
     }
 
     private func queueDispatchSessionID(for event: OpenCodeEvent) -> String? {
@@ -5020,6 +5088,19 @@ final class AppStore {
         return lookup
     }
 
+    static func reconcileLoadedTranscript(existing: [ChatMessage], incoming: [ChatMessage]) -> [ChatMessage] {
+        guard !existing.isEmpty, !incoming.isEmpty else { return incoming }
+
+        let existingByID = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
+        return incoming.map { incomingMessage in
+            guard let existingMessage = existingByID[incomingMessage.id] else {
+                return incomingMessage
+            }
+
+            return preferredTranscriptMessage(existing: existingMessage, incoming: incomingMessage)
+        }
+    }
+
     private static func mergeSession(_ existing: SessionSummary, with incoming: SessionSummary) -> SessionSummary {
         let preferredMetadata = incoming.lastUpdatedAt >= existing.lastUpdatedAt ? incoming : existing
         let fallbackMetadata = preferredMetadata.lastUpdatedAt == existing.lastUpdatedAt ? incoming : existing
@@ -5052,6 +5133,26 @@ final class AppStore {
         case .attention:
             return 2
         }
+    }
+
+    private static func preferredTranscriptMessage(existing: ChatMessage, incoming: ChatMessage) -> ChatMessage {
+        if existing.isInProgress != incoming.isInProgress {
+            return existing.isInProgress ? incoming : existing
+        }
+
+        if (existing.attachment != nil) != (incoming.attachment != nil) {
+            return existing.attachment != nil ? existing : incoming
+        }
+
+        if existing.text.count != incoming.text.count {
+            return existing.text.count > incoming.text.count ? existing : incoming
+        }
+
+        if existing.timestamp != incoming.timestamp {
+            return existing.timestamp > incoming.timestamp ? existing : incoming
+        }
+
+        return incoming
     }
 
     private func applyInferredTitleIfNeeded(sessionIndex: Int, projectIndex: Int) {

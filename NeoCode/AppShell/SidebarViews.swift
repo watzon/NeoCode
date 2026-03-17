@@ -543,6 +543,10 @@ struct SessionTreeRow: View {
     }
 
     private var statusLabel: String? {
+        if store.showsFinishedIndicator(for: session.id) {
+            return "finished"
+        }
+
         switch session.status {
         case .idle:
             return nil
@@ -554,6 +558,10 @@ struct SessionTreeRow: View {
     }
 
     private var statusTone: SidebarSessionStatusBadge.Tone {
+        if store.showsFinishedIndicator(for: session.id) {
+            return .success
+        }
+
         switch session.status {
         case .idle, .running:
             return .accent
@@ -566,6 +574,7 @@ struct SessionTreeRow: View {
 struct SidebarSessionStatusBadge: View {
     enum Tone {
         case accent
+        case success
         case warning
     }
 
@@ -599,6 +608,8 @@ struct SidebarSessionStatusBadge: View {
         switch tone {
         case .accent:
             NeoCodeTheme.accent
+        case .success:
+            NeoCodeTheme.success
         case .warning:
             NeoCodeTheme.warning
         }
@@ -608,6 +619,8 @@ struct SidebarSessionStatusBadge: View {
         switch tone {
         case .accent:
             NeoCodeTheme.accentDim.opacity(0.45)
+        case .success:
+            NeoCodeTheme.success.opacity(0.12)
         case .warning:
             NeoCodeTheme.warning.opacity(0.12)
         }

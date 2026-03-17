@@ -1024,6 +1024,56 @@ struct NeoCodeCoreTests {
 struct NeoCodeMainActorTests {
 
     @MainActor
+    @Test func appStoreRefreshGitCommitPreviewKeepsExistingErrorStateOnSuccess() async throws {
+        let repoURL = try createTemporaryGitRepository()
+        defer { try? FileManager.default.removeItem(at: repoURL) }
+
+        try write("tracked\n", to: repoURL.appendingPathComponent("tracked.txt"))
+        try runGit(["add", "tracked.txt"], in: repoURL)
+        try runGit(["commit", "-m", "Initial commit"], in: repoURL)
+
+        let store = AppStore(projects: [ProjectSummary(name: "NeoCode", path: repoURL.path)])
+        store.selectedProjectID = try #require(store.projects.first?.id)
+
+        await store.refreshGitStatus()
+        store.lastError = "keep me"
+
+        await store.refreshGitCommitPreview(showLoadingIndicator: false)
+
+        #expect(store.lastError == "keep me")
+        #expect(store.gitCommitPreview != nil)
+    }
+
+    @MainActor
+    @Test func appStoreRefreshGitCommitPreviewRetriesSilentlyAndPreservesStalePreviewOnFailure() async throws {
+        let missingPath = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            .path
+        let store = AppStore(projects: [ProjectSummary(name: "NeoCode", path: missingPath)])
+        store.selectedProjectID = try #require(store.projects.first?.id)
+        store.gitStatus = GitRepositoryStatus(isRepository: true, hasChanges: true, aheadCount: 0, hasRemote: true)
+
+        let existingPreview = GitCommitPreview(
+            branch: "main",
+            changedFiles: [GitFileChange(path: "example.txt", stagedStatus: "M", unstagedStatus: " ")],
+            stagedAdditions: 1,
+            stagedDeletions: 0,
+            unstagedAdditions: 0,
+            unstagedDeletions: 0,
+            totalAdditions: 1,
+            totalDeletions: 0
+        )
+        store.gitCommitPreview = existingPreview
+        store.lastError = "keep me"
+
+        await store.refreshGitCommitPreview(showLoadingIndicator: false)
+
+        #expect(store.lastError == "keep me")
+        #expect(store.gitCommitPreview == existingPreview)
+        #expect(store.isLoadingGitCommitPreview == false)
+    }
+
+    @MainActor
     @Test func appStoreAppliesStreamingEventsToSelectedSession() async throws {
         let store = AppStore(projects: [
             ProjectSummary(
@@ -1140,6 +1190,114 @@ struct NeoCodeMainActorTests {
         store.selectSession("ses_1")
         #expect(store.selectedSession?.status == .idle)
         #expect(store.selectedSessionActivity == nil)
+    }
+
+    @MainActor
+    @Test func appStoreShowsFinishedIndicatorForBackgroundCompletionUntilVisited() async throws {
+        let store = AppStore(projects: [
+            ProjectSummary(
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(id: "ses_1", title: "Background", lastUpdatedAt: .distantPast),
+                    SessionSummary(id: "ses_2", title: "Foreground", lastUpdatedAt: .distantPast),
+                ]
+            ),
+        ])
+        store.selectSession("ses_2")
+
+        store.apply(event: .messagePartDelta(OpenCodePartDelta(
+            sessionID: "ses_1",
+            messageID: "msg_1",
+            partID: "part_1",
+            field: "text",
+            delta: "Working"
+        )))
+        store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .busy))
+
+        let completed = try OpenCodeEventDecoder.decode(
+            frame: OpenCodeSSEFrame(
+                event: "message.part.updated",
+                data: "{\"type\":\"message.part.updated\",\"properties\":{\"part\":{\"id\":\"part_1\",\"sessionID\":\"ses_1\",\"messageID\":\"msg_1\",\"type\":\"text\",\"text\":\"Done\",\"tool\":null,\"state\":null,\"time\":{\"created\":\"2026-03-13T10:10:00Z\",\"updated\":\"2026-03-13T10:10:01Z\",\"completed\":\"2026-03-13T10:10:02Z\"}}}}"
+            )
+        )
+
+        store.apply(event: completed)
+
+        #expect(store.projects[0].sessions.first(where: { $0.id == "ses_1" })?.status == .idle)
+        #expect(store.showsFinishedIndicator(for: "ses_1") == true)
+
+        store.selectSession("ses_1")
+
+        #expect(store.showsFinishedIndicator(for: "ses_1") == false)
+    }
+
+    @MainActor
+    @Test func appStoreDoesNotShowFinishedIndicatorForSelectedSessionCompletion() async throws {
+        let store = AppStore(projects: [
+            ProjectSummary(
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(id: "ses_1", title: "Foreground", lastUpdatedAt: .distantPast),
+                ]
+            ),
+        ])
+        store.selectSession("ses_1")
+
+        store.apply(event: .messagePartDelta(OpenCodePartDelta(
+            sessionID: "ses_1",
+            messageID: "msg_1",
+            partID: "part_1",
+            field: "text",
+            delta: "Working"
+        )))
+        store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .busy))
+
+        let completed = try OpenCodeEventDecoder.decode(
+            frame: OpenCodeSSEFrame(
+                event: "message.part.updated",
+                data: "{\"type\":\"message.part.updated\",\"properties\":{\"part\":{\"id\":\"part_1\",\"sessionID\":\"ses_1\",\"messageID\":\"msg_1\",\"type\":\"text\",\"text\":\"Done\",\"tool\":null,\"state\":null,\"time\":{\"created\":\"2026-03-13T10:10:00Z\",\"updated\":\"2026-03-13T10:10:01Z\",\"completed\":\"2026-03-13T10:10:02Z\"}}}}"
+            )
+        )
+
+        store.apply(event: completed)
+
+        #expect(store.selectedSession?.status == .idle)
+        #expect(store.showsFinishedIndicator(for: "ses_1") == false)
+    }
+
+    @MainActor
+    @Test func reconcileLoadedTranscriptPrefersCompletedLocalMessagesOverStaleRemoteMessages() {
+        let now = Date(timeIntervalSince1970: 1_710_616_186)
+        let existing = [
+            ChatMessage(
+                id: "part_1",
+                messageID: "msg_1",
+                role: .assistant,
+                text: "Finished output",
+                timestamp: now.addingTimeInterval(1),
+                emphasis: .normal,
+                isInProgress: false
+            )
+        ]
+        let incoming = [
+            ChatMessage(
+                id: "part_1",
+                messageID: "msg_1",
+                role: .assistant,
+                text: "Working",
+                timestamp: now,
+                emphasis: .normal,
+                isInProgress: true
+            )
+        ]
+
+        let reconciled = AppStore.reconcileLoadedTranscript(existing: existing, incoming: incoming)
+
+        #expect(reconciled.count == 1)
+        #expect(reconciled[0].text == "Finished output")
+        #expect(reconciled[0].isInProgress == false)
     }
 
     @MainActor
