@@ -161,6 +161,7 @@ struct ComposerView: View {
                 selectionRequest: $selectionRequest,
                 placeholder: "Build me a $1M SaaS. Make no mistakes.",
                 projectPath: store.selectedProject?.path,
+                sendKeyBehavior: store.appSettings.general.sendKeyBehavior,
                 onPrimaryAction: handlePrimaryAction,
                 onConfirmAuxiliarySelection: onConfirmAuxiliarySelection,
                 onMoveAuxiliarySelection: onMoveAuxiliarySelection,
@@ -375,7 +376,12 @@ struct ComposerView: View {
         if store.selectedSession?.status == .running {
             return "Queue message"
         }
-        return "Send message"
+        switch store.appSettings.general.sendKeyBehavior {
+        case .returnKey:
+            return "Send message (Return)"
+        case .commandReturn:
+            return "Send message (Command-Return)"
+        }
     }
 
     private func handlePrimaryAction() {
@@ -580,9 +586,9 @@ private struct ComposerActivityIndicator: View {
                 renderScale: 1.0,
                 internalResolutionScale: 1.0,
                 animationInterval: 1.0 / 20.0,
-                intensity: min(1, activityIntensity + wake * 0.42),
-                pulse: min(0.36, activityBasePulse + wake * 0.16),
-                warmth: min(1, activityWarmth + wake * 0.12),
+                intensity: min(1, activityIntensity + wake * 0.24),
+                pulse: min(0.28, activityBasePulse + wake * 0.08),
+                warmth: min(1, activityWarmth + wake * 0.07),
                 beatTrigger: chatBeatTrigger,
                 beatStrength: chatBeatStrength
             )
@@ -593,16 +599,16 @@ private struct ComposerActivityIndicator: View {
             .accessibilityLabel("Agent activity")
             .accessibilityValue(state.accessibilityValue)
             .onAppear {
-                triggerChatBeat(amplitude: 0.18, wakeBoost: 0.22)
+                triggerChatBeat(amplitude: 0.14, wakeBoost: 0.12)
             }
             .onChange(of: transcriptRevision) { _, _ in
                 triggerChatBeat(
-                    amplitude: 0.14 + activityIntensity * 0.10,
-                    wakeBoost: 0.10 + activityIntensity * 0.14
+                    amplitude: 0.10 + activityIntensity * 0.07,
+                    wakeBoost: 0.05 + activityIntensity * 0.08
                 )
             }
             .onChange(of: activitySignature) { _, _ in
-                triggerChatBeat(amplitude: 0.42, wakeBoost: 0.28)
+                triggerChatBeat(amplitude: 0.28, wakeBoost: 0.16)
             }
     }
 
@@ -676,7 +682,7 @@ private struct ComposerActivityIndicator: View {
     }
 
     private func triggerChatBeat(amplitude: CGFloat, wakeBoost: CGFloat) {
-        wakeLevel = min(1, wakeContribution(at: .now) + wakeBoost)
+        wakeLevel = min(0.6, wakeContribution(at: .now) + wakeBoost)
         wakeStartedAt = .now
         chatBeatStrength = min(1, amplitude)
         chatBeatTrigger += 1
@@ -687,7 +693,7 @@ private struct ComposerActivityIndicator: View {
 
         let elapsed = date.timeIntervalSince(wakeStartedAt)
         guard elapsed > 0 else { return wakeLevel }
-        return wakeLevel * CGFloat(exp(-elapsed * 0.35))
+        return wakeLevel * CGFloat(exp(-elapsed * 0.45))
     }
 }
 
@@ -746,6 +752,7 @@ struct GrowingTextView: NSViewRepresentable {
     @Binding var selectionRequest: ComposerTextSelectionRequest?
     let placeholder: String?
     let projectPath: String?
+    let sendKeyBehavior: NeoCodeSendKeyBehavior
     let onPrimaryAction: () -> Void
     let onConfirmAuxiliarySelection: () -> Bool
     let onMoveAuxiliarySelection: (Int) -> Bool
@@ -884,8 +891,16 @@ struct GrowingTextView: NSViewRepresentable {
             guard insertsNewline else { return false }
 
             let shiftPressed = NSApp.currentEvent?.modifierFlags.contains(.shift) == true
+            let commandPressed = NSApp.currentEvent?.modifierFlags.contains(.command) == true
             if shiftPressed {
                 return false
+            }
+
+            switch parent.sendKeyBehavior {
+            case .returnKey:
+                break
+            case .commandReturn:
+                guard commandPressed else { return false }
             }
 
             if parent.onConfirmAuxiliarySelection() {

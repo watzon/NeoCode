@@ -152,6 +152,11 @@ actor PersistedPromptDraftsStore {
         defaults.set(drafts, forKey: key)
     }
 
+    func clearAll() {
+        cachedDrafts = [:]
+        defaults.removeObject(forKey: key)
+    }
+
     private func loadDrafts() -> [String: String] {
         if let cachedDrafts {
             return cachedDrafts

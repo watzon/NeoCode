@@ -20,6 +20,9 @@ struct AppSidebarView: View {
 private struct ThreadsSidebarView: View {
     @Environment(AppStore.self) private var store
     @State private var isPickingProject = false
+    @State private var draggedProjectID: ProjectSummary.ID?
+    @State private var dropTargetProjectID: ProjectSummary.ID?
+    @State private var isBottomDropTarget = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -45,8 +48,39 @@ private struct ThreadsSidebarView: View {
                     } else {
                         LazyVStack(alignment: .leading, spacing: 4) {
                             ForEach(store.projects) { project in
-                                ProjectTreeNode(project: project)
+                                ProjectTreeNode(
+                                    project: project,
+                                    isDropTarget: dropTargetProjectID == project.id,
+                                    isBeingDragged: draggedProjectID == project.id
+                                )
+                                .onDrag {
+                                    dropTargetProjectID = nil
+                                    isBottomDropTarget = false
+                                    draggedProjectID = project.id
+                                    return NSItemProvider(object: project.id.uuidString as NSString)
+                                }
+                                .onDrop(
+                                    of: [.text],
+                                    delegate: ProjectSidebarDropDelegate(
+                                        targetProjectID: project.id,
+                                        draggedProjectID: $draggedProjectID,
+                                        dropTargetProjectID: $dropTargetProjectID,
+                                        isBottomDropTarget: $isBottomDropTarget,
+                                        store: store
+                                    )
+                                )
                             }
+
+                            ProjectSidebarBottomDropTarget(isActive: isBottomDropTarget && draggedProjectID != nil)
+                                .onDrop(
+                                    of: [.text],
+                                    delegate: ProjectSidebarBottomDropDelegate(
+                                        draggedProjectID: $draggedProjectID,
+                                        dropTargetProjectID: $dropTargetProjectID,
+                                        isTargeted: $isBottomDropTarget,
+                                        store: store
+                                    )
+                                )
                         }
                     }
                 }
@@ -170,7 +204,11 @@ struct ProjectTreeNode: View {
     @Environment(OpenCodeRuntime.self) private var runtime
     @State private var isHovering = false
 
+    private let workspaceToolService = WorkspaceToolService()
+
     let project: ProjectSummary
+    var isDropTarget = false
+    var isBeingDragged = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -215,6 +253,17 @@ struct ProjectTreeNode: View {
                 .padding(.leading, 14)
             }
         }
+        .overlay(alignment: .top) {
+            if isDropTarget {
+                Capsule()
+                    .fill(NeoCodeTheme.accent)
+                    .frame(height: 3)
+                    .padding(.horizontal, 6)
+                    .transition(.opacity)
+            }
+        }
+        .opacity(isBeingDragged ? 0.7 : 1)
+        .animation(.easeOut(duration: 0.12), value: isDropTarget)
     }
 
     private var disclosureIcon: String {
@@ -280,6 +329,19 @@ struct ProjectTreeNode: View {
     }
 
     private func openProject() {
+        let availableTools = workspaceToolService.projectOpenTools()
+
+        let resolvedToolID = store.preferredWorkspaceToolID(
+            for: project.id,
+            availableToolIDs: availableTools.map(\.id)
+        ) ?? workspaceToolService.defaultProjectOpenTool(from: availableTools)?.id
+
+        if let resolvedToolID,
+           let tool = availableTools.first(where: { $0.id == resolvedToolID }) {
+            workspaceToolService.openProject(at: project.path, with: tool)
+            return
+        }
+
         NSWorkspace.shared.open(projectURL)
     }
 
@@ -506,6 +568,90 @@ struct SidebarSessionStatusBadge: View {
 private enum SidebarLayout {
     static let selectionCornerRadius: CGFloat = 6
     static let hoverFillOpacity: Double = 0.45
+}
+
+private struct ProjectSidebarBottomDropTarget: View {
+    let isActive: Bool
+
+    var body: some View {
+        Capsule()
+            .fill(isActive ? NeoCodeTheme.accent : NeoCodeTheme.accent.opacity(0.001))
+            .frame(height: isActive ? 3 : 10)
+            .padding(.horizontal, 6)
+            .animation(.easeOut(duration: 0.12), value: isActive)
+    }
+}
+
+private struct ProjectSidebarDropDelegate: DropDelegate {
+    let targetProjectID: ProjectSummary.ID
+    @Binding var draggedProjectID: ProjectSummary.ID?
+    @Binding var dropTargetProjectID: ProjectSummary.ID?
+    @Binding var isBottomDropTarget: Bool
+    let store: AppStore
+
+    func dropEntered(info: DropInfo) {
+        guard let draggedProjectID,
+              draggedProjectID != targetProjectID
+        else {
+            return
+        }
+
+        isBottomDropTarget = false
+        dropTargetProjectID = targetProjectID
+
+        withAnimation(.easeInOut(duration: 0.14)) {
+            store.moveProject(draggedProjectID, before: targetProjectID)
+        }
+    }
+
+    func dropExited(info: DropInfo) {
+        guard dropTargetProjectID == targetProjectID else { return }
+        dropTargetProjectID = nil
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        dropTargetProjectID = nil
+        isBottomDropTarget = false
+        draggedProjectID = nil
+        return true
+    }
+}
+
+private struct ProjectSidebarBottomDropDelegate: DropDelegate {
+    @Binding var draggedProjectID: ProjectSummary.ID?
+    @Binding var dropTargetProjectID: ProjectSummary.ID?
+    @Binding var isTargeted: Bool
+    let store: AppStore
+
+    func dropEntered(info: DropInfo) {
+        guard let draggedProjectID else { return }
+
+        dropTargetProjectID = nil
+        isTargeted = true
+
+        withAnimation(.easeInOut(duration: 0.14)) {
+            store.moveProjectToEnd(draggedProjectID)
+        }
+    }
+
+    func dropExited(info: DropInfo) {
+        isTargeted = false
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        isTargeted = false
+        dropTargetProjectID = nil
+        draggedProjectID = nil
+        return true
+    }
 }
 
 private struct SidebarChrome: View {

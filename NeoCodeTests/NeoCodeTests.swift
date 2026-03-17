@@ -2524,6 +2524,33 @@ struct NeoCodeMainActorTests {
     }
 
     @MainActor
+    @Test func appStoreMovesProjectsBeforeAnotherProject() {
+        let firstProject = ProjectSummary(id: UUID(), name: "NeoCode", path: "/tmp/NeoCode")
+        let secondProject = ProjectSummary(id: UUID(), name: "Docs", path: "/tmp/Docs")
+        let thirdProject = ProjectSummary(id: UUID(), name: "Site", path: "/tmp/Site")
+        let store = AppStore(projects: [firstProject, secondProject, thirdProject])
+
+        store.selectProject(secondProject.id)
+        store.moveProject(thirdProject.id, before: firstProject.id)
+
+        #expect(store.projects.map(\.id) == [thirdProject.id, firstProject.id, secondProject.id])
+        #expect(store.selectedProjectID == secondProject.id)
+    }
+
+    @MainActor
+    @Test func appStoreMovesProjectsToEnd() {
+        let firstProject = ProjectSummary(id: UUID(), name: "NeoCode", path: "/tmp/NeoCode")
+        let secondProject = ProjectSummary(id: UUID(), name: "Docs", path: "/tmp/Docs")
+        let thirdProject = ProjectSummary(id: UUID(), name: "Site", path: "/tmp/Site")
+        let store = AppStore(projects: [firstProject, secondProject, thirdProject])
+
+        store.moveProjectToEnd(firstProject.id)
+
+        #expect(store.projects.map(\.id) == [secondProject.id, thirdProject.id, firstProject.id])
+        #expect(store.selectedProjectID == firstProject.id)
+    }
+
+    @MainActor
     @Test func selectingCachedSessionKeepsTranscriptVisible() {
         let now = Date()
         let store = AppStore(projects: [
@@ -2686,7 +2713,16 @@ struct NeoCodeMainActorTests {
 
         let persistence = PersistedAppSettingsStore(defaults: defaults, key: "appSettings")
         let settings = NeoCodeAppSettings(
-            general: .init(launchToDashboard: false),
+            general: .init(
+                startupBehavior: .lastWorkspace,
+                sendKeyBehavior: .commandReturn,
+                restoresPromptDrafts: false,
+                remembersYoloModePerThread: false,
+                defaultWorkspaceToolID: "dev.zed.Zed",
+                preventsSystemSleepWhileRunning: true,
+                notifiesWhenResponseCompletes: true,
+                notifiesWhenInputIsRequired: true
+            ),
             appearance: .init(
                 themeMode: .dark,
                 lightTheme: .lightDefault,
@@ -2708,6 +2744,54 @@ struct NeoCodeMainActorTests {
         persistence.saveSettings(settings)
 
         #expect(persistence.loadSettings() == settings)
+    }
+
+    @Test func generalSettingsDecodeLegacyLaunchFlag() throws {
+        let payload = #"{"launchToDashboard":false}"#
+        let settings = try JSONDecoder().decode(NeoCodeGeneralSettings.self, from: Data(payload.utf8))
+
+        #expect(settings.startupBehavior == .lastWorkspace)
+        #expect(settings.sendKeyBehavior == .returnKey)
+        #expect(settings.restoresPromptDrafts == true)
+        #expect(settings.remembersYoloModePerThread == true)
+    }
+
+    @MainActor
+    @Test func appStoreUsesGeneralWorkspaceToolDefaultWhenProjectOverrideIsMissing() {
+        let store = AppStore(projects: [
+            ProjectSummary(name: "NeoCode", path: "/tmp/NeoCode")
+        ])
+
+        store.updateGeneral { general in
+            general.defaultWorkspaceToolID = "dev.zed.Zed"
+        }
+
+        #expect(
+            store.preferredWorkspaceToolID(
+                for: store.projects.first?.id,
+                availableToolIDs: ["dev.zed.Zed", "com.apple.finder"]
+            ) == "dev.zed.Zed"
+        )
+    }
+
+    @Test func persistedWorkspaceSelectionStoreRoundTripsSelection() {
+        let suiteName = "tech.watzon.NeoCodeTests.workspace-selection.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = PersistedWorkspaceSelectionStore(defaults: defaults, key: "workspaceSelection")
+        let selection = PersistedWorkspaceSelectionStore.Selection(
+            kind: .session,
+            projectID: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"),
+            sessionID: "ses_123"
+        )
+
+        store.saveSelection(selection)
+
+        #expect(store.loadSelection() == selection)
     }
 
     @MainActor

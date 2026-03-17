@@ -118,20 +118,246 @@ private struct SettingsHeaderView: View {
 }
 
 private struct GeneralSettingsView: View {
-    var body: some View {
-        SettingsCard(
-            title: "General foundation",
-            detail: "The shell is ready for app defaults, runtime behavior, and notification preferences next."
-        ) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("This section is intentionally lightweight for the first release pass.")
-                    .font(.neoBody)
-                    .foregroundStyle(NeoCodeTheme.textPrimary)
+    @Environment(AppStore.self) private var store
+    @State private var workspaceToolOptions: [WorkspaceToolSettingsOption] = [.autoDetect]
 
-                Text("Appearance is fully mocked out first, while General keeps the navigation and persistence structure in place for the next follow-up.")
-                    .font(.neoBody)
+    private let workspaceToolService = WorkspaceToolService()
+    private static let autoDetectToolID = WorkspaceToolSettingsOption.autoDetectID
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            SettingsCard(
+                title: "Startup & workspace",
+                detail: "Choose how NeoCode opens and which app should handle projects before a workspace-specific override takes over."
+            ) {
+                VStack(spacing: 0) {
+                    SettingsControlRow(
+                        title: "On launch",
+                        detail: "Start on the dashboard or restore the last workspace you were actively using.",
+                        accessory: {
+                            Picker("On launch", selection: generalBinding(\.startupBehavior)) {
+                                ForEach(NeoCodeStartupBehavior.allCases) { behavior in
+                                    Text(behavior.title)
+                                        .tag(behavior)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .labelsHidden()
+                            .frame(width: 240)
+                        }
+                    )
+
+                    SettingsDivider()
+
+                    SettingsControlRow(
+                        title: "Open project with",
+                        detail: "Used when a project does not already have its own preferred editor or destination.",
+                        accessory: {
+                            NeoCodeSelect(
+                                title: selectedWorkspaceToolOption.title,
+                                selectedID: selectedWorkspaceToolOptionID,
+                                items: workspaceToolOptions,
+                                emptyMessage: "No apps found.",
+                                placeholder: "Search apps",
+                                isSearchable: true,
+                                direction: .down,
+                                menuWidth: 280,
+                                showsSelectionIndicator: false
+                            ) { option in
+                                WorkspaceToolSettingsOptionLabel(option: option)
+                            } searchableText: { option in
+                                [option.title, option.id]
+                            } onSelect: { option in
+                                store.updateGeneral { general in
+                                    general.defaultWorkspaceToolID = option.id == Self.autoDetectToolID ? nil : option.id
+                                }
+                            } triggerLeading: {
+                                WorkspaceToolSettingsOptionIcon(option: selectedWorkspaceToolOption)
+                            }
+                            .frame(width: 220, alignment: .trailing)
+                        }
+                    )
+                }
+            }
+
+            SettingsCard(
+                title: "Composer",
+                detail: "Tune how prompts send and whether NeoCode should keep per-thread drafts waiting for you when you come back."
+            ) {
+                VStack(spacing: 0) {
+                    SettingsControlRow(
+                        title: "Send messages with",
+                        detail: "Choose whether Return sends immediately or only Command-Return sends while Return inserts a newline.",
+                        accessory: {
+                            Picker("Send messages with", selection: generalBinding(\.sendKeyBehavior)) {
+                                ForEach(NeoCodeSendKeyBehavior.allCases) { behavior in
+                                    Text(behavior.title)
+                                        .tag(behavior)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .labelsHidden()
+                            .frame(width: 240)
+                        }
+                    )
+
+                    SettingsDivider()
+
+                    SettingsControlRow(
+                        title: "Restore drafts when reopening threads",
+                        detail: "Keep unfinished prompt text tied to each thread so you can move around the app without losing context.",
+                        accessory: {
+                            Toggle("Restore drafts when reopening threads", isOn: generalBinding(\.restoresPromptDrafts))
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                        }
+                    )
+                }
+            }
+
+            SettingsCard(
+                title: "Session autonomy",
+                detail: "Control whether NeoCode should remember safety-related per-thread behavior between launches."
+            ) {
+                SettingsControlRow(
+                    title: "Remember YOLO mode per thread",
+                    detail: "Persist YOLO mode for each thread so permission auto-approval comes back the next time you open that workspace.",
+                    accessory: {
+                        Toggle("Remember YOLO mode per thread", isOn: generalBinding(\.remembersYoloModePerThread))
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                    }
+                )
+            }
+
+            SettingsCard(
+                title: "Power & notifications",
+                detail: "Keep long-running work alive and optionally notify you when NeoCode finishes or needs your input."
+            ) {
+                VStack(spacing: 0) {
+                    SettingsControlRow(
+                        title: "Prevent Mac sleep while responses are running",
+                        detail: "Ask macOS to keep the system awake while NeoCode is actively processing a response.",
+                        accessory: {
+                            Toggle("Prevent Mac sleep while responses are running", isOn: generalBinding(\.preventsSystemSleepWhileRunning))
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                        }
+                    )
+
+                    SettingsDivider()
+
+                    SettingsControlRow(
+                        title: "Notify when a response finishes",
+                        detail: "Show a macOS notification after a response completes while the app is unfocused.",
+                        accessory: {
+                            Toggle("Notify when a response finishes", isOn: generalBinding(\.notifiesWhenResponseCompletes))
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                        }
+                    )
+
+                    SettingsDivider()
+
+                    SettingsControlRow(
+                        title: "Notify when input is required",
+                        detail: "Show a macOS notification when a permission request or question is waiting for you while NeoCode is unfocused.",
+                        accessory: {
+                            Toggle("Notify when input is required", isOn: generalBinding(\.notifiesWhenInputIsRequired))
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                        }
+                    )
+                }
+            }
+        }
+        .frame(maxWidth: 720, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .task {
+            refreshWorkspaceToolOptions()
+        }
+    }
+
+    private var selectedWorkspaceToolOptionID: String {
+        store.appSettings.general.defaultWorkspaceToolID ?? Self.autoDetectToolID
+    }
+
+    private var selectedWorkspaceToolOption: WorkspaceToolSettingsOption {
+        workspaceToolOptions.first(where: { $0.id == selectedWorkspaceToolOptionID }) ?? .autoDetect
+    }
+
+    private func generalBinding<Value>(_ keyPath: WritableKeyPath<NeoCodeGeneralSettings, Value>) -> Binding<Value> {
+        Binding(
+            get: { store.appSettings.general[keyPath: keyPath] },
+            set: { newValue in
+                store.updateGeneral { general in
+                    general[keyPath: keyPath] = newValue
+                }
+            }
+        )
+    }
+
+    private func refreshWorkspaceToolOptions() {
+        workspaceToolOptions = [.autoDetect] + workspaceToolService.projectOpenTools().map { WorkspaceToolSettingsOption(tool: $0) }
+    }
+}
+
+private struct WorkspaceToolSettingsOption: Identifiable, Hashable {
+    static let autoDetectID = "__auto__"
+    static let autoDetect = WorkspaceToolSettingsOption(
+        id: autoDetectID,
+        title: "Auto detect",
+        tool: nil,
+        fallbackSystemImage: "wand.and.stars"
+    )
+
+    let id: String
+    let title: String
+    let tool: WorkspaceTool?
+    let fallbackSystemImage: String
+
+    init(tool: WorkspaceTool) {
+        id = tool.id
+        title = tool.label
+        self.tool = tool
+        fallbackSystemImage = tool.fallbackSystemImage
+    }
+
+    private init(id: String, title: String, tool: WorkspaceTool?, fallbackSystemImage: String) {
+        self.id = id
+        self.title = title
+        self.tool = tool
+        self.fallbackSystemImage = fallbackSystemImage
+    }
+}
+
+private struct WorkspaceToolSettingsOptionLabel: View {
+    let option: WorkspaceToolSettingsOption
+
+    var body: some View {
+        HStack(spacing: 10) {
+            WorkspaceToolSettingsOptionIcon(option: option)
+
+            Text(option.title)
+                .font(.neoBody)
+                .foregroundStyle(NeoCodeTheme.textPrimary)
+                .lineLimit(1)
+        }
+    }
+}
+
+private struct WorkspaceToolSettingsOptionIcon: View {
+    let option: WorkspaceToolSettingsOption
+
+    var body: some View {
+        Group {
+            if let tool = option.tool {
+                WorkspaceToolIconView(tool: tool)
+            } else {
+                Image(systemName: option.fallbackSystemImage)
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(NeoCodeTheme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(width: 16, height: 16)
             }
         }
     }
@@ -270,6 +496,8 @@ private struct AppearanceSettingsView: View {
                 }
             }
         }
+        .frame(maxWidth: 720, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .center)
         .tint(NeoCodeTheme.accent)
         .fileImporter(
             isPresented: Binding(

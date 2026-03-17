@@ -19,7 +19,7 @@ enum AppSettingsSection: String, Codable, CaseIterable, Hashable, Identifiable {
     var subtitle: String {
         switch self {
         case .general:
-            return "Defaults, behavior, and future app controls."
+            return "Startup, composer, autonomy, and notifications."
         case .appearance:
             return "Theme, fonts, and interface styling."
         }
@@ -87,6 +87,38 @@ enum NeoCodeThemeMode: String, Codable, CaseIterable, Hashable, Identifiable {
     }
 }
 
+enum NeoCodeStartupBehavior: String, Codable, CaseIterable, Hashable, Identifiable {
+    case dashboard
+    case lastWorkspace
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .dashboard:
+            return "Dashboard"
+        case .lastWorkspace:
+            return "Last workspace"
+        }
+    }
+}
+
+enum NeoCodeSendKeyBehavior: String, Codable, CaseIterable, Hashable, Identifiable {
+    case returnKey
+    case commandReturn
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .returnKey:
+            return "Return"
+        case .commandReturn:
+            return "Command-Return"
+        }
+    }
+}
+
 struct NeoCodeAppSettings: Codable, Hashable {
     var general: NeoCodeGeneralSettings
     var appearance: NeoCodeAppearanceSettings
@@ -101,10 +133,72 @@ struct NeoCodeAppSettings: Codable, Hashable {
 }
 
 struct NeoCodeGeneralSettings: Codable, Hashable {
-    var launchToDashboard: Bool
+    var startupBehavior: NeoCodeStartupBehavior
+    var sendKeyBehavior: NeoCodeSendKeyBehavior
+    var restoresPromptDrafts: Bool
+    var remembersYoloModePerThread: Bool
+    var defaultWorkspaceToolID: String?
+    var preventsSystemSleepWhileRunning: Bool
+    var notifiesWhenResponseCompletes: Bool
+    var notifiesWhenInputIsRequired: Bool
 
-    init(launchToDashboard: Bool = true) {
-        self.launchToDashboard = launchToDashboard
+    init(
+        startupBehavior: NeoCodeStartupBehavior = .dashboard,
+        sendKeyBehavior: NeoCodeSendKeyBehavior = .returnKey,
+        restoresPromptDrafts: Bool = true,
+        remembersYoloModePerThread: Bool = true,
+        defaultWorkspaceToolID: String? = nil,
+        preventsSystemSleepWhileRunning: Bool = false,
+        notifiesWhenResponseCompletes: Bool = false,
+        notifiesWhenInputIsRequired: Bool = false
+    ) {
+        self.startupBehavior = startupBehavior
+        self.sendKeyBehavior = sendKeyBehavior
+        self.restoresPromptDrafts = restoresPromptDrafts
+        self.remembersYoloModePerThread = remembersYoloModePerThread
+        self.defaultWorkspaceToolID = defaultWorkspaceToolID
+        self.preventsSystemSleepWhileRunning = preventsSystemSleepWhileRunning
+        self.notifiesWhenResponseCompletes = notifiesWhenResponseCompletes
+        self.notifiesWhenInputIsRequired = notifiesWhenInputIsRequired
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let legacyLaunchToDashboard = try container.decodeIfPresent(Bool.self, forKey: .launchToDashboard)
+
+        startupBehavior = try container.decodeIfPresent(NeoCodeStartupBehavior.self, forKey: .startupBehavior)
+            ?? ((legacyLaunchToDashboard ?? true) ? .dashboard : .lastWorkspace)
+        sendKeyBehavior = try container.decodeIfPresent(NeoCodeSendKeyBehavior.self, forKey: .sendKeyBehavior) ?? .returnKey
+        restoresPromptDrafts = try container.decodeIfPresent(Bool.self, forKey: .restoresPromptDrafts) ?? true
+        remembersYoloModePerThread = try container.decodeIfPresent(Bool.self, forKey: .remembersYoloModePerThread) ?? true
+        defaultWorkspaceToolID = try container.decodeIfPresent(String.self, forKey: .defaultWorkspaceToolID)
+        preventsSystemSleepWhileRunning = try container.decodeIfPresent(Bool.self, forKey: .preventsSystemSleepWhileRunning) ?? false
+        notifiesWhenResponseCompletes = try container.decodeIfPresent(Bool.self, forKey: .notifiesWhenResponseCompletes) ?? false
+        notifiesWhenInputIsRequired = try container.decodeIfPresent(Bool.self, forKey: .notifiesWhenInputIsRequired) ?? false
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(startupBehavior, forKey: .startupBehavior)
+        try container.encode(sendKeyBehavior, forKey: .sendKeyBehavior)
+        try container.encode(restoresPromptDrafts, forKey: .restoresPromptDrafts)
+        try container.encode(remembersYoloModePerThread, forKey: .remembersYoloModePerThread)
+        try container.encodeIfPresent(defaultWorkspaceToolID, forKey: .defaultWorkspaceToolID)
+        try container.encode(preventsSystemSleepWhileRunning, forKey: .preventsSystemSleepWhileRunning)
+        try container.encode(notifiesWhenResponseCompletes, forKey: .notifiesWhenResponseCompletes)
+        try container.encode(notifiesWhenInputIsRequired, forKey: .notifiesWhenInputIsRequired)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case startupBehavior
+        case sendKeyBehavior
+        case restoresPromptDrafts
+        case remembersYoloModePerThread
+        case defaultWorkspaceToolID
+        case preventsSystemSleepWhileRunning
+        case notifiesWhenResponseCompletes
+        case notifiesWhenInputIsRequired
+        case launchToDashboard
     }
 }
 

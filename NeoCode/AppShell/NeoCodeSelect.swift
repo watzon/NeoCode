@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct NeoCodeSelect<Item: Identifiable, RowContent: View>: View where Item.ID: Hashable {
+struct NeoCodeSelect<Item: Identifiable, RowContent: View, TriggerLeading: View>: View where Item.ID: Hashable {
     let title: String
     let selectedID: Item.ID?
     let items: [Item]
@@ -16,6 +16,7 @@ struct NeoCodeSelect<Item: Identifiable, RowContent: View>: View where Item.ID: 
     let footer: (() -> AnyView)?
     let rowAccessory: ((Item) -> AnyView)?
     let showsSelectionIndicator: Bool
+    @ViewBuilder let triggerLeading: () -> TriggerLeading
 
     @State private var isPresented = false
     @State private var query = ""
@@ -40,7 +41,8 @@ struct NeoCodeSelect<Item: Identifiable, RowContent: View>: View where Item.ID: 
         searchableText: @escaping (Item) -> [String],
         onSelect: @escaping (Item) -> Void,
         footer: (() -> AnyView)? = nil,
-        rowAccessory: ((Item) -> AnyView)? = nil
+        rowAccessory: ((Item) -> AnyView)? = nil,
+        @ViewBuilder triggerLeading: @escaping () -> TriggerLeading
     ) {
         self.title = title
         self.selectedID = selectedID
@@ -57,11 +59,12 @@ struct NeoCodeSelect<Item: Identifiable, RowContent: View>: View where Item.ID: 
         self.footer = footer
         self.rowAccessory = rowAccessory
         self.showsSelectionIndicator = showsSelectionIndicator
+        self.triggerLeading = triggerLeading
     }
 
     var body: some View {
         Button(action: toggleMenu) {
-            NeoCodeDropdownTriggerLabel(title: title, isPresented: isPresented)
+            NeoCodeDropdownTriggerLabel(title: title, isPresented: isPresented, leading: triggerLeading)
         }
         .buttonStyle(.plain)
         .background {
@@ -207,6 +210,46 @@ struct NeoCodeSelect<Item: Identifiable, RowContent: View>: View where Item.ID: 
                     proxy.scrollTo(selectedID, anchor: .center)
                 }
             }
+        }
+    }
+}
+
+extension NeoCodeSelect where TriggerLeading == EmptyView {
+    init(
+        title: String,
+        selectedID: Item.ID? = nil,
+        items: [Item],
+        emptyMessage: String,
+        placeholder: String,
+        isSearchable: Bool,
+        direction: FloatingPanelDirection = .down,
+        menuWidth: CGFloat = 280,
+        menuMaxHeight: CGFloat = 260,
+        showsSelectionIndicator: Bool = true,
+        @ViewBuilder rowContent: @escaping (Item) -> RowContent,
+        searchableText: @escaping (Item) -> [String],
+        onSelect: @escaping (Item) -> Void,
+        footer: (() -> AnyView)? = nil,
+        rowAccessory: ((Item) -> AnyView)? = nil
+    ) {
+        self.init(
+            title: title,
+            selectedID: selectedID,
+            items: items,
+            emptyMessage: emptyMessage,
+            placeholder: placeholder,
+            isSearchable: isSearchable,
+            direction: direction,
+            menuWidth: menuWidth,
+            menuMaxHeight: menuMaxHeight,
+            showsSelectionIndicator: showsSelectionIndicator,
+            rowContent: rowContent,
+            searchableText: searchableText,
+            onSelect: onSelect,
+            footer: footer,
+            rowAccessory: rowAccessory
+        ) {
+            EmptyView()
         }
     }
 }

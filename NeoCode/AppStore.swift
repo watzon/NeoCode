@@ -14,9 +14,12 @@ final class AppStore {
     private let logger = Logger(subsystem: "tech.watzon.NeoCode", category: "AppStore")
     private let projectPersistence = PersistedProjectsStore()
     private let appSettingsPersistence = PersistedAppSettingsStore()
+    private let workspaceSelectionPersistence = PersistedWorkspaceSelectionStore()
     private let promptDraftPersistence = PersistedPromptDraftsStore()
     private let yoloPreferencePersistence = PersistedYoloPreferencesStore()
     private let favoriteModelPersistence = PersistedFavoriteModelsStore()
+    private let notificationService = NeoCodeNotificationService()
+    private let sleepAssertionService = NeoCodeSleepAssertionService()
     private let dashboardStatsService = DashboardStatsService()
     private let newSessionTitle = SessionSummary.defaultTitle
     private let autoRespondedPermissionTTL: TimeInterval = 60 * 60
@@ -83,7 +86,11 @@ final class AppStore {
     }
 
     var projects: [ProjectSummary]
-    var selectedProjectID: ProjectSummary.ID?
+    var selectedProjectID: ProjectSummary.ID? {
+        didSet {
+            persistWorkspaceSelectionIfNeeded()
+        }
+    }
     var selectedContent: AppContentSelection {
         didSet {
             if case .settings = selectedContent {
@@ -91,6 +98,7 @@ final class AppStore {
             }
 
             lastWorkspaceSelection = selectedContent
+            persistWorkspaceSelectionIfNeeded()
         }
     }
     var appSettings: NeoCodeAppSettings {
@@ -214,19 +222,28 @@ final class AppStore {
         let normalizedProjects = Self.normalizedProjects(PersistedProjectsStore().loadProjects())
         let extractedState = Self.extractTranscriptState(from: normalizedProjects)
         let loadedAppSettings = PersistedAppSettingsStore().loadSettings()
+        let restoredWorkspaceSelection = PersistedWorkspaceSelectionStore().loadSelection()
+        let initialWorkspaceSelection = Self.initialWorkspaceSelection(
+            projects: extractedState.projects,
+            startupBehavior: loadedAppSettings.general.startupBehavior,
+            restoredSelection: restoredWorkspaceSelection
+        )
         self.projects = extractedState.projects
         self.transcriptStateBySessionID = extractedState.transcripts
-        self.selectedProjectID = extractedState.projects.first?.id
-        self.selectedContent = .dashboard
+        self.selectedProjectID = initialWorkspaceSelection.projectID
+        self.selectedContent = initialWorkspaceSelection.content
         self.appSettings = loadedAppSettings
         self.loadingTranscriptSessionID = nil
-        self.yoloSessionKeys = PersistedYoloPreferencesStore().loadYoloSessionKeys()
+        self.yoloSessionKeys = loadedAppSettings.general.remembersYoloModePerThread
+            ? PersistedYoloPreferencesStore().loadYoloSessionKeys()
+            : []
         self.favoriteModelIDs = favoriteModelPersistence.loadFavoriteModelIDs()
         self.performanceOptions = AppStorePerformanceOptions()
         self.isPersistenceEnabled = true
-        self.lastWorkspaceSelection = .dashboard
+        self.lastWorkspaceSelection = initialWorkspaceSelection.content
         NeoCodeTheme.configure(with: loadedAppSettings.appearance)
         seedComposerDefaults()
+        refreshSystemSleepAssertion()
     }
 
     init(
@@ -237,19 +254,28 @@ final class AppStore {
         let normalizedProjects = Self.normalizedProjects(projects)
         let extractedState = Self.extractTranscriptState(from: normalizedProjects)
         let loadedAppSettings = isPersistenceEnabled ? PersistedAppSettingsStore().loadSettings() : .init()
+        let restoredWorkspaceSelection = isPersistenceEnabled ? PersistedWorkspaceSelectionStore().loadSelection() : nil
+        let initialWorkspaceSelection = Self.initialWorkspaceSelection(
+            projects: extractedState.projects,
+            startupBehavior: loadedAppSettings.general.startupBehavior,
+            restoredSelection: restoredWorkspaceSelection
+        )
         self.projects = extractedState.projects
         self.transcriptStateBySessionID = extractedState.transcripts
-        self.selectedProjectID = extractedState.projects.first?.id
-        self.selectedContent = .dashboard
+        self.selectedProjectID = initialWorkspaceSelection.projectID
+        self.selectedContent = initialWorkspaceSelection.content
         self.appSettings = loadedAppSettings
         self.loadingTranscriptSessionID = nil
-        self.yoloSessionKeys = isPersistenceEnabled ? PersistedYoloPreferencesStore().loadYoloSessionKeys() : []
+        self.yoloSessionKeys = isPersistenceEnabled && loadedAppSettings.general.remembersYoloModePerThread
+            ? PersistedYoloPreferencesStore().loadYoloSessionKeys()
+            : []
         self.favoriteModelIDs = isPersistenceEnabled ? favoriteModelPersistence.loadFavoriteModelIDs() : []
         self.performanceOptions = performanceOptions
         self.isPersistenceEnabled = isPersistenceEnabled
-        self.lastWorkspaceSelection = .dashboard
+        self.lastWorkspaceSelection = initialWorkspaceSelection.content
         NeoCodeTheme.configure(with: loadedAppSettings.appearance)
         seedComposerDefaults()
+        refreshSystemSleepAssertion()
     }
 
     var selectedSessionID: String? {
@@ -395,6 +421,23 @@ final class AppStore {
         scheduleProjectPersistence()
     }
 
+    func preferredWorkspaceToolID(for projectID: ProjectSummary.ID?, availableToolIDs: [String]) -> String? {
+        let availableToolIDs = Set(availableToolIDs)
+
+        if let projectID,
+           let preferredEditorID = preferredEditorID(for: projectID),
+           availableToolIDs.contains(preferredEditorID) {
+            return preferredEditorID
+        }
+
+        if let defaultWorkspaceToolID = appSettings.general.defaultWorkspaceToolID,
+           availableToolIDs.contains(defaultWorkspaceToolID) {
+            return defaultWorkspaceToolID
+        }
+
+        return nil
+    }
+
     func setProjectCollapsed(_ isCollapsed: Bool, for projectID: ProjectSummary.ID) {
         guard let projectIndex = projects.firstIndex(where: { $0.id == projectID }) else { return }
         projects[projectIndex].settings.isCollapsedInSidebar = isCollapsed
@@ -423,12 +466,32 @@ final class AppStore {
             yoloSessionKeys.remove(key)
         }
 
-        if isPersistenceEnabled {
+        if isPersistenceEnabled,
+           appSettings.general.remembersYoloModePerThread {
             yoloPreferencePersistence.saveYoloSessionKeys(yoloSessionKeys)
         }
     }
 
+    func updateGeneral(_ update: (inout NeoCodeGeneralSettings) -> Void) {
+        let previousGeneral = appSettings.general
+        var general = previousGeneral
+        update(&general)
+        guard general != previousGeneral else { return }
+
+        appSettings.general = general
+        handleGeneralSettingsChange(from: previousGeneral, to: general)
+    }
+
     func preparePrompt(for sessionID: String?) async {
+        guard appSettings.general.restoresPromptDrafts else {
+            isPromptReady = true
+            promptLoadingText = nil
+            isHydratingPrompt = true
+            draft = ""
+            isHydratingPrompt = false
+            return
+        }
+
         guard isPersistenceEnabled else {
             isPromptReady = true
             promptLoadingText = nil
@@ -573,6 +636,26 @@ final class AppStore {
         scheduleGitRefreshLoop(for: project.path)
     }
 
+    func moveProject(_ projectID: ProjectSummary.ID, before destinationProjectID: ProjectSummary.ID) {
+        guard projectID != destinationProjectID,
+              let sourceIndex = projects.firstIndex(where: { $0.id == projectID }),
+              let destinationIndex = projects.firstIndex(where: { $0.id == destinationProjectID })
+        else {
+            return
+        }
+
+        let insertionIndex = sourceIndex < destinationIndex ? destinationIndex - 1 : destinationIndex
+        moveProject(from: sourceIndex, to: insertionIndex)
+    }
+
+    func moveProjectToEnd(_ projectID: ProjectSummary.ID) {
+        guard let sourceIndex = projects.firstIndex(where: { $0.id == projectID }) else {
+            return
+        }
+
+        moveProject(from: sourceIndex, to: projects.count - 1)
+    }
+
     func toggleProjectCollapsed(_ projectID: ProjectSummary.ID) {
         setProjectCollapsed(!isProjectCollapsed(projectID), for: projectID)
     }
@@ -581,11 +664,87 @@ final class AppStore {
         projects.first(where: { $0.id == projectID })?.settings.isCollapsedInSidebar ?? false
     }
 
+    private func moveProject(from sourceIndex: Int, to destinationIndex: Int) {
+        guard projects.indices.contains(sourceIndex) else { return }
+
+        let boundedDestination = max(0, min(destinationIndex, projects.count - 1))
+        guard sourceIndex != boundedDestination else { return }
+
+        var reorderedProjects = projects
+        let project = reorderedProjects.remove(at: sourceIndex)
+        let insertionIndex = max(0, min(boundedDestination, reorderedProjects.count))
+        reorderedProjects.insert(project, at: insertionIndex)
+        projects = reorderedProjects
+        scheduleProjectPersistence()
+    }
+
     func updateAppearance(_ update: (inout NeoCodeAppearanceSettings) -> Void) {
         var appearance = appSettings.appearance
         update(&appearance)
         appearance.syncPresetSelection()
         appSettings.appearance = appearance
+    }
+
+    private func handleGeneralSettingsChange(from oldValue: NeoCodeGeneralSettings, to newValue: NeoCodeGeneralSettings) {
+        if oldValue.restoresPromptDrafts != newValue.restoresPromptDrafts {
+            if newValue.restoresPromptDrafts {
+                persistDraftIfNeeded()
+            } else {
+                promptDraftsByKey = [:]
+                loadedPromptKeys = []
+
+                if isPersistenceEnabled {
+                    let promptDraftPersistence = promptDraftPersistence
+                    Task {
+                        await promptDraftPersistence.clearAll()
+                    }
+                }
+            }
+        }
+
+        if oldValue.remembersYoloModePerThread != newValue.remembersYoloModePerThread,
+           isPersistenceEnabled {
+            if newValue.remembersYoloModePerThread {
+                yoloPreferencePersistence.saveYoloSessionKeys(yoloSessionKeys)
+            } else {
+                yoloPreferencePersistence.saveYoloSessionKeys([])
+            }
+        }
+
+        if (!oldValue.notifiesWhenResponseCompletes && newValue.notifiesWhenResponseCompletes)
+            || (!oldValue.notifiesWhenInputIsRequired && newValue.notifiesWhenInputIsRequired) {
+            Task { [weak self] in
+                await self?.ensureNotificationAuthorization()
+            }
+        }
+
+        refreshSystemSleepAssertion()
+    }
+
+    private func ensureNotificationAuthorization() async {
+        guard appSettings.general.notifiesWhenResponseCompletes || appSettings.general.notifiesWhenInputIsRequired else {
+            return
+        }
+
+        guard await notificationService.requestAuthorizationIfNeeded() else {
+            updateGeneral { general in
+                general.notifiesWhenResponseCompletes = false
+                general.notifiesWhenInputIsRequired = false
+            }
+            lastError = "NeoCode notifications are disabled in macOS. Enable them in System Settings to use notification alerts."
+            return
+        }
+    }
+
+    private func refreshSystemSleepAssertion() {
+        let shouldPreventSleep = appSettings.general.preventsSystemSleepWhileRunning && hasRunningSessions
+        sleepAssertionService.setActive(shouldPreventSleep)
+    }
+
+    private var hasRunningSessions: Bool {
+        projects.contains { project in
+            project.sessions.contains { $0.status == .running }
+        }
     }
 
     func connect(to runtime: OpenCodeRuntime) async {
@@ -1983,11 +2142,13 @@ final class AppStore {
         case .sessionDeleted(let sessionID):
             removeSession(sessionID, in: projectID)
         case .sessionStatusChanged(let sessionID, let status):
+            let previousStatus = liveSessionStatuses[sessionID]
             liveSessionStatuses[sessionID] = status
             if case .idle = status {
                 clearLocalSessionActivity(sessionID)
             }
             refreshSessionStatus(sessionID: sessionID, projectID: projectID)
+            notifyIfNeededForCompletedResponse(sessionID: sessionID, previousStatus: previousStatus, status: status)
         case .permissionAsked(let request):
             if let service = liveServices[projectID],
                shouldAutoRespond(to: request) {
@@ -1996,11 +2157,13 @@ final class AppStore {
                 }
             } else {
                 upsertPendingPermission(request, in: projectID)
+                notifyIfNeededForPermissionRequest(request)
             }
         case .permissionReplied(let event):
             removePendingPermission(requestID: event.requestID, sessionID: event.sessionID, projectID: projectID)
         case .questionAsked(let request):
             upsertPendingQuestion(request, in: projectID)
+            notifyIfNeededForQuestionRequest(request)
         case .questionReplied(let event):
             removePendingQuestion(requestID: event.requestID, sessionID: event.sessionID, projectID: projectID)
         case .questionRejected(let event):
@@ -2134,6 +2297,7 @@ final class AppStore {
         isRespondingToPrompt = false
         isPromptReady = true
         promptLoadingText = nil
+        refreshSystemSleepAssertion()
     }
 
     private func disconnectLiveState(for projectID: ProjectSummary.ID) {
@@ -2674,14 +2838,14 @@ final class AppStore {
                 return false
             }
             let service = WorkspaceToolService()
-            let tools = service.discoveredTools()
+            let tools = service.projectOpenTools()
             guard !tools.isEmpty else {
                 lastError = "No supported workspace tools were found."
                 return false
             }
             let preferredID = preferredEditorID(for: projectID)
             let tool = tools.first(where: { $0.id == preferredID })
-                ?? service.defaultToolID(from: tools).flatMap { id in tools.first(where: { $0.id == id }) }
+                ?? service.defaultProjectOpenTool(from: tools)
                 ?? tools.first
             guard let tool else {
                 lastError = "No supported workspace tools were found."
@@ -3131,6 +3295,7 @@ final class AppStore {
 
         if projects[indices.project].sessions[indices.session].status == .idle {
             projects[indices.project].sessions[indices.session].status = .running
+            refreshSystemSleepAssertion()
         }
         scheduleBufferedDeltaFlush()
         scheduleProjectPersistence(.streaming)
@@ -3448,6 +3613,7 @@ final class AppStore {
         }
 
         projects[indices.project].sessions[indices.session].status = status
+        refreshSystemSleepAssertion()
         if status != .running {
             cancelStreamingRecoveryCheck(for: sessionID)
             flushPendingProjectPersistence()
@@ -3464,6 +3630,7 @@ final class AppStore {
             transcript: transcript,
             fallback: projects[indices.project].sessions[indices.session].status
         )
+        refreshSystemSleepAssertion()
         if projects[indices.project].sessions[indices.session].status != .running {
             cancelStreamingRecoveryCheck(for: sessionID)
             flushPendingProjectPersistence()
@@ -3820,7 +3987,11 @@ final class AppStore {
     }
 
     private func persistDraftIfNeeded() {
-        guard isPersistenceEnabled else { return }
+        guard isPersistenceEnabled,
+              appSettings.general.restoresPromptDrafts
+        else {
+            return
+        }
 
         guard !isHydratingPrompt,
               isPromptReady,
@@ -3845,6 +4016,15 @@ final class AppStore {
 
     private func primePromptState(for sessionID: String?) {
         attachedFiles = []
+
+        guard appSettings.general.restoresPromptDrafts else {
+            isPromptReady = true
+            promptLoadingText = nil
+            isHydratingPrompt = true
+            draft = ""
+            isHydratingPrompt = false
+            return
+        }
 
         guard let sessionID,
               let promptKey = promptDraftKey(for: sessionID)
@@ -3874,6 +4054,15 @@ final class AppStore {
     }
 
     private func storePromptDraft(_ value: String, forKey promptKey: String) async {
+        guard appSettings.general.restoresPromptDrafts else {
+            promptDraftsByKey.removeValue(forKey: promptKey)
+            loadedPromptKeys.remove(promptKey)
+            if isPersistenceEnabled {
+                await promptDraftPersistence.saveDraft("", forKey: promptKey)
+            }
+            return
+        }
+
         promptDraftsByKey[promptKey] = value
         loadedPromptKeys.insert(promptKey)
         guard isPersistenceEnabled else { return }
@@ -3897,6 +4086,121 @@ final class AppStore {
     private func yoloPreferenceKey(for sessionID: String) -> String? {
         guard let project = selectedProject ?? project(for: sessionID) else { return nil }
         return "\(project.path)::\(sessionID)"
+    }
+
+    private func persistWorkspaceSelectionIfNeeded() {
+        guard isPersistenceEnabled, !isSettingsSelected else { return }
+        workspaceSelectionPersistence.saveSelection(currentWorkspaceSelection)
+    }
+
+    private var currentWorkspaceSelection: PersistedWorkspaceSelectionStore.Selection {
+        switch selectedContent {
+        case .session(let sessionID):
+            return PersistedWorkspaceSelectionStore.Selection(
+                kind: .session,
+                projectID: project(for: sessionID)?.id ?? selectedProjectID,
+                sessionID: sessionID
+            )
+        case .dashboard, .settings:
+            return PersistedWorkspaceSelectionStore.Selection(
+                kind: .dashboard,
+                projectID: selectedProjectID
+            )
+        }
+    }
+
+    private static func initialWorkspaceSelection(
+        projects: [ProjectSummary],
+        startupBehavior: NeoCodeStartupBehavior,
+        restoredSelection: PersistedWorkspaceSelectionStore.Selection?
+    ) -> (projectID: ProjectSummary.ID?, content: AppContentSelection) {
+        let fallbackProjectID = projects.first?.id
+
+        guard startupBehavior == .lastWorkspace,
+              let restoredSelection
+        else {
+            return (fallbackProjectID, .dashboard)
+        }
+
+        let restoredProjectID = restoredSelection.projectID.flatMap { projectID in
+            projects.contains(where: { $0.id == projectID }) ? projectID : nil
+        }
+
+        switch restoredSelection.kind {
+        case .dashboard:
+            return (restoredProjectID ?? fallbackProjectID, .dashboard)
+        case .session:
+            guard let sessionID = restoredSelection.sessionID,
+                  let project = projects.first(where: { project in
+                      project.sessions.contains(where: { $0.id == sessionID })
+                  })
+            else {
+                return (restoredProjectID ?? fallbackProjectID, .dashboard)
+            }
+
+            return (project.id, .session(sessionID))
+        }
+    }
+
+    private func notifyIfNeededForCompletedResponse(sessionID: String, previousStatus: OpenCodeSessionActivity?, status: OpenCodeSessionActivity) {
+        guard appSettings.general.notifiesWhenResponseCompletes,
+              previousStatus != .idle,
+              status == .idle,
+              let session = session(for: sessionID)
+        else {
+            return
+        }
+
+        let title = session.title == SessionSummary.defaultTitle ? "Response finished" : session.title
+        let body = "NeoCode finished the latest response."
+
+        Task { [weak self] in
+            await self?.notificationService.postIfApplicationInactive(
+                identifier: "completion-\(sessionID)",
+                title: title,
+                body: body
+            )
+        }
+    }
+
+    private func notifyIfNeededForPermissionRequest(_ request: OpenCodePermissionRequest) {
+        guard appSettings.general.notifiesWhenInputIsRequired,
+              let session = session(for: request.sessionID)
+        else {
+            return
+        }
+
+        let body = session.title == SessionSummary.defaultTitle
+            ? "A session needs permission before it can continue."
+            : "\(session.title) needs permission before it can continue."
+
+        Task { [weak self] in
+            await self?.notificationService.postIfApplicationInactive(
+                identifier: "permission-\(request.id)",
+                title: "Permission required",
+                body: body
+            )
+        }
+    }
+
+    private func notifyIfNeededForQuestionRequest(_ request: OpenCodeQuestionRequest) {
+        guard appSettings.general.notifiesWhenInputIsRequired,
+              let session = session(for: request.sessionID)
+        else {
+            return
+        }
+
+        let body = session.title == SessionSummary.defaultTitle
+            ? "A session is waiting for your answer."
+            : "\(session.title) is waiting for your answer."
+
+        Task { [weak self] in
+            await self?.notificationService.postIfApplicationInactive(
+                identifier: "question-\(request.id)",
+                title: "Input required",
+                body: body
+            )
+        }
     }
 
     private func replacePendingQuestions(_ requests: [OpenCodeQuestionRequest], in projectID: ProjectSummary.ID) {

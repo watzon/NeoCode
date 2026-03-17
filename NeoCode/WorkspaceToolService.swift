@@ -19,6 +19,15 @@ struct WorkspaceTool: Identifiable, Hashable {
 struct WorkspaceToolService {
     private let fileManager = FileManager.default
 
+    func projectOpenTools() -> [WorkspaceTool] {
+        discoveredTools()
+    }
+
+    func defaultProjectOpenTool(from tools: [WorkspaceTool]) -> WorkspaceTool? {
+        guard let defaultToolID = defaultToolID(from: tools) else { return nil }
+        return tools.first(where: { $0.id == defaultToolID })
+    }
+
     func discoveredTools() -> [WorkspaceTool] {
         let queryResults = QueryResults(
             textEditors: queryApplicationsOpeningText(),

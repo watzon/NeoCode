@@ -180,9 +180,9 @@ struct DraftReactiveMetaballOrb: View {
                 renderScale: renderScale,
                 internalResolutionScale: internalResolutionScale,
                 animationInterval: animationInterval,
-                intensity: min(1, idleIntensity + steadyIntensity * 0.46 + wake * 0.34),
-                pulse: min(0.38, basePulse + wake * 0.16),
-                warmth: min(1, warmth + wake * 0.14),
+                intensity: min(1, idleIntensity + steadyIntensity * 0.46 + wake * 0.20),
+                pulse: min(0.30, basePulse + wake * 0.08),
+                warmth: min(1, warmth + wake * 0.08),
                 beatTrigger: 0,
                 beatStrength: 0
             )
@@ -196,9 +196,9 @@ struct DraftReactiveMetaballOrb: View {
         guard oldValue != newValue else { return }
 
         let changeMagnitude = abs(newValue.count - oldValue.count)
-        let wakeBoost = min(0.26, 0.07 + CGFloat(changeMagnitude) * 0.035)
+        let wakeBoost = min(0.14, 0.04 + CGFloat(changeMagnitude) * 0.02)
 
-        wakeLevel = min(1, wakeContribution(at: .now) + wakeBoost)
+        wakeLevel = min(0.5, wakeContribution(at: .now) + wakeBoost)
         wakeStartedAt = .now
     }
 
@@ -207,6 +207,6 @@ struct DraftReactiveMetaballOrb: View {
 
         let elapsed = date.timeIntervalSince(wakeStartedAt)
         guard elapsed > 0 else { return wakeLevel }
-        return wakeLevel * CGFloat(exp(-elapsed * 0.55))
+        return wakeLevel * CGFloat(exp(-elapsed * 0.7))
     }
 }

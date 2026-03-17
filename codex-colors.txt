@@ -1,0 +1,86 @@
+Absolutely:
+codex-theme-v1:{"codeThemeId":"absolutely","theme":{"accent":"#cc7d5e","contrast":45,"fonts":{"code":null,"ui":null},"ink":"#2d2d2b","opaqueWindows":false,"semanticColors":{"diffAdded":"#00c853","diffRemoved":"#ff5f38","skill":"#cc7d5e"},"surface":"#f9f9f7"},"variant":"light"}
+codex-theme-v1:{"codeThemeId":"absolutely","theme":{"accent":"#cc7d5e","contrast":60,"fonts":{"code":null,"ui":null},"ink":"#f9f9f7","opaqueWindows":false,"semanticColors":{"diffAdded":"#00c853","diffRemoved":"#ff5f38","skill":"#cc7d5e"},"surface":"#2d2d2b"},"variant":"dark"}
+
+Ayu:
+codex-theme-v1:{"codeThemeId":"ayu","theme":{"accent":"#e6b450","contrast":60,"fonts":{"code":null,"ui":null},"ink":"#bfbdb6","opaqueWindows":false,"semanticColors":{"diffAdded":"#7fd962","diffRemoved":"#ea6c73","skill":"#cda1fa"},"surface":"#0b0e14"},"variant":"dark"}
+
+Catppuccin:
+codex-theme-v1:{"codeThemeId":"catppuccin","theme":{"accent":"#8839ef","contrast":45,"fonts":{"code":null,"ui":null},"ink":"#4c4f69","opaqueWindows":false,"semanticColors":{"diffAdded":"#40a02b","diffRemoved":"#d20f39","skill":"#8839ef"},"surface":"#eff1f5"},"variant":"light"}
+codex-theme-v1:{"codeThemeId":"catppuccin","theme":{"accent":"#cba6f7","contrast":60,"fonts":{"code":null,"ui":null},"ink":"#cdd6f4","opaqueWindows":false,"semanticColors":{"diffAdded":"#a6e3a1","diffRemoved":"#f38ba8","skill":"#cba6f7"},"surface":"#1e1e2e"},"variant":"dark"}
+
+Codex:
+codex-theme-v1:{"codeThemeId":"codex","theme":{"accent":"#0169cc","contrast":45,"fonts":{"code":null,"ui":null},"ink":"#0d0d0d","opaqueWindows":false,"semanticColors":{"diffAdded":"#00a240","diffRemoved":"#e02e2a","skill":"#751ed9"},"surface":"#ffffff"},"variant":"light"}
+codex-theme-v1:{"codeThemeId":"codex","theme":{"accent":"#0169cc","contrast":60,"fonts":{"code":null,"ui":null},"ink":"#fcfcfc","opaqueWindows":false,"semanticColors":{"diffAdded":"#00a240","diffRemoved":"#e02e2a","skill":"#b06dff"},"surface":"#111111"},"variant":"dark"}
+
+Dracula:
+codex-theme-v1:{"codeThemeId":"dracula","theme":{"accent":"#ff79c6","contrast":60,"fonts":{"code":null,"ui":null},"ink":"#f8f8f2","opaqueWindows":false,"semanticColors":{"diffAdded":"#50fa7b","diffRemoved":"#ff5555","skill":"#ff79c6"},"surface":"#282a36"},"variant":"dark"}
+
+Everforest:
+codex-theme-v1:{"codeThemeId":"everforest","theme":{"accent":"#93b259","contrast":45,"fonts":{"code":null,"ui":null},"ink":"#5c6a72","opaqueWindows":false,"semanticColors":{"diffAdded":"#8da101","diffRemoved":"#f85552","skill":"#df69ba"},"surface":"#fdf6e3"},"variant":"light"}
+codex-theme-v1:{"codeThemeId":"everforest","theme":{"accent":"#a7c080","contrast":60,"fonts":{"code":null,"ui":null},"ink":"#d3c6aa","opaqueWindows":false,"semanticColors":{"diffAdded":"#a7c080","diffRemoved":"#e67e80","skill":"#d699b6"},"surface":"#2d353b"},"variant":"dark"}
+
+Github:
+codex-theme-v1:{"codeThemeId":"github","theme":{"accent":"#0969da","contrast":45,"fonts":{"code":null,"ui":null},"ink":"#1f2328","opaqueWindows":false,"semanticColors":{"diffAdded":"#1a7f37","diffRemoved":"#cf222e","skill":"#8250df"},"surface":"#ffffff"},"variant":"light"}
+codex-theme-v1:{"codeThemeId":"github","theme":{"accent":"#1f6feb","contrast":60,"fonts":{"code":null,"ui":null},"ink":"#e6edf3","opaqueWindows":false,"semanticColors":{"diffAdded":"#3fb950","diffRemoved":"#f85149","skill":"#bc8cff"},"surface":"#0d1117"},"variant":"dark"}
+
+Gruvbox:
+codex-theme-v1:{"codeThemeId":"gruvbox","theme":{"accent":"#458588","contrast":45,"fonts":{"code":null,"ui":null},"ink":"#3c3836","opaqueWindows":false,"semanticColors":{"diffAdded":"#3c3836","diffRemoved":"#cc241d","skill":"#b16286"},"surface":"#fbf1c7"},"variant":"light"}
+codex-theme-v1:{"codeThemeId":"gruvbox","theme":{"accent":"#458588","contrast":60,"fonts":{"code":null,"ui":null},"ink":"#ebdbb2","opaqueWindows":false,"semanticColors":{"diffAdded":"#ebdbb2","diffRemoved":"#cc241d","skill":"#b16286"},"surface":"#282828"},"variant":"dark"}
+
+Linear:
+codex-theme-v1:{"codeThemeId":"linear","theme":{"accent":"#5e6ad2","contrast":45,"fonts":{"code":null,"ui":"Inter"},"ink":"#2a3140","opaqueWindows":true,"semanticColors":{"diffAdded":"#00a240","diffRemoved":"#ba2623","skill":"#8160d8"},"surface":"#f7f8fa"},"variant":"light"}
+codex-theme-v1:{"codeThemeId":"linear","theme":{"accent":"#5e6ad2","contrast":60,"fonts":{"code":null,"ui":"Inter"},"ink":"#e6e9ef","opaqueWindows":true,"semanticColors":{"diffAdded":"#7ad9c0","diffRemoved":"#fa423e","skill":"#c2a1ff"},"surface":"#17181d"},"variant":"dark"}
+
+Lobster:
+codex-theme-v1:{"codeThemeId":"lobster","theme":{"accent":"#ff5c5c","contrast":60,"fonts":{"code":null,"ui":"Satoshi"},"ink":"#e4e4e7","opaqueWindows":true,"semanticColors":{"diffAdded":"#22c55e","diffRemoved":"#ff5c5c","skill":"#3b82f6"},"surface":"#111827"},"variant":"dark"}
+
+Material:
+codex-theme-v1:{"codeThemeId":"material","theme":{"accent":"#80cbc4","contrast":60,"fonts":{"code":null,"ui":"Satoshi"},"ink":"#eeffff","opaqueWindows":true,"semanticColors":{"diffAdded":"#c3e88d","diffRemoved":"#f07178","skill":"#c792ea"},"surface":"#212121"},"variant":"dark"}
+
+Matrix:
+codex-theme-v1:{"codeThemeId":"matrix","theme":{"accent":"#1eff5a","contrast":60,"fonts":{"code":null,"ui":"ui-monospace, \"SFMono-Regular\", \"SF Mono\", Menlo, Consolas, \"Liberation Mono\", monospace"},"ink":"#b8ffca","opaqueWindows":true,"semanticColors":{"diffAdded":"#1eff5a","diffRemoved":"#fa423e","skill":"#1eff5a"},"surface":"#040805"},"variant":"dark"}
+
+Monokai:
+codex-theme-v1:{"codeThemeId":"monokai","theme":{"accent":"#99947c","contrast":60,"fonts":{"code":null,"ui":"ui-monospace, \"SFMono-Regular\", \"SF Mono\", Menlo, Consolas, \"Liberation Mono\", monospace"},"ink":"#f8f8f2","opaqueWindows":true,"semanticColors":{"diffAdded":"#86b42b","diffRemoved":"#c4265e","skill":"#8c6bc8"},"surface":"#272822"},"variant":"dark"}
+
+Night Owl:
+codex-theme-v1:{"codeThemeId":"night-owl","theme":{"accent":"#44596b","contrast":60,"fonts":{"code":null,"ui":"ui-monospace, \"SFMono-Regular\", \"SF Mono\", Menlo, Consolas, \"Liberation Mono\", monospace"},"ink":"#d6deeb","opaqueWindows":true,"semanticColors":{"diffAdded":"#c5e478","diffRemoved":"#ef5350","skill":"#c792ea"},"surface":"#011627"},"variant":"dark"}
+
+Nord:
+codex-theme-v1:{"codeThemeId":"nord","theme":{"accent":"#88c0d0","contrast":60,"fonts":{"code":null,"ui":"ui-monospace, \"SFMono-Regular\", \"SF Mono\", Menlo, Consolas, \"Liberation Mono\", monospace"},"ink":"#d8dee9","opaqueWindows":true,"semanticColors":{"diffAdded":"#a3be8c","diffRemoved":"#bf616a","skill":"#b48ead"},"surface":"#2e3440"},"variant":"dark"}
+
+Notion:
+codex-theme-v1:{"codeThemeId":"notion","theme":{"accent":"#3183d8","contrast":45,"fonts":{"code":null,"ui":null},"ink":"#37352f","opaqueWindows":true,"semanticColors":{"diffAdded":"#008000","diffRemoved":"#a31515","skill":"#0000ff"},"surface":"#ffffff"},"variant":"light"}
+codex-theme-v1:{"codeThemeId":"notion","theme":{"accent":"#3183d8","contrast":60,"fonts":{"code":null,"ui":null},"ink":"#d9d9d8","opaqueWindows":true,"semanticColors":{"diffAdded":"#4ec9b0","diffRemoved":"#fa423e","skill":"#3183d8"},"surface":"#191919"},"variant":"dark"}
+
+One:
+codex-theme-v1:{"codeThemeId":"one","theme":{"accent":"#526fff","contrast":45,"fonts":{"code":null,"ui":null},"ink":"#383a42","opaqueWindows":true,"semanticColors":{"diffAdded":"#3bba54","diffRemoved":"#e45649","skill":"#526fff"},"surface":"#fafafa"},"variant":"light"}
+codex-theme-v1:{"codeThemeId":"one","theme":{"accent":"#4d78cc","contrast":60,"fonts":{"code":null,"ui":null},"ink":"#abb2bf","opaqueWindows":true,"semanticColors":{"diffAdded":"#8cc265","diffRemoved":"#e05561","skill":"#c162de"},"surface":"#282c34"},"variant":"dark"}
+
+Oscurange:
+codex-theme-v1:{"codeThemeId":"oscurange","theme":{"accent":"#f9b98c","contrast":60,"fonts":{"code":null,"ui":null},"ink":"#e6e6e6","opaqueWindows":true,"semanticColors":{"diffAdded":"#40c977","diffRemoved":"#fa423e","skill":"#479ffa"},"surface":"#0b0b0f"},"variant":"dark"}
+
+Proof:
+codex-theme-v1:{"codeThemeId":"proof","theme":{"accent":"#3d755d","contrast":45,"fonts":{"code":null,"ui":null},"ink":"#2f312d","opaqueWindows":false,"semanticColors":{"diffAdded":"#3d755d","diffRemoved":"#ba2623","skill":"#5f6ac2"},"surface":"#f5f3ed"},"variant":"light"}
+
+Rose Pine:
+codex-theme-v1:{"codeThemeId":"rose-pine","theme":{"accent":"#d7827e","contrast":45,"fonts":{"code":null,"ui":null},"ink":"#575279","opaqueWindows":false,"semanticColors":{"diffAdded":"#56949f","diffRemoved":"#797593","skill":"#907aa9"},"surface":"#faf4ed"},"variant":"light"}
+codex-theme-v1:{"codeThemeId":"rose-pine","theme":{"accent":"#ea9a97","contrast":60,"fonts":{"code":null,"ui":null},"ink":"#e0def4","opaqueWindows":true,"semanticColors":{"diffAdded":"#9ccfd8","diffRemoved":"#908caa","skill":"#c4a7e7"},"surface":"#232136"},"variant":"dark"}
+
+Sentry:
+codex-theme-v1:{"codeThemeId":"sentry","theme":{"accent":"#7055f6","contrast":60,"fonts":{"code":null,"ui":null},"ink":"#e6dff9","opaqueWindows":true,"semanticColors":{"diffAdded":"#8ee6d7","diffRemoved":"#fa423e","skill":"#7055f6"},"surface":"#2d2935"},"variant":"dark"}
+
+Solarized:
+codex-theme-v1:{"codeThemeId":"solarized","theme":{"accent":"#b58900","contrast":45,"fonts":{"code":null,"ui":null},"ink":"#657b83","opaqueWindows":false,"semanticColors":{"diffAdded":"#859900","diffRemoved":"#dc322f","skill":"#d33682"},"surface":"#fdf6e3"},"variant":"light"}
+codex-theme-v1:{"codeThemeId":"solarized","theme":{"accent":"#d30102","contrast":60,"fonts":{"code":null,"ui":null},"ink":"#839496","opaqueWindows":true,"semanticColors":{"diffAdded":"#859900","diffRemoved":"#dc322f","skill":"#d33682"},"surface":"#002b36"},"variant":"dark"}
+
+Temple:
+codex-theme-v1:{"codeThemeId":"temple","theme":{"accent":"#e4f222","contrast":60,"fonts":{"code":null,"ui":null},"ink":"#c7e6da","opaqueWindows":true,"semanticColors":{"diffAdded":"#40c977","diffRemoved":"#fa423e","skill":"#e4f222"},"surface":"#02120c"},"variant":"dark"}
+
+Tokyo Night:
+codex-theme-v1:{"codeThemeId":"tokyo-night","theme":{"accent":"#3d59a1","contrast":60,"fonts":{"code":null,"ui":null},"ink":"#a9b1d6","opaqueWindows":true,"semanticColors":{"diffAdded":"#449dab","diffRemoved":"#914c54","skill":"#9d7cd8"},"surface":"#1a1b26"},"variant":"dark"}
+
+VS Code Plus:
+codex-theme-v1:{"codeThemeId":"vscode-plus","theme":{"accent":"#007acc","contrast":45,"fonts":{"code":null,"ui":null},"ink":"#000000","opaqueWindows":false,"semanticColors":{"diffAdded":"#008000","diffRemoved":"#ee0000","skill":"#0000ff"},"surface":"#ffffff"},"variant":"light"}
+codex-theme-v1:{"codeThemeId":"vscode-plus","theme":{"accent":"#007acc","contrast":60,"fonts":{"code":null,"ui":null},"ink":"#d4d4d4","opaqueWindows":true,"semanticColors":{"diffAdded":"#369432","diffRemoved":"#f44747","skill":"#000080"},"surface":"#1e1e1e"},"variant":"dark"}

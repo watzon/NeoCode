@@ -160,9 +160,15 @@ struct SessionHeaderView: View {
     private var selectedWorkspaceTool: WorkspaceTool? {
         guard !workspaceTools.isEmpty else { return nil }
 
-        if let projectID,
-           let preferredEditorID = store.preferredEditorID(for: projectID),
-           let tool = workspaceTools.first(where: { $0.id == preferredEditorID }) {
+        if let resolvedToolID = store.preferredWorkspaceToolID(
+            for: projectID,
+            availableToolIDs: workspaceTools.map(\.id)
+        ),
+           let tool = workspaceTools.first(where: { $0.id == resolvedToolID }) {
+            return tool
+        }
+
+        if let tool = workspaceToolService.defaultProjectOpenTool(from: workspaceTools) {
             return tool
         }
 
@@ -175,15 +181,7 @@ struct SessionHeaderView: View {
             return
         }
 
-        let discoveredTools = workspaceToolService.discoveredTools()
-        workspaceTools = discoveredTools
-
-        if let projectID,
-           let defaultToolID = workspaceToolService.defaultToolID(from: discoveredTools),
-           store.preferredEditorID(for: projectID) == nil,
-           discoveredTools.contains(where: { $0.id == defaultToolID }) {
-            store.setPreferredEditorID(defaultToolID, for: projectID)
-        }
+        workspaceTools = workspaceToolService.projectOpenTools()
     }
 
     private func selectWorkspaceTool(_ tool: WorkspaceTool) {
@@ -582,30 +580,5 @@ private struct HeaderSplitControl<Icon: View, MenuContent: View>: View {
 
     private var primaryForegroundColor: Color {
         isPrimaryDisabled ? NeoCodeTheme.textMuted : NeoCodeTheme.textPrimary
-    }
-}
-
-private struct WorkspaceToolIconView: View {
-    let tool: WorkspaceTool
-
-    private let service = WorkspaceToolService()
-
-    var body: some View {
-        Group {
-            if let image = service.icon(for: tool) {
-                Image(nsImage: image)
-                    .renderingMode(.original)
-                    .resizable()
-                    .interpolation(.high)
-                    .scaledToFit()
-            } else {
-                Image(systemName: tool.fallbackSystemImage)
-                    .resizable()
-                    .scaledToFit()
-                    .padding(2)
-                    .foregroundStyle(NeoCodeTheme.textSecondary)
-            }
-        }
-        .frame(width: 16, height: 16)
     }
 }
