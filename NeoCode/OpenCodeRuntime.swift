@@ -25,6 +25,14 @@ final class OpenCodeRuntime {
         let version: String
     }
 
+    private enum StartupPhase: String {
+        case idle
+        case resolvingConfiguration
+        case launchingProcess
+        case waitingForListeningAddress
+        case waitingForHealthCheck
+    }
+
     private final class RuntimeEntry {
         var process: Process?
         var outputPipe: Pipe?
@@ -32,6 +40,7 @@ final class OpenCodeRuntime {
         var outputBuffer = ""
         var lastOutput = ""
         var startTask: Task<Connection, Error>?
+        var startupPhase: StartupPhase = .idle
     }
 
     var userFacingError: String?
@@ -140,11 +149,13 @@ final class OpenCodeRuntime {
 
         terminateProcess(entry: entry, projectPath: projectPath, clearStartTask: false)
         entry.requestedStop = false
+        entry.startupPhase = .resolvingConfiguration
         setState(.starting(projectPath: projectPath), for: projectPath)
         logger.info("Starting OpenCode runtime for project: \(projectPath, privacy: .public)")
 
         do {
             let configuration = try OpenCodeRuntimeConfiguration(projectPath: projectPath)
+            entry.startupPhase = .launchingProcess
             let process = try makeProcess(for: configuration, entry: entry, projectPath: projectPath)
             entry.process = process
 
@@ -157,7 +168,9 @@ final class OpenCodeRuntime {
             try process.run()
             ManagedProcessRegistry.shared.register(process)
 
+            entry.startupPhase = .waitingForListeningAddress
             let baseURL = try await waitForBoundURL(entry: entry, timeout: 15)
+            entry.startupPhase = .waitingForHealthCheck
             let health = try await client.waitUntilHealthy(
                 baseURL: baseURL,
                 username: configuration.username,
@@ -174,12 +187,21 @@ final class OpenCodeRuntime {
                 version: health.version
             )
             entry.outputBuffer = ""
+            entry.startupPhase = .idle
             connectionsByProjectPath[projectPath] = connection
             setState(.running(connection), for: projectPath)
             userFacingError = nil
             return connection
+        } catch is CancellationError {
+            logger.info(
+                "Runtime startup cancelled project=\(projectPath, privacy: .public) phase=\(entry.startupPhase.rawValue, privacy: .public) requestedStop=\(entry.requestedStop, privacy: .public) processRunning=\(entry.process?.isRunning == true, privacy: .public) lastOutput=\(Self.startupLogOutput(entry.lastOutput), privacy: .public)"
+            )
+            stop(entry: entry, projectPath: projectPath)
+            throw CancellationError()
         } catch {
-            logger.error("Runtime failed to start: \(error.localizedDescription, privacy: .public)")
+            logger.error(
+                "Runtime failed to start project=\(projectPath, privacy: .public) phase=\(entry.startupPhase.rawValue, privacy: .public) requestedStop=\(entry.requestedStop, privacy: .public) processRunning=\(entry.process?.isRunning == true, privacy: .public) error=\(error.localizedDescription, privacy: .public) lastOutput=\(Self.startupLogOutput(entry.lastOutput), privacy: .public)"
+            )
             stop(entry: entry, projectPath: projectPath)
             userFacingError = error.localizedDescription
             setState(.failed(projectPath: projectPath, message: error.localizedDescription), for: projectPath)
@@ -208,6 +230,7 @@ final class OpenCodeRuntime {
         entry.outputPipe = nil
         entry.outputBuffer = ""
         entry.lastOutput = ""
+        entry.startupPhase = .idle
         connectionsByProjectPath.removeValue(forKey: projectPath)
         setState(.idle, for: projectPath)
     }
@@ -264,6 +287,7 @@ final class OpenCodeRuntime {
         entry.outputPipe?.fileHandleForReading.readabilityHandler = nil
         entry.outputPipe = nil
         entry.outputBuffer = ""
+        entry.startupPhase = .idle
 
         if entry.requestedStop {
             entry.requestedStop = false
@@ -338,6 +362,18 @@ final class OpenCodeRuntime {
         let trimmed = chunk.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "" }
         return String(trimmed.suffix(limit))
+    }
+
+    nonisolated static func startupLogOutput(_ output: String, limit: Int = 240) -> String {
+        let normalized = output
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " | ")
+
+        guard !normalized.isEmpty else { return "<none>" }
+        guard normalized.count > limit else { return normalized }
+        return String(normalized.suffix(limit))
     }
 
     private func extractServerURL(from text: String) -> URL? {

@@ -5,6 +5,7 @@
 //  Created by Chris W on 3/13/26.
 //
 
+import OSLog
 import SwiftUI
 
 struct ContentView: View {
@@ -36,20 +37,10 @@ struct ContentView: View {
             }
         }
         .task(id: selectionSyncTaskKey) {
-            guard isRuntimeBootstrappingEnabled else { return }
-            guard !store.isSettingsSelected else { return }
-            await store.syncSelection(using: runtime)
+            await runSelectionSyncTask(for: selectionSyncTaskKey)
         }
         .task(id: dashboardRefreshTaskKey) {
-            guard isRuntimeBootstrappingEnabled else { return }
-
-            if store.isSettingsSelected {
-                store.suspendDashboardRefresh()
-            } else if store.isDashboardSelected {
-                await store.startDashboard(using: runtime)
-            } else {
-                store.suspendDashboardRefresh()
-            }
+            await runDashboardRefreshTask(for: dashboardRefreshTaskKey)
         }
         .onChange(of: store.lastError) { _, newValue in
             showToast(newValue)
@@ -75,6 +66,55 @@ struct ContentView: View {
                     }
                 }
             }
+        }
+    }
+
+    private func runSelectionSyncTask(for taskKey: String) async {
+        let logger = Logger(subsystem: "tech.watzon.NeoCode", category: "ContentView")
+        let bootstrappingEnabled = isRuntimeBootstrappingEnabled
+        let skipsForSettings = store.isSettingsSelected
+
+        await withTaskCancellationHandler {
+            guard bootstrappingEnabled else { return }
+            guard !skipsForSettings else {
+                logger.debug("Skipping selection sync for settings key=\(taskKey, privacy: .public)")
+                return
+            }
+
+            logger.debug("Starting selection sync key=\(taskKey, privacy: .public)")
+            await store.syncSelection(using: runtime)
+            logger.debug("Finished selection sync key=\(taskKey, privacy: .public)")
+        } onCancel: {
+            logger.info(
+                "Selection sync task cancelled key=\(taskKey, privacy: .public) bootstrapping=\(bootstrappingEnabled, privacy: .public) settings=\(skipsForSettings, privacy: .public)"
+            )
+        }
+    }
+
+    private func runDashboardRefreshTask(for taskKey: String) async {
+        let logger = Logger(subsystem: "tech.watzon.NeoCode", category: "ContentView")
+        let bootstrappingEnabled = isRuntimeBootstrappingEnabled
+        let isSettingsSelected = store.isSettingsSelected
+        let isDashboardSelected = store.isDashboardSelected
+
+        await withTaskCancellationHandler {
+            guard bootstrappingEnabled else { return }
+
+            if isSettingsSelected {
+                logger.debug("Suspending dashboard refresh for settings key=\(taskKey, privacy: .public)")
+                store.suspendDashboardRefresh()
+            } else if isDashboardSelected {
+                logger.debug("Starting dashboard refresh task key=\(taskKey, privacy: .public)")
+                await store.startDashboard(using: runtime)
+                logger.debug("Finished dashboard refresh task key=\(taskKey, privacy: .public)")
+            } else {
+                logger.debug("Suspending dashboard refresh outside dashboard key=\(taskKey, privacy: .public)")
+                store.suspendDashboardRefresh()
+            }
+        } onCancel: {
+            logger.info(
+                "Dashboard task cancelled key=\(taskKey, privacy: .public) bootstrapping=\(bootstrappingEnabled, privacy: .public) settings=\(isSettingsSelected, privacy: .public) dashboard=\(isDashboardSelected, privacy: .public)"
+            )
         }
     }
 

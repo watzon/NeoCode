@@ -755,6 +755,18 @@ struct NeoCodeCoreTests {
         #expect(snippet == "world")
     }
 
+    @Test func runtimeFormatsStartupLogOutputAsSingleTrimmedLine() {
+        let formatted = OpenCodeRuntime.startupLogOutput("\n  booting  \n\n listening on 127.0.0.1  \n")
+
+        #expect(formatted == "booting | listening on 127.0.0.1")
+    }
+
+    @Test func runtimeFormatsEmptyStartupLogOutputWithPlaceholder() {
+        let formatted = OpenCodeRuntime.startupLogOutput("\n   \n")
+
+        #expect(formatted == "<none>")
+    }
+
     @Test func subprocessRunnerCancelsProcessTree() async throws {
         let tempDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
