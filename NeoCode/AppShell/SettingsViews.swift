@@ -1,4 +1,6 @@
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SettingsSidebarView: View {
     @Environment(AppStore.self) private var store
@@ -166,6 +168,7 @@ private struct GeneralSettingsView: View {
 
 private struct AppearanceSettingsView: View {
     @Environment(AppStore.self) private var store
+    @State private var importTarget: ThemeProfileKind?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
@@ -193,19 +196,29 @@ private struct AppearanceSettingsView: View {
                 AppearanceThemeEditorCard(
                     title: "Light theme",
                     subtitle: "Warm daylight palette for your brighter workspace.",
-                    profile: profileBinding(.light)
+                    profile: profileBinding(.light),
+                    selectedPreset: selectedPreset(for: .light),
+                    presets: NeoCodeThemePresetCatalog.presets,
+                    onImport: { importTarget = .light },
+                    onCopy: { copyTheme(kind: .light) },
+                    onSelectPreset: { applyPreset($0, kind: .light) }
                 )
 
                 AppearanceThemeEditorCard(
                     title: "Dark theme",
                     subtitle: "Low-glare palette for the main NeoCode shell.",
-                    profile: profileBinding(.dark)
+                    profile: profileBinding(.dark),
+                    selectedPreset: selectedPreset(for: .dark),
+                    presets: NeoCodeThemePresetCatalog.presets,
+                    onImport: { importTarget = .dark },
+                    onCopy: { copyTheme(kind: .dark) },
+                    onSelectPreset: { applyPreset($0, kind: .dark) }
                 )
             }
 
             SettingsCard(
                 title: "Interface",
-                detail: "These settings are persisted now and can be hooked into more detailed behavior next."
+                detail: "Choose the fonts and sizing NeoCode uses across the shell, composer, transcript, and code surfaces."
             ) {
                 VStack(spacing: 0) {
                     SettingsControlRow(
@@ -219,12 +232,22 @@ private struct AppearanceSettingsView: View {
                     )
 
                     SettingsDivider()
-
+                    
                     SettingsControlRow(
                         title: "UI font",
-                        detail: "The display name is saved now so a font picker can be attached later.",
+                        detail: "Used for labels, navigation, settings, and conversation chrome.",
                         accessory: {
-                            SettingsTag(text: store.appSettings.appearance.uiFontName)
+                            SettingsFontPicker(
+                                title: store.appSettings.appearance.uiFontName,
+                                selectedID: store.appSettings.appearance.uiFontName,
+                                options: NeoCodeFontCatalog.uiOptions,
+                                emptyMessage: "No fonts found.",
+                                placeholder: "Search UI fonts"
+                            ) { option in
+                                store.updateAppearance { appearance in
+                                    appearance.uiFontName = option.id
+                                }
+                            }
                         }
                     )
 
@@ -234,10 +257,10 @@ private struct AppearanceSettingsView: View {
                         title: "UI font size",
                         detail: "Changes the base size used across labels, headers, and controls.",
                         accessory: {
-                            Stepper(value: appearanceBinding(\.uiFontSize), in: NeoCodeAppearanceSettings.minimumUIFontSize...NeoCodeAppearanceSettings.maximumUIFontSize, step: 1) {
-                                SettingsStepperValue(value: store.appSettings.appearance.uiFontSize)
-                            }
-                            .labelsHidden()
+                            SettingsStepperControl(
+                                value: appearanceBinding(\.uiFontSize),
+                                range: NeoCodeAppearanceSettings.minimumUIFontSize...NeoCodeAppearanceSettings.maximumUIFontSize
+                            )
                         }
                     )
 
@@ -245,9 +268,19 @@ private struct AppearanceSettingsView: View {
 
                     SettingsControlRow(
                         title: "Code font",
-                        detail: "Stored for the next pass when code-specific font selection becomes configurable.",
+                        detail: "Used for transcript code, diffs, file references, and inline code blocks.",
                         accessory: {
-                            SettingsTag(text: store.appSettings.appearance.codeFontName)
+                            SettingsFontPicker(
+                                title: store.appSettings.appearance.codeFontName,
+                                selectedID: store.appSettings.appearance.codeFontName,
+                                options: NeoCodeFontCatalog.codeOptions,
+                                emptyMessage: "No monospaced fonts found.",
+                                placeholder: "Search code fonts"
+                            ) { option in
+                                store.updateAppearance { appearance in
+                                    appearance.codeFontName = option.id
+                                }
+                            }
                         }
                     )
 
@@ -257,16 +290,30 @@ private struct AppearanceSettingsView: View {
                         title: "Code font size",
                         detail: "Changes transcript, diff, and code-preview sizing throughout the app.",
                         accessory: {
-                            Stepper(value: appearanceBinding(\.codeFontSize), in: NeoCodeAppearanceSettings.minimumCodeFontSize...NeoCodeAppearanceSettings.maximumCodeFontSize, step: 1) {
-                                SettingsStepperValue(value: store.appSettings.appearance.codeFontSize)
-                            }
-                            .labelsHidden()
+                            SettingsStepperControl(
+                                value: appearanceBinding(\.codeFontSize),
+                                range: NeoCodeAppearanceSettings.minimumCodeFontSize...NeoCodeAppearanceSettings.maximumCodeFontSize
+                            )
                         }
                     )
                 }
             }
         }
         .tint(NeoCodeTheme.accent)
+        .fileImporter(
+            isPresented: Binding(
+                get: { importTarget != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        importTarget = nil
+                    }
+                }
+            ),
+            allowedContentTypes: [.json],
+            allowsMultipleSelection: false
+        ) { result in
+            handleImport(result)
+        }
     }
 
     private func appearanceBinding<Value>(_ keyPath: WritableKeyPath<NeoCodeAppearanceSettings, Value>) -> Binding<Value> {
@@ -302,11 +349,75 @@ private struct AppearanceSettingsView: View {
             }
         )
     }
-}
 
-private enum ThemeProfileKind {
-    case light
-    case dark
+    private func selectedPreset(for kind: ThemeProfileKind) -> NeoCodeThemePreset? {
+        guard let presetID = store.appSettings.appearance.selectedPresetID(for: kind) else { return nil }
+        return NeoCodeThemePresetCatalog.presets.first(where: { $0.id == presetID })
+    }
+
+    private func applyPreset(_ preset: NeoCodeThemePreset, kind: ThemeProfileKind) {
+        store.updateAppearance { appearance in
+            appearance.applyPreset(preset, kind: kind)
+        }
+    }
+
+    private func copyTheme(kind: ThemeProfileKind) {
+        let profile: NeoCodeThemeProfile
+        let name: String?
+
+        switch kind {
+        case .light:
+            profile = store.appSettings.appearance.lightTheme
+            name = selectedPreset(for: .light)?.title
+        case .dark:
+            profile = store.appSettings.appearance.darkTheme
+            name = selectedPreset(for: .dark)?.title
+        }
+
+        let payload = NeoCodeThemeProfileTransfer(profile: profile, name: name)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+
+        guard let data = try? encoder.encode(payload),
+              let text = String(data: data, encoding: .utf8)
+        else {
+            store.lastError = "Could not serialize the theme as JSON."
+            return
+        }
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        store.lastError = nil
+    }
+
+    private func handleImport(_ result: Result<[URL], Error>) {
+        guard let kind = importTarget else { return }
+        defer { importTarget = nil }
+
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else { return }
+
+            do {
+                let data = try Data(contentsOf: url)
+                let payload = try JSONDecoder().decode(NeoCodeThemeProfileTransfer.self, from: data)
+                store.updateAppearance { appearance in
+                    switch kind {
+                    case .light:
+                        appearance.lightTheme = payload.profile
+                    case .dark:
+                        appearance.darkTheme = payload.profile
+                    }
+                }
+                store.lastError = nil
+            } catch {
+                store.lastError = "Could not import theme JSON."
+            }
+        case .failure:
+            break
+        }
+    }
 }
 
 private struct AppearanceThemePreview: View {
@@ -376,9 +487,30 @@ private struct AppearanceThemeEditorCard: View {
     let title: String
     let subtitle: String
     @Binding var profile: NeoCodeThemeProfile
+    let selectedPreset: NeoCodeThemePreset?
+    let presets: [NeoCodeThemePreset]
+    let onImport: () -> Void
+    let onCopy: () -> Void
+    let onSelectPreset: (NeoCodeThemePreset) -> Void
 
     var body: some View {
-        SettingsCard(title: title, detail: subtitle) {
+        SettingsCard(
+            title: title,
+            detail: subtitle,
+            headerAccessory: {
+                AnyView(
+                    HStack(spacing: 10) {
+                        SettingsCardActionButton(title: "Import", action: onImport)
+                        SettingsCardActionButton(title: "Copy theme", action: onCopy)
+                        ThemePresetPicker(
+                            selectedPreset: selectedPreset,
+                            presets: presets,
+                            onSelectPreset: onSelectPreset
+                        )
+                    }
+                )
+            }
+        ) {
             VStack(spacing: 0) {
                 SettingsControlRow(
                     title: "Accent",
@@ -471,19 +603,40 @@ private struct SettingsSidebarButton: View {
 private struct SettingsCard<Content: View>: View {
     let title: String
     let detail: String
+    let headerAccessory: (() -> AnyView)?
     @ViewBuilder let content: () -> Content
+
+    init(
+        title: String,
+        detail: String,
+        headerAccessory: (() -> AnyView)? = nil,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.title = title
+        self.detail = detail
+        self.headerAccessory = headerAccessory
+        self.content = content
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .foregroundStyle(NeoCodeTheme.textPrimary)
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        .foregroundStyle(NeoCodeTheme.textPrimary)
 
-                Text(detail)
-                    .font(.neoBody)
-                    .foregroundStyle(NeoCodeTheme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    Text(detail)
+                        .font(.neoBody)
+                        .foregroundStyle(NeoCodeTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 12)
+
+                if let headerAccessory {
+                    headerAccessory()
+                }
             }
 
             content()
@@ -520,6 +673,7 @@ private struct SettingsControlRow<Accessory: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             accessory()
+                .frame(minWidth: 190, alignment: .trailing)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -531,6 +685,54 @@ private struct SettingsDivider: View {
             .fill(NeoCodeTheme.line)
             .frame(height: 1)
             .padding(.vertical, 16)
+    }
+}
+
+private struct SettingsFontPicker: View {
+    let title: String
+    let selectedID: String
+    let options: [NeoCodeFontOption]
+    let emptyMessage: String
+    let placeholder: String
+    let onSelect: (NeoCodeFontOption) -> Void
+
+    var body: some View {
+        NeoCodeSelect(
+            title: title,
+            selectedID: selectedID,
+            items: options,
+            emptyMessage: emptyMessage,
+            placeholder: placeholder,
+            isSearchable: true,
+            direction: .down,
+            menuWidth: 280,
+            showsSelectionIndicator: false
+        ) { option in
+            Text(option.title)
+                .font(.neoBody)
+                .foregroundStyle(NeoCodeTheme.textPrimary)
+                .lineLimit(1)
+        } searchableText: { option in
+            [option.title, option.id]
+        } onSelect: { option in
+            onSelect(option)
+        }
+        .frame(width: 190, alignment: .trailing)
+    }
+}
+
+private struct SettingsStepperControl: View {
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+
+    var body: some View {
+        HStack(spacing: 10) {
+            SettingsStepperValue(value: value)
+
+            Stepper("", value: $value, in: range, step: 1)
+                .labelsHidden()
+                .fixedSize()
+        }
     }
 }
 
@@ -615,5 +817,83 @@ private struct SettingsStepperValue: View {
                 .fill(NeoCodeTheme.panelSoft)
                 .overlay(Capsule().stroke(NeoCodeTheme.line, lineWidth: 1))
         )
+    }
+}
+
+private struct SettingsCardActionButton: View {
+    let title: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(title, action: action)
+            .buttonStyle(.plain)
+            .font(.neoAction)
+            .foregroundStyle(NeoCodeTheme.textSecondary)
+    }
+}
+
+private struct ThemePresetPicker: View {
+    let selectedPreset: NeoCodeThemePreset?
+    let presets: [NeoCodeThemePreset]
+    let onSelectPreset: (NeoCodeThemePreset) -> Void
+
+    @State private var isPresented = false
+
+    private var triggerTitle: String {
+        selectedPreset?.title ?? "Custom"
+    }
+
+    var body: some View {
+        Button(action: toggleMenu) {
+            NeoCodeDropdownTriggerLabel(title: triggerTitle, isPresented: isPresented) {
+                ThemePresetBadgeView(preset: selectedPreset)
+            }
+        }
+        .buttonStyle(.plain)
+        .background {
+            AnchoredFloatingPanelPresenter(isPresented: isPresented, direction: .down, onDismiss: closeMenu) {
+                DropdownMenuSurface(width: 220) {
+                    ForEach(presets) { preset in
+                        DropdownMenuRow(isSelected: preset.id == selectedPreset?.id, action: {
+                            onSelectPreset(preset)
+                            closeMenu()
+                        }) {
+                            HStack(spacing: 10) {
+                                ThemePresetBadgeView(preset: preset)
+                                Text(preset.title)
+                                    .font(.neoAction)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func toggleMenu() {
+        isPresented.toggle()
+    }
+
+    private func closeMenu() {
+        isPresented = false
+    }
+}
+
+private struct ThemePresetBadgeView: View {
+    let preset: NeoCodeThemePreset?
+
+    var body: some View {
+        let background = Color(neoHex: preset?.badgeBackgroundHex ?? "#ECECEC") ?? NeoCodeTheme.panelSoft
+        let foreground = Color(neoHex: preset?.badgeForegroundHex ?? "#4A4A4A") ?? NeoCodeTheme.textPrimary
+
+        Text(preset?.badgeText ?? "Aa")
+            .font(.system(size: 11, weight: .semibold, design: .rounded))
+            .foregroundStyle(foreground)
+            .frame(width: 20, height: 20)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(background)
+            )
     }
 }

@@ -1325,6 +1325,121 @@ struct NeoCodeMainActorTests {
     }
 
     @MainActor
+    @Test func openCodeClientDecodesRevertSessionResponse() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { MockURLProtocol.requestHandler = nil }
+        var capturedRequest: URLRequest?
+
+        MockURLProtocol.requestHandler = { request in
+            capturedRequest = request
+
+            guard let url = request.url,
+                  let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)
+            else {
+                throw URLError(.badServerResponse)
+            }
+
+            let body = Data(
+                """
+                {
+                  "id": "ses_1",
+                  "title": "Existing",
+                  "parentID": null,
+                  "time": {
+                    "created": "2026-03-13T10:00:00Z",
+                    "updated": "2026-03-13T10:05:00Z",
+                    "completed": null
+                  },
+                  "revert": {
+                    "messageID": "msg_user_1"
+                  }
+                }
+                """.utf8
+            )
+            return (response, body)
+        }
+
+        let baseURL = try #require(URL(string: "http://127.0.0.1:4000"))
+        let client = OpenCodeClient(
+            connection: OpenCodeRuntime.Connection(
+                projectPath: "/tmp/NeoCode",
+                baseURL: baseURL,
+                username: "user",
+                password: "pass",
+                version: "1.0.0"
+            ),
+            session: session
+        )
+
+        let reverted = try await client.revertSession(sessionID: "ses_1", messageID: "msg_user_1", partID: nil)
+
+        let request = try #require(capturedRequest)
+        #expect(request.httpMethod == "POST")
+        #expect(request.url?.path == "/session/ses_1/revert")
+        let bodyData = try requestBodyData(from: request)
+        let body = try #require(bodyData)
+        let payload = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        #expect(payload["messageID"] as? String == "msg_user_1")
+        #expect(reverted.id == "ses_1")
+    }
+
+    @MainActor
+    @Test func openCodeClientDecodesUnrevertSessionResponse() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { MockURLProtocol.requestHandler = nil }
+        var capturedRequest: URLRequest?
+
+        MockURLProtocol.requestHandler = { request in
+            capturedRequest = request
+
+            guard let url = request.url,
+                  let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)
+            else {
+                throw URLError(.badServerResponse)
+            }
+
+            let body = Data(
+                """
+                {
+                  "id": "ses_1",
+                  "title": "Existing",
+                  "parentID": null,
+                  "time": {
+                    "created": "2026-03-13T10:00:00Z",
+                    "updated": "2026-03-13T10:05:00Z",
+                    "completed": null
+                  }
+                }
+                """.utf8
+            )
+            return (response, body)
+        }
+
+        let baseURL = try #require(URL(string: "http://127.0.0.1:4000"))
+        let client = OpenCodeClient(
+            connection: OpenCodeRuntime.Connection(
+                projectPath: "/tmp/NeoCode",
+                baseURL: baseURL,
+                username: "user",
+                password: "pass",
+                version: "1.0.0"
+            ),
+            session: session
+        )
+
+        let restored = try await client.unrevertSession(sessionID: "ses_1")
+
+        let request = try #require(capturedRequest)
+        #expect(request.httpMethod == "POST")
+        #expect(request.url?.path == "/session/ses_1/unrevert")
+        #expect(restored.id == "ses_1")
+    }
+
+    @MainActor
     @Test func openCodeClientPostsSlashCommandRequests() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MockURLProtocol.self]
@@ -2007,6 +2122,38 @@ struct NeoCodeMainActorTests {
         #expect(NeoCodeThemeMode.system.preferredColorScheme == nil)
         #expect(NeoCodeThemeMode.light.preferredColorScheme == .light)
         #expect(NeoCodeThemeMode.dark.preferredColorScheme == .dark)
+        #expect(NeoCodeThemeMode.system.appKitAppearanceName == nil)
+        #expect(NeoCodeThemeMode.light.appKitAppearanceName == .aqua)
+        #expect(NeoCodeThemeMode.dark.appKitAppearanceName == .darkAqua)
+    }
+
+    @MainActor
+    @Test func appStoreReconcilesBackToLastSelectedModelWhenModelListReloads() {
+        let store = AppStore(projects: [])
+        let preferredModel = ComposerModelOption(
+            id: "anthropic/claude-sonnet",
+            providerID: "anthropic",
+            modelID: "claude-sonnet",
+            title: "Claude Sonnet",
+            contextWindow: nil,
+            variants: []
+        )
+        let fallbackModel = ComposerModelOption(
+            id: "openai/gpt-5.4",
+            providerID: "openai",
+            modelID: "gpt-5.4",
+            title: "GPT-5.4",
+            contextWindow: nil,
+            variants: ["high", "medium", "low"]
+        )
+
+        store.availableModels = [preferredModel, fallbackModel]
+        store.setModelForCurrentAgent(preferredModel.id)
+        store.selectedModelID = "missing/model"
+
+        store.reconcileSelectedModel(using: store.availableModels)
+
+        #expect(store.selectedModelID == preferredModel.id)
     }
 
     @MainActor
@@ -2042,6 +2189,37 @@ struct NeoCodeMainActorTests {
         persistence.saveSettings(settings)
 
         #expect(persistence.loadSettings() == settings)
+    }
+
+    @MainActor
+    @Test func appearanceSettingsInferPresetSelectionFromMatchingThemes() throws {
+        let codex = try #require(NeoCodeThemePresetCatalog.presets.first(where: { $0.id == "codex" }))
+        let appearance = NeoCodeAppearanceSettings(
+            themeMode: .system,
+            lightTheme: codex.lightTheme,
+            darkTheme: codex.darkTheme
+        )
+
+        #expect(appearance.selectedLightPresetID == "codex")
+        #expect(appearance.selectedDarkPresetID == "codex")
+    }
+
+    @MainActor
+    @Test func themeProfileTransferRoundTripsThemeJSON() throws {
+        let transfer = NeoCodeThemeProfileTransfer(
+            name: "Codex",
+            accentHex: "#0285FF",
+            backgroundHex: "#FFFFFF",
+            foregroundHex: "#0D0D0D",
+            contrast: 45
+        )
+
+        let data = try JSONEncoder().encode(transfer)
+        let decoded = try JSONDecoder().decode(NeoCodeThemeProfileTransfer.self, from: data)
+
+        #expect(decoded == transfer)
+        #expect(decoded.profile.accentHex == "#0285FF")
+        #expect(decoded.profile.isSidebarTranslucent == false)
     }
 
     @MainActor
@@ -2410,15 +2588,15 @@ private final class MockOpenCodeService: OpenCodeServicing {
     func updateSession(sessionID: String, title: String) async throws -> OpenCodeSession { fatalError("Unused in test") }
     func deleteSession(sessionID: String) async throws -> Bool { true }
 
-    func revertSession(sessionID: String, messageID: String, partID: String?) async throws -> Bool {
+    func revertSession(sessionID: String, messageID: String, partID: String?) async throws -> OpenCodeSession {
         revertedSessionID = sessionID
         revertedMessageID = messageID
-        return true
+        return OpenCodeSession(id: sessionID, title: nil, parentID: nil, time: nil)
     }
 
-    func unrevertSession(sessionID: String) async throws -> Bool {
+    func unrevertSession(sessionID: String) async throws -> OpenCodeSession {
         unrevertedSessionIDs.append(sessionID)
-        return true
+        return OpenCodeSession(id: sessionID, title: nil, parentID: nil, time: nil)
     }
 
     func abortSession(sessionID: String) async throws {}

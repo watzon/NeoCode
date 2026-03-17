@@ -747,8 +747,7 @@ struct GrowingTextView: NSViewRepresentable {
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
-        textView.font = NSFont.systemFont(ofSize: 13)
-        textView.textColor = NSColor(NeoCodeTheme.textPrimary)
+        textView.applyTheme()
         textView.delegate = context.coordinator
         textView.textContainerInset = NSSize(width: 0, height: 4)
         textView.textContainer?.lineFragmentPadding = 0
@@ -796,6 +795,7 @@ struct GrowingTextView: NSViewRepresentable {
             }
         }
         textView.placeholder = placeholder
+        textView.applyTheme()
         textView.onImportAttachments = onImportAttachments
         textView.onConfirmAuxiliarySelection = onConfirmAuxiliarySelection
         textView.onMoveAuxiliarySelection = onMoveAuxiliarySelection
@@ -939,8 +939,6 @@ private final class ComposerNSTextView: NSTextView {
         guard placeholderLabel == nil else { return }
 
         let label = NSTextField(labelWithString: placeholder ?? "")
-        label.font = NSFont.systemFont(ofSize: 13)
-        label.textColor = NSColor(NeoCodeTheme.textMuted)
         label.isEditable = false
         label.isSelectable = false
         label.backgroundColor = .clear
@@ -956,6 +954,14 @@ private final class ComposerNSTextView: NSTextView {
         ])
 
         updatePlaceholderVisibility()
+    }
+
+    func applyTheme() {
+        font = NeoCodeTheme.uiAppKitFont(size: NeoCodeTheme.uiBaseFontSize)
+        textColor = NSColor(NeoCodeTheme.textPrimary)
+        insertionPointColor = NSColor(NeoCodeTheme.accent)
+        placeholderLabel?.font = NeoCodeTheme.uiAppKitFont(size: NeoCodeTheme.uiBaseFontSize)
+        placeholderLabel?.textColor = NSColor(NeoCodeTheme.textMuted)
     }
 
     func updatePlaceholderVisibility() {

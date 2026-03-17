@@ -10,8 +10,8 @@ protocol OpenCodeServicing {
     func createSession(title: String?) async throws -> OpenCodeSession
     func updateSession(sessionID: String, title: String) async throws -> OpenCodeSession
     func deleteSession(sessionID: String) async throws -> Bool
-    func revertSession(sessionID: String, messageID: String, partID: String?) async throws -> Bool
-    func unrevertSession(sessionID: String) async throws -> Bool
+    func revertSession(sessionID: String, messageID: String, partID: String?) async throws -> OpenCodeSession
+    func unrevertSession(sessionID: String) async throws -> OpenCodeSession
     func abortSession(sessionID: String) async throws
     func replyToPermission(requestID: String, reply: OpenCodePermissionReply, message: String?) async throws
     func replyToQuestion(requestID: String, answers: [OpenCodeQuestionAnswer]) async throws
@@ -87,7 +87,7 @@ final class OpenCodeClient: OpenCodeServicing {
         return try await request(path: "/session/\(sessionID)", method: "DELETE")
     }
 
-    func revertSession(sessionID: String, messageID: String, partID: String? = nil) async throws -> Bool {
+    func revertSession(sessionID: String, messageID: String, partID: String? = nil) async throws -> OpenCodeSession {
         logger.info("POST /session/\(sessionID, privacy: .public)/revert messageID=\(messageID, privacy: .public)")
         return try await request(
             path: "/session/\(sessionID)/revert",
@@ -96,7 +96,7 @@ final class OpenCodeClient: OpenCodeServicing {
         )
     }
 
-    func unrevertSession(sessionID: String) async throws -> Bool {
+    func unrevertSession(sessionID: String) async throws -> OpenCodeSession {
         logger.info("POST /session/\(sessionID, privacy: .public)/unrevert")
         return try await request(path: "/session/\(sessionID)/unrevert", method: "POST", body: Optional<EmptyRequest>.none)
     }

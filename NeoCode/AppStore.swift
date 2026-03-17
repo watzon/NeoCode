@@ -477,6 +477,8 @@ final class AppStore {
         selectedProjectID = destinationProjectID
         if let projectPath = projectPath(for: destinationProjectID) {
             availableModels = cachedModelsByProjectPath[projectPath] ?? availableModels
+            reconcileSelectedModel(using: availableModels)
+            refreshThinkingLevels()
             availableCommands = cachedCommandsByProjectPath[projectPath] ?? []
         }
         if let selectedSessionID,
@@ -575,6 +577,7 @@ final class AppStore {
     func updateAppearance(_ update: (inout NeoCodeAppearanceSettings) -> Void) {
         var appearance = appSettings.appearance
         update(&appearance)
+        appearance.syncPresetSelection()
         appSettings.appearance = appearance
     }
 
@@ -2068,9 +2071,7 @@ final class AppStore {
 
             cachedModelsByProjectPath[projectPath] = models
             availableModels = models
-            if selectedModelID == nil || !models.contains(where: { $0.id == selectedModelID }) {
-                selectedModelID = models.first?.id
-            }
+            reconcileSelectedModel(using: models)
             if preferredFallbackModelID == nil,
                let selectedModelID,
                models.contains(where: { $0.id == selectedModelID }) {
@@ -2084,9 +2085,7 @@ final class AppStore {
         case .failure(let message):
             logger.error("Failed to load composer models: \(message, privacy: .public)")
             availableModels = cachedModelsByProjectPath[projectPath] ?? []
-            if selectedModelID == nil || !availableModels.contains(where: { $0.id == selectedModelID }) {
-                selectedModelID = availableModels.first?.id
-            }
+            reconcileSelectedModel(using: availableModels)
         }
 
         switch agentsResult {
@@ -2391,6 +2390,33 @@ final class AppStore {
         if !self.selectedAgent.isEmpty {
             self.ephemeralAgentModels[self.selectedAgent] = modelID
             logger.info("Stored ephemeral model for agent \(self.selectedAgent): \(modelID)")
+        }
+    }
+
+    func reconcileSelectedModel(using models: [ComposerModelOption]) {
+        if let selectedModelID,
+           models.contains(where: { $0.id == selectedModelID }) {
+            return
+        }
+
+        if !selectedAgent.isEmpty,
+           let ephemeralModelID = ephemeralAgentModels[selectedAgent],
+           models.contains(where: { $0.id == ephemeralModelID }) {
+            selectedModelID = ephemeralModelID
+            selectedModelVariant = nil
+            return
+        }
+
+        if let preferredFallbackModelID,
+           models.contains(where: { $0.id == preferredFallbackModelID }) {
+            selectedModelID = preferredFallbackModelID
+            selectedModelVariant = nil
+            return
+        }
+
+        selectedModelID = models.first?.id
+        if selectedModelID == nil {
+            selectedModelVariant = nil
         }
     }
 

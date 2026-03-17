@@ -8,6 +8,7 @@ enum NeoCodeTheme {
 
     static func configure(with appearance: NeoCodeAppearanceSettings) {
         appearanceSettings = appearance
+        NSApp.appearance = appearance.themeMode.appKitAppearanceName.flatMap(NSAppearance.init(named:))
     }
 
     static var canvas: Color { dynamicColor(\.canvas) }
@@ -46,6 +47,88 @@ enum NeoCodeTheme {
         CGFloat(appearanceSettings.codeFontSize)
     }
 
+    static var currentUIFontName: String {
+        appearanceSettings.uiFontName
+    }
+
+    static var currentCodeFontName: String {
+        appearanceSettings.codeFontName
+    }
+
+    static func uiAppKitFont(size: CGFloat, weight: NSFont.Weight = .regular) -> NSFont {
+        if let customFont = resolvedFont(
+            storedName: appearanceSettings.uiFontName,
+            size: size,
+            weight: weight,
+            fallback: NSFont.systemFont(ofSize: size, weight: weight),
+            preferFixedPitch: false
+        ) {
+            return customFont
+        }
+
+        return NSFont.systemFont(ofSize: size, weight: weight)
+    }
+
+    static func codeAppKitFont(size: CGFloat, weight: NSFont.Weight = .regular) -> NSFont {
+        if let customFont = resolvedFont(
+            storedName: appearanceSettings.codeFontName,
+            size: size,
+            weight: weight,
+            fallback: NSFont.monospacedSystemFont(ofSize: size, weight: weight),
+            preferFixedPitch: true
+        ) {
+            return customFont
+        }
+
+        return NSFont.monospacedSystemFont(ofSize: size, weight: weight)
+    }
+
+    private static func resolvedFont(
+        storedName: String,
+        size: CGFloat,
+        weight: NSFont.Weight,
+        fallback: NSFont,
+        preferFixedPitch: Bool
+    ) -> NSFont? {
+        guard let postScriptName = NeoCodeFontCatalog.postScriptName(for: storedName, preferFixedPitch: preferFixedPitch),
+              let baseFont = NSFont(name: postScriptName, size: size)
+        else {
+            return nil
+        }
+
+        return adjustedFont(baseFont, size: size, weight: weight, fallback: fallback, preferFixedPitch: preferFixedPitch)
+    }
+
+    private static func adjustedFont(
+        _ font: NSFont,
+        size: CGFloat,
+        weight: NSFont.Weight,
+        fallback: NSFont,
+        preferFixedPitch: Bool
+    ) -> NSFont {
+        var resolvedFont = font.withSize(size)
+        let fontManager = NSFontManager.shared
+
+        if weight.rawValue >= NSFont.Weight.semibold.rawValue {
+            let boldCandidate = fontManager.convert(resolvedFont, toHaveTrait: .boldFontMask)
+            if boldCandidate.fontName != resolvedFont.fontName || boldCandidate.familyName == resolvedFont.familyName {
+                resolvedFont = boldCandidate.withSize(size)
+            }
+        }
+
+        if preferFixedPitch,
+           !resolvedFont.isFixedPitch,
+           fallback.isFixedPitch {
+            return fallback
+        }
+
+        return resolvedFont
+    }
+
+    fileprivate static func customFont(_ font: NSFont) -> Font {
+        .custom(font.fontName, size: font.pointSize)
+    }
+
     private static func dynamicColor(_ keyPath: KeyPath<ResolvedPalette, NSColor>) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in
             resolvedPalette(for: isDark(appearance))[keyPath: keyPath]
@@ -66,27 +149,51 @@ enum NeoCodeTheme {
 
 extension Font {
     static var neoTitle: Font {
-        .system(size: NeoCodeTheme.uiBaseFontSize + 1, weight: .semibold, design: .rounded)
+        let size = NeoCodeTheme.uiBaseFontSize + 1
+        if NeoCodeTheme.currentUIFontName == NeoCodeFontCatalog.defaultUIFontName {
+            return .system(size: size, weight: .semibold, design: .rounded)
+        }
+        return NeoCodeTheme.customFont(NeoCodeTheme.uiAppKitFont(size: size, weight: .semibold))
     }
 
     static var neoBody: Font {
-        .system(size: NeoCodeTheme.uiBaseFontSize, weight: .regular, design: .default)
+        let size = NeoCodeTheme.uiBaseFontSize
+        if NeoCodeTheme.currentUIFontName == NeoCodeFontCatalog.defaultUIFontName {
+            return .system(size: size, weight: .regular, design: .default)
+        }
+        return NeoCodeTheme.customFont(NeoCodeTheme.uiAppKitFont(size: size, weight: .regular))
     }
 
     static var neoMeta: Font {
-        .system(size: max(10, NeoCodeTheme.uiBaseFontSize - 2), weight: .medium, design: .default)
+        let size = max(10, NeoCodeTheme.uiBaseFontSize - 2)
+        if NeoCodeTheme.currentUIFontName == NeoCodeFontCatalog.defaultUIFontName {
+            return .system(size: size, weight: .medium, design: .default)
+        }
+        return NeoCodeTheme.customFont(NeoCodeTheme.uiAppKitFont(size: size, weight: .medium))
     }
 
     static var neoAction: Font {
-        .system(size: NeoCodeTheme.uiBaseFontSize, weight: .medium, design: .default)
+        let size = NeoCodeTheme.uiBaseFontSize
+        if NeoCodeTheme.currentUIFontName == NeoCodeFontCatalog.defaultUIFontName {
+            return .system(size: size, weight: .medium, design: .default)
+        }
+        return NeoCodeTheme.customFont(NeoCodeTheme.uiAppKitFont(size: size, weight: .medium))
     }
 
     static var neoMono: Font {
-        .system(size: NeoCodeTheme.codeBaseFontSize, weight: .regular, design: .monospaced)
+        let size = NeoCodeTheme.codeBaseFontSize
+        if NeoCodeTheme.currentCodeFontName == NeoCodeFontCatalog.defaultCodeFontName {
+            return .system(size: size, weight: .regular, design: .monospaced)
+        }
+        return NeoCodeTheme.customFont(NeoCodeTheme.codeAppKitFont(size: size, weight: .regular))
     }
 
     static var neoMonoSmall: Font {
-        .system(size: max(10, NeoCodeTheme.codeBaseFontSize - 1), weight: .regular, design: .monospaced)
+        let size = max(10, NeoCodeTheme.codeBaseFontSize - 1)
+        if NeoCodeTheme.currentCodeFontName == NeoCodeFontCatalog.defaultCodeFontName {
+            return .system(size: size, weight: .regular, design: .monospaced)
+        }
+        return NeoCodeTheme.customFont(NeoCodeTheme.codeAppKitFont(size: size, weight: .regular))
     }
 }
 
