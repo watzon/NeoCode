@@ -28,8 +28,17 @@ struct NeoCodeApp: App {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    enum TerminationIntent {
+        case userQuit
+        case updateRelaunch
+    }
+
     var onDidBecomeActive: (() -> Void)?
     var onWillTerminate: (() -> Void)?
+    var terminationWarningProvider: (() -> AppTerminationWarningContext?)?
+    var onUpdateTerminationCancelled: (() -> Void)?
+
+    private var terminationIntent: TerminationIntent = .userQuit
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard AppTestMode.isUnitTestHost else { return }
@@ -52,8 +61,69 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         onDidBecomeActive?()
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let warning = terminationWarningProvider?() else {
+            return .terminateNow
+        }
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = terminationIntent == .updateRelaunch
+            ? "Install update and restart NeoCode?"
+            : "Quit NeoCode?"
+        alert.informativeText = terminationAlertMessage(for: warning, intent: terminationIntent)
+        alert.addButton(withTitle: terminationIntent == .updateRelaunch ? "Install and Restart" : "Quit")
+        alert.addButton(withTitle: "Cancel")
+
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            return .terminateNow
+        }
+
+        if terminationIntent == .updateRelaunch {
+            terminationIntent = .userQuit
+            onUpdateTerminationCancelled?()
+        }
+        return .terminateCancel
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
+        if terminationIntent == .updateRelaunch {
+            relaunchApplication()
+        }
         onWillTerminate?()
+    }
+
+    func requestUpdateRelaunch() {
+        terminationIntent = .updateRelaunch
+        NSApp.terminate(nil)
+    }
+
+    private func terminationAlertMessage(for warning: AppTerminationWarningContext, intent: TerminationIntent) -> String {
+        let intro: String
+        switch intent {
+        case .userQuit:
+            intro = "NeoCode still has active sessions. Quitting now may interrupt responses or leave pending questions unanswered."
+        case .updateRelaunch:
+            intro = "NeoCode needs to close to finish installing the update, but active sessions are still running. Restarting now may interrupt responses or leave pending questions unanswered."
+        }
+
+        let preview = warning.sessions.prefix(5).map { session in
+            "- \(session.sessionTitle) - \(session.projectName) (\(session.reason))"
+        }.joined(separator: "\n")
+
+        let moreCount = warning.count - min(warning.count, 5)
+        let suffix = moreCount > 0 ? "\n...and \(moreCount) more." : ""
+
+        return "\(intro)\n\nActive sessions:\n\(preview)\(suffix)"
+    }
+
+    private func relaunchApplication() {
+        let appPath = Bundle.main.bundlePath
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", "sleep 1; open -n \"\(appPath)\""]
+        try? process.run()
     }
 }
 
@@ -99,6 +169,12 @@ private struct AppSceneView: View {
                 NeoCodeTheme.configure(with: store.appSettings.appearance)
                 appDelegate.onDidBecomeActive = {
                     store.handleApplicationDidBecomeActive()
+                }
+                appDelegate.terminationWarningProvider = {
+                    store.terminationWarningContext()
+                }
+                appDelegate.onUpdateTerminationCancelled = {
+                    updateService.handleTerminationCancelledDuringInstall()
                 }
                 appDelegate.onWillTerminate = {
                     store.flushPendingProjectPersistence()

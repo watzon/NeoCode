@@ -8,6 +8,21 @@ nonisolated struct AppStorePerformanceOptions: Sendable {
     var deltaFlushDebounce: Duration = .milliseconds(33)
 }
 
+struct AppTerminationWarningContext: Equatable {
+    struct Session: Identifiable, Equatable {
+        let id: String
+        let projectName: String
+        let sessionTitle: String
+        let reason: String
+    }
+
+    let sessions: [Session]
+
+    var count: Int {
+        sessions.count
+    }
+}
+
 @MainActor
 @Observable
 final class AppStore {
@@ -449,6 +464,24 @@ final class AppStore {
 
     func pendingQuestion(for sessionID: String) -> OpenCodeQuestionRequest? {
         pendingQuestionsBySession[sessionID]?.first
+    }
+
+    func terminationWarningContext() -> AppTerminationWarningContext? {
+        let sessions = projects.flatMap { project in
+            project.sessions.compactMap { session -> AppTerminationWarningContext.Session? in
+                guard let reason = terminationBlockReason(for: session) else { return nil }
+
+                return AppTerminationWarningContext.Session(
+                    id: session.id,
+                    projectName: project.name,
+                    sessionTitle: session.title,
+                    reason: reason
+                )
+            }
+        }
+
+        guard !sessions.isEmpty else { return nil }
+        return AppTerminationWarningContext(sessions: sessions)
     }
 
     func isYoloModeEnabled(for sessionID: String) -> Bool {
@@ -3383,8 +3416,24 @@ final class AppStore {
         }
 
         return project.sessions.contains { session in
-            session.status == .running || pendingPermission(for: session.id) != nil || pendingQuestion(for: session.id) != nil
+            terminationBlockReason(for: session) != nil
         }
+    }
+
+    private func terminationBlockReason(for session: SessionSummary) -> String? {
+        if session.status == .running || isSessionLocallyActive(session.id) {
+            return "responding"
+        }
+
+        if pendingPermission(for: session.id) != nil {
+            return "awaiting permission"
+        }
+
+        if pendingQuestion(for: session.id) != nil {
+            return "awaiting input"
+        }
+
+        return nil
     }
 
     private func projectSessionIDs(for projectID: ProjectSummary.ID) -> [String] {

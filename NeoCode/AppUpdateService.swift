@@ -119,7 +119,7 @@ final class AppUpdateService: NSObject, SPUUpdaterDelegate {
     }
 
     var canCheckForUpdates: Bool {
-        updater?.canCheckForUpdates ?? false
+        return updater?.canCheckForUpdates ?? false
     }
 
     var canPerformPrimaryAction: Bool {
@@ -329,6 +329,12 @@ final class AppUpdateService: NSObject, SPUUpdaterDelegate {
         acknowledgement()
     }
 
+    func handleTerminationCancelledDuringInstall() {
+        if case .installing = phase, let release = activeRelease {
+            phase = .readyToInstall(release)
+        }
+    }
+
     func handleDismissedUpdateFlow() {
         clearTransientState()
 
@@ -421,6 +427,7 @@ final class AppUpdateService: NSObject, SPUUpdaterDelegate {
         let environment = ProcessInfo.processInfo.environment
         return environment["XCTestConfigurationFilePath"] != nil || environment["NEOCODE_UI_TEST_MODE"] == "1"
     }
+
 }
 
 private extension Double {

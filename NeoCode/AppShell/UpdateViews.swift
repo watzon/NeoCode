@@ -124,45 +124,77 @@ struct UpdatesSettingsView: View {
 struct WindowTitlebarUpdateButton: View {
     @Environment(AppUpdateService.self) private var updateService
     @State private var isHovering = false
+    @State private var isPulsing = false
 
-    private let blue = Color(red: 0.19, green: 0.53, blue: 0.97)
+    private let blue = Color(red: 0.23, green: 0.50, blue: 0.95)
+    private let blueHighlight = Color(red: 0.36, green: 0.61, blue: 0.98)
+
+    private static let compactSize: CGFloat = 14
+    private static let expandedHeight: CGFloat = 16
+    private static let containerWidth: CGFloat = 250
 
     var body: some View {
         Group {
             if let model {
-                Button(action: updateService.performPrimaryAction) {
-                    HStack(spacing: expanded(for: model) ? 6 : 0) {
-                        indicator(for: model)
+                let isExpanded = expanded(for: model)
 
-                        if expanded(for: model) {
+                Button(action: updateService.performPrimaryAction) {
+                    HStack(spacing: isExpanded ? 7 : 0) {
+                        if showsLeadingIndicator(for: model, isExpanded: isExpanded) {
+                            indicator(for: model)
+                        }
+
+                        if isExpanded {
                             Text(model.label)
-                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
                                 .foregroundStyle(.white)
                                 .lineLimit(1)
                                 .fixedSize(horizontal: true, vertical: false)
                         }
                     }
-                    .padding(.leading, expanded(for: model) ? 7 : 0)
-                    .padding(.trailing, expanded(for: model) ? 10 : 0)
-                    .frame(height: 18)
-                    .frame(minWidth: expanded(for: model) ? nil : 18)
+                    .padding(.leading, isExpanded ? 8 : 0)
+                    .padding(.trailing, isExpanded ? 12 : 0)
+                    .frame(
+                        width: isExpanded ? nil : Self.compactSize,
+                        height: isExpanded ? Self.expandedHeight : Self.compactSize,
+                        alignment: .center
+                    )
                     .background(
                         Capsule(style: .continuous)
-                            .fill(blue)
+                            .fill(
+                                LinearGradient(
+                                    colors: [blueHighlight, blue],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
                     )
                     .overlay(
                         Capsule(style: .continuous)
-                            .stroke(Color.white.opacity(0.18), lineWidth: 0.75)
+                            .stroke(Color.white.opacity(0.22), lineWidth: 0.75)
                     )
-                    .shadow(color: blue.opacity(0.35), radius: expanded(for: model) ? 10 : 6, x: 0, y: 1)
+                    .shadow(color: blue.opacity(isExpanded ? 0.28 : 0.4), radius: isExpanded ? 10 : 7, x: 0, y: 1)
+                    .scaleEffect(availablePulseScale(for: model, isExpanded: isExpanded))
+                    .animation(.snappy(duration: 0.18, extraBounce: 0), value: isExpanded)
+                    .animation(.easeInOut(duration: 1.05).repeatForever(autoreverses: true), value: isPulsing)
                 }
                 .buttonStyle(.plain)
                 .disabled(!model.isInteractive)
                 .help(model.label)
+                .frame(width: Self.containerWidth, height: 20, alignment: .leading)
                 .onHover { isHovering in
                     withAnimation(.snappy(duration: 0.18, extraBounce: 0)) {
                         self.isHovering = isHovering
                     }
+                }
+                .onAppear {
+                    updatePulseState(for: model)
+                }
+                .onChange(of: model.state) { _, _ in
+                    updatePulseState(for: model)
+                }
+                .onChange(of: isHovering) { _, _ in
+                    updatePulseState(for: model)
                 }
             } else {
                 Color.clear
@@ -175,7 +207,7 @@ struct WindowTitlebarUpdateButton: View {
         switch updateService.phase {
         case .available(let release):
             return .init(
-                label: "Update available \(release.displayVersion)",
+                label: "Update available: \(release.displayVersion)",
                 state: .available,
                 progress: nil,
                 isInteractive: updateService.canPerformPrimaryAction,
@@ -222,14 +254,31 @@ struct WindowTitlebarUpdateButton: View {
         !model.collapsesWhenIdle || isHovering
     }
 
+    private func availablePulseScale(for model: TitlebarUpdateModel, isExpanded: Bool) -> CGFloat {
+        guard model.state == .available, !isExpanded else { return 1 }
+        return isPulsing ? 1.06 : 0.97
+    }
+
+    private func showsLeadingIndicator(for model: TitlebarUpdateModel, isExpanded: Bool) -> Bool {
+        switch model.state {
+        case .available:
+            return isExpanded
+        case .progress, .ready, .installing:
+            return true
+        }
+    }
+
+    private func updatePulseState(for model: TitlebarUpdateModel) {
+        isPulsing = model.state == .available && !isHovering
+    }
+
     @ViewBuilder
     private func indicator(for model: TitlebarUpdateModel) -> some View {
         switch model.state {
         case .available:
-            Circle()
-                .fill(Color.white)
-                .frame(width: 6, height: 6)
-                .shadow(color: Color.white.opacity(0.35), radius: 2, x: 0, y: 0)
+            Image(systemName: "shippingbox.fill")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.white)
         case .progress:
             UpdateProgressRing(progress: model.progress ?? 0)
         case .ready:
