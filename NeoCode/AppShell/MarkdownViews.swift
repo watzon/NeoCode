@@ -153,6 +153,8 @@ struct ProseMarkdownView: View {
                             .padding(.leading, CGFloat(item.level) * 18)
                         }
                     }
+                case .table(let table):
+                    MarkdownTableView(table: table, baseFont: baseFont, textColor: textColor)
                 }
             }
         }
@@ -206,12 +208,13 @@ enum MarkdownElement {
     case heading(level: Int, text: String)
     case paragraph(String)
     case list([MarkdownListItem])
+    case table(MarkdownTable)
 
     var supportsInlineLeadingLabel: Bool {
         switch self {
         case .paragraph:
             return true
-        case .heading, .list:
+        case .heading, .list, .table:
             return false
         }
     }
@@ -227,6 +230,113 @@ struct MarkdownListItem {
     let level: Int
     let marker: Marker
     let text: String
+}
+
+struct MarkdownTable {
+    let headers: [String]
+    let rows: [[String]]
+    let alignments: [Alignment]
+    
+    enum Alignment {
+        case left
+        case center
+        case right
+    }
+}
+
+struct MarkdownTableView: View {
+    let table: MarkdownTable
+    let baseFont: Font
+    let textColor: Color
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            Grid(horizontalSpacing: 0, verticalSpacing: 0) {
+                GridRow {
+                    ForEach(Array(table.headers.enumerated()), id: \.offset) { index, header in
+                        cell(
+                            text: header,
+                            font: .system(size: 13, weight: .semibold, design: .default),
+                            background: NeoCodeTheme.panelRaised.opacity(0.7),
+                            alignment: table.alignments[safe: index] ?? .left
+                        )
+                        .gridColumnAlignment(columnAlignment(for: table.alignments[safe: index] ?? .left))
+                    }
+                }
+
+                ForEach(Array(table.rows.enumerated()), id: \.offset) { rowIndex, row in
+                    GridRow {
+                        ForEach(Array(row.enumerated()), id: \.offset) { index, value in
+                            cell(
+                                text: value,
+                                font: baseFont,
+                                background: rowIndex.isMultiple(of: 2) ? NeoCodeTheme.panel : NeoCodeTheme.panelSoft,
+                                alignment: table.alignments[safe: index] ?? .left
+                            )
+                        }
+                    }
+                }
+            }
+            .background(NeoCodeTheme.panel)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(NeoCodeTheme.line, lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder
+    private func cell(text: String, font: Font, background: Color, alignment: MarkdownTable.Alignment) -> some View {
+        InlineMarkdownText(text: text, baseFont: font)
+            .foregroundStyle(textColor)
+            .lineLimit(nil)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(minWidth: 96, maxWidth: .infinity, alignment: frameAlignment(for: alignment))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(background)
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(NeoCodeTheme.line)
+                    .frame(height: 1)
+            }
+            .overlay(alignment: .leading) {
+                Rectangle()
+                    .fill(NeoCodeTheme.line)
+                    .frame(width: 1)
+            }
+    }
+
+    private func frameAlignment(for tableAlignment: MarkdownTable.Alignment) -> Alignment {
+        switch tableAlignment {
+        case .left:
+            return .leading
+        case .center:
+            return .center
+        case .right:
+            return .trailing
+        }
+    }
+
+    private func columnAlignment(for tableAlignment: MarkdownTable.Alignment) -> HorizontalAlignment {
+        switch tableAlignment {
+        case .left:
+            return .leading
+        case .center:
+            return .center
+        case .right:
+            return .trailing
+        }
+    }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        guard indices.contains(index) else { return nil }
+        return self[index]
+    }
 }
 
 struct InlineMarkdownText: View {
@@ -385,6 +495,7 @@ private enum MarkdownRenderCache {
         var results: [MarkdownElement] = []
         var paragraph: [String] = []
         var listItems: [MarkdownListItem] = []
+        var lineIndex = 0
 
         func flushParagraph() {
             guard !paragraph.isEmpty else { return }
@@ -398,12 +509,14 @@ private enum MarkdownRenderCache {
             listItems.removeAll(keepingCapacity: true)
         }
 
-        for rawLine in lines {
+        while lineIndex < lines.count {
+            let rawLine = lines[lineIndex]
             let line = rawLine.trimmingCharacters(in: .whitespaces)
 
             if line.isEmpty {
                 flushParagraph()
                 flushList()
+                lineIndex += 1
                 continue
             }
 
@@ -411,22 +524,126 @@ private enum MarkdownRenderCache {
                 flushParagraph()
                 flushList()
                 results.append(heading)
+                lineIndex += 1
                 continue
             }
 
             if let item = parseListItem(rawLine) {
                 flushParagraph()
                 listItems.append(item)
+                lineIndex += 1
+                continue
+            }
+
+            // Check for table
+            if let (table, consumedLines) = parseTable(from: lines, startingAt: lineIndex) {
+                flushParagraph()
+                flushList()
+                results.append(.table(table))
+                lineIndex += consumedLines
                 continue
             }
 
             flushList()
             paragraph.append(line)
+            lineIndex += 1
         }
 
         flushParagraph()
         flushList()
         return results
+    }
+
+    private static func parseTable(from lines: [String], startingAt startIndex: Int) -> (MarkdownTable, Int)? {
+        guard startIndex < lines.count else { return nil }
+
+        let headerLine = lines[startIndex].trimmingCharacters(in: .whitespaces)
+
+        // Check if line looks like a table row (starts and ends with |)
+        guard headerLine.hasPrefix("|") && headerLine.hasSuffix("|") else { return nil }
+
+        // Check if there's a next line for the separator
+        guard startIndex + 1 < lines.count else { return nil }
+
+        let separatorLine = lines[startIndex + 1].trimmingCharacters(in: .whitespaces)
+
+        // Check if separator line is valid (contains only |, -, :, and spaces)
+        guard separatorLine.range(of: "^\\|[-:\\s|]+\\|$", options: .regularExpression) != nil ||
+              (separatorLine.hasPrefix("|") && separatorLine.hasSuffix("|")) else { return nil }
+
+        // Verify separator contains dashes
+        guard separatorLine.contains("-") else { return nil }
+
+        // Parse headers
+        let headers = parseTableCells(headerLine)
+
+        // Parse alignments from separator
+        let alignments = parseTableAlignments(separatorLine, columnCount: headers.count)
+
+        // Parse data rows
+        var rows: [[String]] = []
+        var currentIndex = startIndex + 2
+
+        while currentIndex < lines.count {
+            let line = lines[currentIndex].trimmingCharacters(in: .whitespaces)
+
+            // Check if this is a table row
+            guard line.hasPrefix("|") && line.hasSuffix("|") else { break }
+
+            // Check if this looks like another header/separator (stop parsing)
+            if line.range(of: "^\\|[-:\\s|]+\\|$", options: .regularExpression) != nil && line.contains("-") {
+                break
+            }
+
+            let cells = parseTableCells(line)
+            // Pad cells to match header count
+            var paddedCells = cells
+            while paddedCells.count < headers.count {
+                paddedCells.append("")
+            }
+            rows.append(Array(paddedCells.prefix(headers.count)))
+
+            currentIndex += 1
+        }
+
+        guard !rows.isEmpty else { return nil }
+
+        let table = MarkdownTable(headers: headers, rows: rows, alignments: alignments)
+        return (table, currentIndex - startIndex)
+    }
+
+    private static func parseTableCells(_ line: String) -> [String] {
+        // Remove leading and trailing |
+        let trimmed = line.dropFirst().dropLast()
+
+        // Split by |
+        let cells = trimmed.split(separator: "|", omittingEmptySubsequences: false)
+
+        return cells.map { cell in
+            String(cell).trimmingCharacters(in: .whitespaces)
+        }
+    }
+
+    private static func parseTableAlignments(_ separatorLine: String, columnCount: Int) -> [MarkdownTable.Alignment] {
+        // Remove leading and trailing |
+        let trimmed = separatorLine.dropFirst().dropLast()
+
+        // Split by |
+        let parts = trimmed.split(separator: "|", omittingEmptySubsequences: false)
+
+        return parts.prefix(columnCount).map { part in
+            let trimmed = part.trimmingCharacters(in: .whitespaces)
+            let hasLeftColon = trimmed.hasPrefix(":")
+            let hasRightColon = trimmed.hasSuffix(":")
+
+            if hasLeftColon && hasRightColon {
+                return .center
+            } else if hasRightColon {
+                return .right
+            } else {
+                return .left
+            }
+        }
     }
 
     private static func parseInlineMarkdown(from text: String) -> AttributedString? {
