@@ -63,6 +63,7 @@ struct SessionSummary: Codable, Identifiable, Hashable {
     var stats: SessionStatsSnapshot?
     var transcript: [ChatMessage]
     var isEphemeral: Bool
+    var composerState: SessionComposerState?
 
     init(
         id: String,
@@ -74,7 +75,8 @@ struct SessionSummary: Codable, Identifiable, Hashable {
         revert: OpenCodeSessionRevert? = nil,
         stats: SessionStatsSnapshot? = nil,
         transcript: [ChatMessage] = [],
-        isEphemeral: Bool = false
+        isEphemeral: Bool = false,
+        composerState: SessionComposerState? = nil
     ) {
         self.id = id
         self.parentID = parentID
@@ -86,9 +88,14 @@ struct SessionSummary: Codable, Identifiable, Hashable {
         self.stats = stats
         self.transcript = transcript
         self.isEphemeral = isEphemeral
+        self.composerState = composerState
     }
 
-    init(session: OpenCodeSession, fallbackTitle: String = SessionSummary.defaultTitle) {
+    init(
+        session: OpenCodeSession,
+        fallbackTitle: String = SessionSummary.defaultTitle,
+        composerState: SessionComposerState? = nil
+    ) {
         self.init(
             id: session.id,
             parentID: session.parentID,
@@ -99,7 +106,8 @@ struct SessionSummary: Codable, Identifiable, Hashable {
             revert: session.revert,
             stats: nil,
             transcript: [],
-            isEphemeral: false
+            isEphemeral: false,
+            composerState: composerState
         )
     }
 

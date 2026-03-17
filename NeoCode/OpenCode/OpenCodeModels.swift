@@ -246,7 +246,9 @@ struct OpenCodeMessageInfo: Decodable, Equatable, Sendable {
     let time: OpenCodeTimeContainer?
 
     nonisolated var createdAt: Date? { time?.created }
+    nonisolated var completedAt: Date? { time?.completed }
     nonisolated var updatedAt: Date? { time?.completed ?? time?.updated ?? time?.created }
+    nonisolated var isCompleted: Bool { completedAt != nil }
     nonisolated var isSummaryMessage: Bool {
         guard case .bool(true) = summary else { return false }
         return true

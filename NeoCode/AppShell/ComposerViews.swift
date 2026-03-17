@@ -1069,8 +1069,10 @@ private final class ComposerNSTextView: NSTextView {
         _ sourceTexts: [ComposerPromptFileReference.SourceText],
         for request: MentionHighlightRequest
     ) {
-        if appliedMentionHighlightRequest == request,
-           promotedFileMentionSourceTexts == sourceTexts {
+        pendingMentionHighlightRequest = nil
+
+        if promotedFileMentionSourceTexts == sourceTexts {
+            appliedMentionHighlightRequest = request
             return
         }
 
@@ -1081,18 +1083,34 @@ private final class ComposerNSTextView: NSTextView {
     private func applyFileMentionHighlights(_ sourceTexts: [ComposerPromptFileReference.SourceText]) {
         guard let layoutManager else { return }
 
+        let textLength = (string as NSString).length
+        removeTemporaryMentionHighlightAttributes(
+            promotedFileMentionSourceTexts,
+            using: layoutManager,
+            textLength: textLength
+        )
         promotedFileMentionSourceTexts = sourceTexts
-
-        let fullRange = NSRange(location: 0, length: (string as NSString).length)
-        layoutManager.removeTemporaryAttribute(.foregroundColor, forCharacterRange: fullRange)
-        layoutManager.removeTemporaryAttribute(.backgroundColor, forCharacterRange: fullRange)
-        layoutManager.removeTemporaryAttribute(.underlineStyle, forCharacterRange: fullRange)
-        layoutManager.removeTemporaryAttribute(.underlineColor, forCharacterRange: fullRange)
 
         for sourceText in sourceTexts {
             let range = NSRange(location: sourceText.start, length: sourceText.end - sourceText.start)
-            guard range.location >= 0, NSMaxRange(range) <= fullRange.length else { continue }
+            guard range.location >= 0, NSMaxRange(range) <= textLength else { continue }
             layoutManager.addTemporaryAttributes(mentionHighlightAttributes, forCharacterRange: range)
+        }
+    }
+
+    private func removeTemporaryMentionHighlightAttributes(
+        _ sourceTexts: [ComposerPromptFileReference.SourceText],
+        using layoutManager: NSLayoutManager,
+        textLength: Int
+    ) {
+        for sourceText in sourceTexts {
+            let range = NSRange(location: sourceText.start, length: sourceText.end - sourceText.start)
+            guard range.location >= 0, NSMaxRange(range) <= textLength else { continue }
+
+            layoutManager.removeTemporaryAttribute(.foregroundColor, forCharacterRange: range)
+            layoutManager.removeTemporaryAttribute(.backgroundColor, forCharacterRange: range)
+            layoutManager.removeTemporaryAttribute(.underlineStyle, forCharacterRange: range)
+            layoutManager.removeTemporaryAttribute(.underlineColor, forCharacterRange: range)
         }
     }
 

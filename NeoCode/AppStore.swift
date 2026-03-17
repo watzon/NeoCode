@@ -219,6 +219,7 @@ final class AppStore {
     private var promptPersistTask: Task<Void, Never>?
     private var yoloSessionKeys: Set<String>
     private var favoriteModelIDs: Set<String> = []
+    private var isApplyingSessionComposerState = false
     private var autoRespondedPermissionIDs: [String: Date] = [:]
     private var activeTranscriptLoadKeys = Set<String>()
     private var locallyActiveSessionIDs = Set<String>()
@@ -591,6 +592,7 @@ final class AppStore {
 
     func selectProject(_ destinationProjectID: ProjectSummary.ID) {
         guard projects.contains(where: { $0.id == destinationProjectID }) else { return }
+        persistComposerStateForSelectedSession()
         selectedProjectID = destinationProjectID
         restoreComposerOptionsFromCache(for: projectPath(for: destinationProjectID))
         if let selectedSessionID,
@@ -604,6 +606,7 @@ final class AppStore {
     }
 
     func selectDashboard() {
+        persistComposerStateForSelectedSession()
         selectedSessionID = nil
         loadingTranscriptSessionID = nil
         primePromptState(for: nil)
@@ -639,10 +642,14 @@ final class AppStore {
 
     func selectSession(_ sessionID: String) {
         guard selectedSessionID != sessionID else { return }
+        persistComposerStateForSelectedSession()
         let destinationProjectID = projectID(for: sessionID)
         selectedSessionID = sessionID
         selectedProjectID = destinationProjectID
-        restoreComposerOptionsFromCache(for: destinationProjectID.flatMap { projectPath(for: $0) })
+        withSessionComposerStatePersistenceSuspended {
+            restoreComposerOptionsFromCache(for: destinationProjectID.flatMap { projectPath(for: $0) })
+        }
+        restoreComposerState(for: sessionID)
 
         if session(for: sessionID)?.isEphemeral == true {
             loadingTranscriptSessionID = nil
@@ -1769,13 +1776,10 @@ final class AppStore {
 
         do {
             logger.info("Aborting session: \(sessionID, privacy: .public)")
-            try await service.abortSession(sessionID: sessionID)
-            liveSessionStatuses[sessionID] = .idle
-            setSessionStatus(.idle, sessionID: sessionID, projectID: projectID)
             cancelStreamingRecoveryCheck(for: sessionID)
-            refreshSelectedSessionMessages(projectID: projectID)
+            flushBufferedTextDeltas(for: sessionID, projectID: projectID)
+            try await service.abortSession(sessionID: sessionID)
             lastError = nil
-            await sendQueuedMessagesIfPossible(for: sessionID, projectID: projectID, using: runtime)
             reevaluateRuntimeRetention(using: runtime)
         } catch {
             logger.error("Failed to abort session \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")
@@ -2289,6 +2293,7 @@ final class AppStore {
                 var infos = messageInfosBySessionID[sessionID] ?? [:]
                 infos[info.id] = info
                 messageInfosBySessionID[sessionID] = infos
+                reconcileCompletedMessageIfNeeded(info, sessionID: sessionID, projectID: projectID)
                 refreshSessionStats(sessionID: sessionID, projectID: projectID)
                 touchSession(sessionID: sessionID, projectID: projectID, updatedAt: info.updatedAt ?? info.createdAt ?? Date())
             }
@@ -2544,6 +2549,7 @@ final class AppStore {
         )
 
         refreshThinkingLevels()
+        persistComposerStateForSelectedSession()
         composerOptionsProjectPath = projectPath
     }
 
@@ -2672,6 +2678,7 @@ final class AppStore {
 
         availableThinkingLevels = variants
         if variants.isEmpty {
+            persistComposerStateForSelectedSession()
             return
         }
 
@@ -2682,6 +2689,8 @@ final class AppStore {
         } else if selectedThinkingLevel == nil || !variants.contains(selectedThinkingLevel ?? "") {
             selectedThinkingLevel = variants.first
         }
+
+        persistComposerStateForSelectedSession()
     }
 
     var selectedModel: ComposerModelOption? {
@@ -2706,6 +2715,81 @@ final class AppStore {
         } else if availableThinkingLevels.isEmpty {
             selectedThinkingLevel = nil
         }
+        persistComposerStateForSelectedSession()
+    }
+
+    private var currentSessionComposerState: SessionComposerState {
+        SessionComposerState(
+            selectedModelID: selectedModelID,
+            selectedModelVariant: selectedModelVariant,
+            selectedAgent: selectedAgent.isEmpty ? nil : selectedAgent,
+            selectedThinkingLevel: selectedThinkingLevel,
+            ephemeralAgentModels: ephemeralAgentModels,
+            preferredFallbackModelID: preferredFallbackModelID
+        )
+    }
+
+    private func persistComposerStateForSelectedSession() {
+        persistComposerState(for: selectedSessionID)
+    }
+
+    private func withSessionComposerStatePersistenceSuspended<T>(_ operation: () -> T) -> T {
+        let wasApplyingSessionComposerState = isApplyingSessionComposerState
+        isApplyingSessionComposerState = true
+        defer { isApplyingSessionComposerState = wasApplyingSessionComposerState }
+        return operation()
+    }
+
+    private func persistComposerState(for sessionID: String?) {
+        guard !isApplyingSessionComposerState,
+              let sessionID,
+              let projectID = projectID(for: sessionID),
+              let indices = indices(for: sessionID, projectID: projectID)
+        else {
+            return
+        }
+
+        let state = currentSessionComposerState
+        guard projects[indices.project].sessions[indices.session].composerState != state else { return }
+        projects[indices.project].sessions[indices.session].composerState = state
+        scheduleProjectPersistence()
+    }
+
+    private func restoreComposerState(for sessionID: String) {
+        if let state = session(for: sessionID)?.composerState {
+            applyComposerState(state)
+        } else {
+            resetComposerStateToDefaults()
+        }
+
+        persistComposerState(for: sessionID)
+    }
+
+    private func applyComposerState(_ state: SessionComposerState) {
+        isApplyingSessionComposerState = true
+        defer { isApplyingSessionComposerState = false }
+
+        selectedModelID = state.selectedModelID
+        selectedModelVariant = state.selectedModelVariant
+        selectedAgent = state.selectedAgent ?? ""
+        selectedThinkingLevel = state.selectedThinkingLevel
+        ephemeralAgentModels = state.ephemeralAgentModels
+        preferredFallbackModelID = state.preferredFallbackModelID
+        reconcileSelectedModel(using: availableModels)
+        refreshThinkingLevels()
+    }
+
+    private func resetComposerStateToDefaults() {
+        isApplyingSessionComposerState = true
+        defer { isApplyingSessionComposerState = false }
+
+        selectedModelID = availableModels.first?.id
+        selectedModelVariant = nil
+        selectedAgent = availableAgents.first ?? ""
+        selectedThinkingLevel = nil
+        ephemeralAgentModels = [:]
+        preferredFallbackModelID = selectedModelID
+        refreshThinkingLevels()
     }
 
     @discardableResult
@@ -2760,6 +2844,8 @@ final class AppStore {
     /// 3. Preferred global fallback model
     /// 4. First available model
     func selectAgent(_ agentName: String) {
+        defer { persistComposerStateForSelectedSession() }
+
         if !selectedAgent.isEmpty,
            selectedAgent != agentName,
            let selectedModelID,
@@ -2820,6 +2906,8 @@ final class AppStore {
             self.ephemeralAgentModels[self.selectedAgent] = modelID
             logger.info("Stored ephemeral model for agent \(self.selectedAgent): \(modelID)")
         }
+
+        persistComposerStateForSelectedSession()
     }
 
     func reconcileSelectedModel(using models: [ComposerModelOption]) {
@@ -2963,6 +3051,7 @@ final class AppStore {
                 return false
             }
             selectedThinkingLevel = match
+            persistComposerStateForSelectedSession()
             draft = ""
             return true
 
@@ -3763,6 +3852,9 @@ final class AppStore {
             merged.transcript = []
             merged.status = existing.status
             merged.lastUpdatedAt = max(existing.lastUpdatedAt, incoming.lastUpdatedAt)
+            if merged.composerState == nil {
+                merged.composerState = existing.composerState
+            }
             return merged.applyingInferredTitle(from: transcript)
         }
 
@@ -3800,6 +3892,9 @@ final class AppStore {
             updated = updated.applyingInferredTitle(from: transcript)
             if updated.stats == nil {
                 updated.stats = existing.stats
+            }
+            if updated.composerState == nil {
+                updated.composerState = existing.composerState
             }
             projects[projectIndex].sessions[sessionIndex] = updated
             projects[projectIndex].sessions[sessionIndex].status = resolvedSessionStatus(
@@ -3921,6 +4016,41 @@ final class AppStore {
             return
         }
         scheduleProjectPersistence(.streaming)
+    }
+
+    private func reconcileCompletedMessageIfNeeded(
+        _ info: OpenCodeMessageInfo,
+        sessionID: String,
+        projectID: ProjectSummary.ID
+    ) {
+        guard info.isCompleted,
+              let indices = indices(for: sessionID, projectID: projectID)
+        else {
+            return
+        }
+
+        var transcript = transcript(for: sessionID)
+        var didChangeTranscript = false
+
+        for index in transcript.indices where transcript[index].messageID == info.id && transcript[index].isInProgress {
+            transcript[index].isInProgress = false
+            if let completedAt = info.completedAt,
+               transcript[index].timestamp < completedAt {
+                transcript[index].timestamp = completedAt
+            }
+            didChangeTranscript = true
+        }
+
+        if didChangeTranscript {
+            setTranscript(transcript, for: sessionID)
+            projects[indices.project].sessions[indices.session].lastUpdatedAt = info.updatedAt ?? projects[indices.project].sessions[indices.session].lastUpdatedAt
+        }
+
+        if !transcript.contains(where: \.isInProgress) && !hasBufferedTextDeltas(for: sessionID) {
+            clearLocalSessionActivity(sessionID)
+        }
+
+        refreshSessionStatus(sessionID: sessionID, projectID: projectID)
     }
 
     private func transcriptRevision(for sessionID: String, projectID: ProjectSummary.ID) -> Int {
@@ -4935,7 +5065,8 @@ final class AppStore {
             id: "draft-session-\(UUID().uuidString)",
             title: newSessionTitle,
             lastUpdatedAt: .now,
-            isEphemeral: true
+            isEphemeral: true,
+            composerState: currentSessionComposerState
         )
         upsert(session: session, in: projectID, preferTopInsertion: true)
         selectedProjectID = projectID
@@ -4995,7 +5126,11 @@ final class AppStore {
         replaceSession(
             ephemeralSessionID,
             in: projectID,
-            with: SessionSummary(session: created, fallbackTitle: ephemeralSession.title)
+            with: SessionSummary(
+                session: created,
+                fallbackTitle: ephemeralSession.title,
+                composerState: ephemeralSession.composerState
+            )
         )
         selectedSessionID = created.id
 
@@ -5028,6 +5163,9 @@ final class AppStore {
         replacement.status = existing.status
         if replacement.stats == nil {
             replacement.stats = existing.stats
+        }
+        if replacement.composerState == nil {
+            replacement.composerState = existing.composerState
         }
         replacement.transcript = []
         replacement.lastUpdatedAt = max(existing.lastUpdatedAt, session.lastUpdatedAt)
@@ -5089,16 +5227,43 @@ final class AppStore {
     }
 
     static func reconcileLoadedTranscript(existing: [ChatMessage], incoming: [ChatMessage]) -> [ChatMessage] {
-        guard !existing.isEmpty, !incoming.isEmpty else { return incoming }
+        guard !existing.isEmpty else { return incoming }
+        guard !incoming.isEmpty else {
+            return preservedLocalTranscriptSuffix(existing: existing, incomingIDs: []) ?? incoming
+        }
 
         let existingByID = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
-        return incoming.map { incomingMessage in
+        let incomingIDs = Set(incoming.map(\.id))
+        var reconciled = incoming.map { incomingMessage in
             guard let existingMessage = existingByID[incomingMessage.id] else {
                 return incomingMessage
             }
 
             return preferredTranscriptMessage(existing: existingMessage, incoming: incomingMessage)
         }
+
+        if let preservedSuffix = preservedLocalTranscriptSuffix(existing: existing, incomingIDs: incomingIDs) {
+            reconciled.append(contentsOf: preservedSuffix)
+        }
+
+        return reconciled
+    }
+
+    private static func preservedLocalTranscriptSuffix(existing: [ChatMessage], incomingIDs: Set<String>) -> [ChatMessage]? {
+        var trailingMessages: [ChatMessage] = []
+
+        for message in existing.reversed() {
+            if incomingIDs.contains(message.id) {
+                break
+            }
+
+            trailingMessages.append(message)
+        }
+
+        guard !trailingMessages.isEmpty else { return nil }
+
+        let preserved = trailingMessages.reversed()
+        return preserved.contains(where: \.isInProgress) ? Array(preserved) : nil
     }
 
     private static func mergeSession(_ existing: SessionSummary, with incoming: SessionSummary) -> SessionSummary {

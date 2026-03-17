@@ -1268,6 +1268,55 @@ struct NeoCodeMainActorTests {
     }
 
     @MainActor
+    @Test func appStoreMarksStreamingPlaceholderCompleteWhenMessageCompletesWithoutFinalPartUpdate() {
+        let now = Date(timeIntervalSince1970: 1_710_616_186)
+        let store = AppStore(projects: [
+            ProjectSummary(
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(
+                        id: "ses_1",
+                        title: "Foreground",
+                        lastUpdatedAt: .distantPast,
+                        status: .running,
+                        transcript: [
+                            ChatMessage(
+                                id: "part_1",
+                                messageID: "msg_1",
+                                role: .assistant,
+                                text: "Partial response",
+                                timestamp: now,
+                                emphasis: .normal,
+                                isInProgress: true
+                            )
+                        ]
+                    ),
+                ]
+            ),
+        ])
+
+        store.selectSession("ses_1")
+        store.apply(event: .messageUpdated(OpenCodeMessageInfo(
+            id: "msg_1",
+            sessionID: "ses_1",
+            role: "assistant",
+            summary: nil,
+            agent: nil,
+            providerID: nil,
+            modelID: nil,
+            cost: nil,
+            tokens: nil,
+            time: OpenCodeTimeContainer(created: now, updated: now, completed: now.addingTimeInterval(2))
+        )))
+
+        #expect(store.selectedTranscript.count == 1)
+        #expect(store.selectedTranscript[0].isInProgress == false)
+        #expect(store.selectedTranscript[0].timestamp == now.addingTimeInterval(2))
+        #expect(store.selectedSession?.status == .idle)
+    }
+
+    @MainActor
     @Test func reconcileLoadedTranscriptPrefersCompletedLocalMessagesOverStaleRemoteMessages() {
         let now = Date(timeIntervalSince1970: 1_710_616_186)
         let existing = [
@@ -1298,6 +1347,93 @@ struct NeoCodeMainActorTests {
         #expect(reconciled.count == 1)
         #expect(reconciled[0].text == "Finished output")
         #expect(reconciled[0].isInProgress == false)
+    }
+
+    @MainActor
+    @Test func reconcileLoadedTranscriptPreservesTrailingInProgressMessagesMissingFromIncoming() {
+        let now = Date(timeIntervalSince1970: 1_710_616_186)
+        let existing = [
+            ChatMessage(
+                id: "user_1",
+                messageID: "msg_user",
+                role: .user,
+                text: "Explain the bug",
+                timestamp: now,
+                emphasis: .normal
+            ),
+            ChatMessage(
+                id: "reasoning_1",
+                messageID: "msg_assistant",
+                role: .assistant,
+                text: "Investigating",
+                timestamp: now.addingTimeInterval(1),
+                emphasis: .strong,
+                isInProgress: false
+            ),
+            ChatMessage(
+                id: "text_1",
+                messageID: "msg_assistant",
+                role: .assistant,
+                text: "Working through the stop flow",
+                timestamp: now.addingTimeInterval(2),
+                emphasis: .normal,
+                isInProgress: true
+            ),
+        ]
+        let incoming = [
+            ChatMessage(
+                id: "user_1",
+                messageID: "msg_user",
+                role: .user,
+                text: "Explain the bug",
+                timestamp: now,
+                emphasis: .normal
+            )
+        ]
+
+        let reconciled = AppStore.reconcileLoadedTranscript(existing: existing, incoming: incoming)
+
+        #expect(reconciled.map(\.id) == ["user_1", "reasoning_1", "text_1"])
+        #expect(reconciled.last?.text == "Working through the stop flow")
+        #expect(reconciled.last?.isInProgress == true)
+    }
+
+    @MainActor
+    @Test func reconcileLoadedTranscriptDropsTrailingCompletedMessagesMissingFromIncoming() {
+        let now = Date(timeIntervalSince1970: 1_710_616_186)
+        let existing = [
+            ChatMessage(
+                id: "user_1",
+                messageID: "msg_user",
+                role: .user,
+                text: "Explain the bug",
+                timestamp: now,
+                emphasis: .normal
+            ),
+            ChatMessage(
+                id: "text_1",
+                messageID: "msg_assistant",
+                role: .assistant,
+                text: "This should not linger",
+                timestamp: now.addingTimeInterval(1),
+                emphasis: .normal,
+                isInProgress: false
+            ),
+        ]
+        let incoming = [
+            ChatMessage(
+                id: "user_1",
+                messageID: "msg_user",
+                role: .user,
+                text: "Explain the bug",
+                timestamp: now,
+                emphasis: .normal
+            )
+        ]
+
+        let reconciled = AppStore.reconcileLoadedTranscript(existing: existing, incoming: incoming)
+
+        #expect(reconciled.map(\.id) == ["user_1"])
     }
 
     @MainActor
@@ -3388,6 +3524,50 @@ struct NeoCodeMainActorTests {
 
         store.reconcileSelectedModel(using: store.availableModels)
 
+        #expect(store.selectedModelID == preferredModel.id)
+    }
+
+    @MainActor
+    @Test func appStoreKeepsSelectedModelScopedToEachSession() {
+        let projectID = UUID()
+        let fallbackModel = ComposerModelOption(
+            id: "openai/gpt-5.4",
+            providerID: "openai",
+            modelID: "gpt-5.4",
+            title: "GPT-5.4",
+            contextWindow: nil,
+            variants: ["high", "medium", "low"]
+        )
+        let preferredModel = ComposerModelOption(
+            id: "anthropic/claude-sonnet",
+            providerID: "anthropic",
+            modelID: "claude-sonnet",
+            title: "Claude Sonnet",
+            contextWindow: nil,
+            variants: []
+        )
+        let store = AppStore(projects: [
+            ProjectSummary(
+                id: projectID,
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(id: "ses_1", title: "Session 1", lastUpdatedAt: .distantPast),
+                    SessionSummary(id: "ses_2", title: "Session 2", lastUpdatedAt: .distantPast),
+                ]
+            ),
+        ])
+
+        store.availableModels = [fallbackModel, preferredModel]
+
+        store.selectSession("ses_1")
+        store.setModelForCurrentAgent(preferredModel.id)
+        store.refreshThinkingLevels()
+
+        store.selectSession("ses_2")
+        #expect(store.selectedModelID == fallbackModel.id)
+
+        store.selectSession("ses_1")
         #expect(store.selectedModelID == preferredModel.id)
     }
 
