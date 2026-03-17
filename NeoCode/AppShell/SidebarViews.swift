@@ -246,6 +246,10 @@ struct ProjectTreeNode: View {
 
             if !store.isProjectCollapsed(project.id) {
                 VStack(alignment: .leading, spacing: 2) {
+                    if shouldShowSessionSyncIndicator {
+                        ProjectSessionSyncRow()
+                    }
+
                     ForEach(project.displayedSessions(showAll: showsAllSessions)) { session in
                         SessionTreeRow(session: session, isSelected: store.selectedSessionID == session.id)
                             .onTapGesture {
@@ -355,6 +359,10 @@ struct ProjectTreeNode: View {
 
         let hiddenSessionLabel = project.hiddenSessionCount == 1 ? "1 more" : "\(project.hiddenSessionCount) more"
         return "Show \(hiddenSessionLabel)"
+    }
+
+    private var shouldShowSessionSyncIndicator: Bool {
+        project.sessions.isEmpty && store.isSessionListSyncing(for: project.id)
     }
 
     private func openProject() {
@@ -603,6 +611,25 @@ struct SidebarSessionStatusBadge: View {
         case .warning:
             NeoCodeTheme.warning.opacity(0.12)
         }
+    }
+}
+
+private struct ProjectSessionSyncRow: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
+
+            Text("Syncing threads...")
+                .font(.neoMonoSmall)
+                .foregroundStyle(NeoCodeTheme.textMuted)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Syncing threads")
     }
 }
 

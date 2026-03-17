@@ -147,7 +147,9 @@ final class AppStore {
     var isRefreshingGitStatus = false
     var isLoadingGitCommitPreview = false
     var isPerformingGitOperation = false
-    var isLoadingSessions = false
+    var isLoadingSessions: Bool {
+        loadingSessionCountsByProjectID.values.contains { $0 > 0 }
+    }
     var loadingTranscriptSessionID: String?
     var isSending = false
     var queuedMessagesBySessionID: [String: [ComposerQueuedMessage]] = [:]
@@ -232,6 +234,8 @@ final class AppStore {
     private var queuedMessageDispatchingSessionIDs = Set<String>()
     private var sessionCreationTasksBySessionID: [String: Task<String?, Never>] = [:]
     private var lastWorkspaceSelection: AppContentSelection = .dashboard
+    private var sessionListSyncActivityByProjectID: [ProjectSummary.ID: Int] = [:]
+    private var loadingSessionCountsByProjectID: [ProjectSummary.ID: Int] = [:]
 
     init() {
         let normalizedProjects = Self.normalizedProjects(PersistedProjectsStore().loadProjects())
@@ -696,6 +700,11 @@ final class AppStore {
         projects.first(where: { $0.id == projectID })?.settings.isCollapsedInSidebar ?? false
     }
 
+    func isSessionListSyncing(for projectID: ProjectSummary.ID) -> Bool {
+        (sessionListSyncActivityByProjectID[projectID] ?? 0) > 0
+            || (loadingSessionCountsByProjectID[projectID] ?? 0) > 0
+    }
+
     private func moveProject(from sourceIndex: Int, to destinationIndex: Int) {
         guard projects.indices.contains(sourceIndex) else { return }
 
@@ -790,7 +799,9 @@ final class AppStore {
 
         scheduleGitRefreshLoop(for: project.path)
         restoreComposerOptionsFromCache(for: project.path)
-        _ = await connectProject(project.id, using: runtime, includeComposerOptions: true)
+        await withSessionListSyncActivityIfNeeded(for: project.id) {
+            _ = await connectProject(project.id, using: runtime, includeComposerOptions: true)
+        }
         reevaluateRuntimeRetention(using: runtime)
     }
 
@@ -829,12 +840,14 @@ final class AppStore {
 
         selectProject(projectID)
 
-        guard let service = await liveService(for: projectID, runtime: runtime) else { return }
+        await withSessionListSyncActivityIfNeeded(for: projectID) {
+            guard let service = await liveService(for: projectID, runtime: runtime) else { return }
 
-        await loadSessions(using: service, for: projectID)
-        await loadSessionStatuses(using: service, for: projectID)
-        await loadPendingPermissions(using: service, for: projectID)
-        await loadPendingQuestions(using: service, for: projectID)
+            await loadSessions(using: service, for: projectID)
+            await loadSessionStatuses(using: service, for: projectID)
+            await loadPendingPermissions(using: service, for: projectID)
+            await loadPendingQuestions(using: service, for: projectID)
+        }
         reevaluateRuntimeRetention(using: runtime)
     }
 
@@ -2368,7 +2381,8 @@ final class AppStore {
         locallyActiveSessionIDs = []
         pendingPermissionsBySession = [:]
         pendingQuestionsBySession = [:]
-        isLoadingSessions = false
+        sessionListSyncActivityByProjectID = [:]
+        loadingSessionCountsByProjectID = [:]
         isSending = false
         isRespondingToPrompt = false
         isPromptReady = true
@@ -2386,6 +2400,8 @@ final class AppStore {
         subscribedConnectionIdentifiers.removeValue(forKey: projectID)
         runtimeIdleTasks[projectID]?.cancel()
         runtimeIdleTasks.removeValue(forKey: projectID)
+        sessionListSyncActivityByProjectID.removeValue(forKey: projectID)
+        loadingSessionCountsByProjectID.removeValue(forKey: projectID)
 
         let sessionIDs = projectSessionIDs(for: projectID)
         for sessionID in sessionIDs {
@@ -3097,8 +3113,8 @@ final class AppStore {
     }
 
     private func loadSessions(using service: any OpenCodeServicing, for projectID: ProjectSummary.ID, allowCachedFallback: Bool = false) async {
-        isLoadingSessions = true
-        defer { isLoadingSessions = false }
+        beginSessionLoad(for: projectID)
+        defer { endSessionLoad(for: projectID) }
 
         let keepsCurrentUI = allowCachedFallback && (hasCachedSessions(in: projectID) || selectedSession?.isEphemeral == true)
 
@@ -3140,6 +3156,58 @@ final class AppStore {
             applyLiveSessionStatuses(remoteStatuses, projectID: projectID)
         } catch {
             logger.error("Failed to load session statuses: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private func withSessionListSyncActivityIfNeeded(
+        for projectID: ProjectSummary.ID,
+        operation: () async -> Void
+    ) async {
+        let shouldTrack = shouldTrackSessionListSyncActivity(for: projectID)
+        if shouldTrack {
+            beginSessionListSyncActivity(for: projectID)
+        }
+
+        defer {
+            if shouldTrack {
+                endSessionListSyncActivity(for: projectID)
+            }
+        }
+
+        await operation()
+    }
+
+    private func shouldTrackSessionListSyncActivity(for projectID: ProjectSummary.ID) -> Bool {
+        guard let project = projects.first(where: { $0.id == projectID }) else { return false }
+        return project.sessions.isEmpty
+    }
+
+    private func beginSessionListSyncActivity(for projectID: ProjectSummary.ID) {
+        sessionListSyncActivityByProjectID[projectID, default: 0] += 1
+    }
+
+    private func endSessionListSyncActivity(for projectID: ProjectSummary.ID) {
+        adjustCounter(&sessionListSyncActivityByProjectID, for: projectID, delta: -1)
+    }
+
+    private func beginSessionLoad(for projectID: ProjectSummary.ID) {
+        loadingSessionCountsByProjectID[projectID, default: 0] += 1
+    }
+
+    private func endSessionLoad(for projectID: ProjectSummary.ID) {
+        adjustCounter(&loadingSessionCountsByProjectID, for: projectID, delta: -1)
+    }
+
+    private func adjustCounter(
+        _ counters: inout [ProjectSummary.ID: Int],
+        for projectID: ProjectSummary.ID,
+        delta: Int
+    ) {
+        let nextValue = max((counters[projectID] ?? 0) + delta, 0)
+        if nextValue == 0 {
+            counters.removeValue(forKey: projectID)
+        } else {
+            counters[projectID] = nextValue
         }
     }
 
