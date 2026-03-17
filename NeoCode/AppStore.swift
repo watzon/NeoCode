@@ -397,12 +397,11 @@ final class AppStore {
     }
 
     var selectedSessionActivity: OpenCodeSessionActivity? {
-        guard let selectedSessionID,
-              isSessionLocallyActive(selectedSessionID)
-        else {
-            return nil
-        }
-        return liveSessionStatuses[selectedSessionID]
+        guard let selectedSessionID else { return nil }
+        return effectiveLiveSessionActivity(
+            for: selectedSessionID,
+            transcript: transcript(for: selectedSessionID)
+        )
     }
 
     func project(for sessionID: String) -> ProjectSummary? {
@@ -3665,15 +3664,13 @@ final class AppStore {
             return .attention
         }
 
-        if let activity = liveSessionStatuses[sessionID] {
+        if let activity = effectiveLiveSessionActivity(for: sessionID, transcript: transcript) {
             switch activity {
             case .idle:
                 return .idle
             case .busy:
-                guard isSessionLocallyActive(sessionID) else { break }
                 return .running
             case .retry:
-                guard isSessionLocallyActive(sessionID) else { break }
                 return .attention
             }
         }
@@ -3696,6 +3693,34 @@ final class AppStore {
         }
 
         return fallback == .attention ? .attention : .idle
+    }
+
+    private func effectiveLiveSessionActivity(
+        for sessionID: String,
+        transcript: [ChatMessage]
+    ) -> OpenCodeSessionActivity? {
+        guard isSessionLocallyActive(sessionID),
+              let activity = liveSessionStatuses[sessionID]
+        else {
+            return nil
+        }
+
+        switch activity {
+        case .idle:
+            return .idle
+        case .busy, .retry:
+            guard transcript.contains(where: \.isInProgress)
+                    || hasBufferedTextDeltas(for: sessionID)
+                    || transcript.last?.role == .user
+            else {
+                return nil
+            }
+            return activity
+        }
+    }
+
+    private func hasBufferedTextDeltas(for sessionID: String) -> Bool {
+        bufferedTextDeltas.keys.contains { $0.sessionID == sessionID }
     }
 
     private func queueDispatchSessionID(for event: OpenCodeEvent) -> String? {

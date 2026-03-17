@@ -914,6 +914,46 @@ struct NeoCodeMainActorTests {
     }
 
     @MainActor
+    @Test func appStoreClearsBackgroundWorkingBadgeWhenCompletedPartArrives() async throws {
+        let store = AppStore(projects: [
+            ProjectSummary(
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(id: "ses_1", title: "Background", lastUpdatedAt: .distantPast),
+                    SessionSummary(id: "ses_2", title: "Foreground", lastUpdatedAt: .distantPast),
+                ]
+            ),
+        ])
+        store.selectSession("ses_2")
+
+        store.apply(event: .messagePartDelta(OpenCodePartDelta(
+            sessionID: "ses_1",
+            messageID: "msg_1",
+            partID: "part_1",
+            field: "text",
+            delta: "Working"
+        )))
+        store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .busy))
+
+        let completed = try OpenCodeEventDecoder.decode(
+            frame: OpenCodeSSEFrame(
+                event: "message.part.updated",
+                data: "{\"type\":\"message.part.updated\",\"properties\":{\"part\":{\"id\":\"part_1\",\"sessionID\":\"ses_1\",\"messageID\":\"msg_1\",\"type\":\"text\",\"text\":\"Done\",\"tool\":null,\"state\":null,\"time\":{\"created\":\"2026-03-13T10:10:00Z\",\"updated\":\"2026-03-13T10:10:01Z\",\"completed\":\"2026-03-13T10:10:02Z\"}}}}"
+            )
+        )
+
+        store.apply(event: completed)
+
+        let background = try #require(store.projects[0].sessions.first(where: { $0.id == "ses_1" }))
+        #expect(background.status == .idle)
+
+        store.selectSession("ses_1")
+        #expect(store.selectedSession?.status == .idle)
+        #expect(store.selectedSessionActivity == nil)
+    }
+
+    @MainActor
     @Test func appStoreBatchesTextDeltasBeforeUpdatingTranscript() async {
         let store = AppStore(
             projects: [
