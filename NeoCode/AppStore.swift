@@ -1991,7 +1991,10 @@ final class AppStore {
         showLoadingIndicator: Bool = true,
         projectPathOverride: String? = nil
     ) async {
-        guard !isRefreshingGitCommitPreview else { return }
+        while isRefreshingGitCommitPreview {
+            guard !Task.isCancelled else { return }
+            await Task.yield()
+        }
 
         let projectPath = projectPathOverride ?? selectedProject?.path
         guard let projectPath,

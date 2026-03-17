@@ -92,6 +92,8 @@ struct GitCommitPreview: Equatable, Sendable {
     let stagedDeletions: Int
     let unstagedAdditions: Int
     let unstagedDeletions: Int
+    let totalAdditions: Int
+    let totalDeletions: Int
 
     var fileCount: Int {
         changedFiles.count
@@ -106,11 +108,11 @@ struct GitCommitPreview: Equatable, Sendable {
     }
 
     func additions(includeUnstaged: Bool) -> Int {
-        stagedAdditions + (includeUnstaged ? unstagedAdditions : 0)
+        includeUnstaged ? totalAdditions : stagedAdditions
     }
 
     func deletions(includeUnstaged: Bool) -> Int {
-        stagedDeletions + (includeUnstaged ? unstagedDeletions : 0)
+        includeUnstaged ? totalDeletions : stagedDeletions
     }
 }
 
@@ -180,11 +182,13 @@ struct GitRepositoryService: Sendable {
         async let currentBranch = Self.currentBranch(in: projectPath)
         async let stagedStats = Self.runGit(["diff", "--cached", "--numstat"], in: projectPath)
         async let unstagedStats = Self.runGit(["diff", "--numstat"], in: projectPath)
+        async let totalStats = Self.pendingCommitStats(in: projectPath)
 
         let resolvedStatusOutput = try await statusOutput
         let resolvedCurrentBranch = try await currentBranch
         let resolvedStagedStats = try await stagedStats
         let resolvedUnstagedStats = try await unstagedStats
+        let resolvedTotalStats = try await totalStats
 
         return GitCommitPreview(
             branch: resolvedCurrentBranch,
@@ -192,7 +196,9 @@ struct GitRepositoryService: Sendable {
             stagedAdditions: Self.parseNumstat(resolvedStagedStats).additions,
             stagedDeletions: Self.parseNumstat(resolvedStagedStats).deletions,
             unstagedAdditions: Self.parseNumstat(resolvedUnstagedStats).additions,
-            unstagedDeletions: Self.parseNumstat(resolvedUnstagedStats).deletions
+            unstagedDeletions: Self.parseNumstat(resolvedUnstagedStats).deletions,
+            totalAdditions: resolvedTotalStats.additions,
+            totalDeletions: resolvedTotalStats.deletions
         )
     }
 
@@ -329,6 +335,30 @@ struct GitRepositoryService: Sendable {
             }
     }
 
+    private nonisolated static func pendingCommitStats(in projectPath: String) async throws -> (additions: Int, deletions: Int) {
+        let gitDirectoryPath = try await runGit(["rev-parse", "--absolute-git-dir"], in: projectPath)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let gitDirectoryURL = URL(fileURLWithPath: gitDirectoryPath, isDirectory: true)
+        let liveIndexURL = gitDirectoryURL.appendingPathComponent("index", isDirectory: false)
+        let temporaryIndexURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: false)
+
+        if FileManager.default.fileExists(atPath: liveIndexURL.path) {
+            try FileManager.default.copyItem(at: liveIndexURL, to: temporaryIndexURL)
+        } else {
+            FileManager.default.createFile(atPath: temporaryIndexURL.path, contents: Data())
+        }
+
+        defer {
+            try? FileManager.default.removeItem(at: temporaryIndexURL)
+        }
+
+        let environment = ["GIT_INDEX_FILE": temporaryIndexURL.path]
+        _ = try await runGit(["add", "-A"], in: projectPath, environment: environment)
+        let output = try await runGit(["diff", "--cached", "--numstat"], in: projectPath, environment: environment)
+        return parseNumstat(output)
+    }
+
     private nonisolated static func currentBranch(in projectPath: String) async throws -> String {
         let branch = try await runGit(["branch", "--show-current"], in: projectPath)
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -340,11 +370,18 @@ struct GitRepositoryService: Sendable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private nonisolated static func runGit(_ arguments: [String], in projectPath: String) async throws -> String {
+    private nonisolated static func runGit(
+        _ arguments: [String],
+        in projectPath: String,
+        environment: [String: String] = [:]
+    ) async throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["git"] + arguments
         process.currentDirectoryURL = URL(fileURLWithPath: projectPath)
+        if !environment.isEmpty {
+            process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
+        }
 
         let result = try await SubprocessRunner(process: process).run()
         let string = result.output

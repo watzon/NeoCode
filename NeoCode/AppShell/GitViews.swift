@@ -66,7 +66,9 @@ struct GitCommitSheet: View {
     }
 
     private func summary(_ preview: GitCommitPreview) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let files = filteredFiles(preview)
+
+        return VStack(alignment: .leading, spacing: 12) {
             GitCommitMetadataRow(label: "Branch") {
                 Text(preview.branch)
                     .font(.neoMonoSmall)
@@ -97,13 +99,20 @@ struct GitCommitSheet: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
-                    ForEach(filteredFiles(preview)) { file in
-                        GitCommitFileRow(file: file)
+                    if files.isEmpty {
+                        Text(includeUnstaged ? "No changed files were found." : "No staged files are ready to commit.")
+                            .font(.neoMonoSmall)
+                            .foregroundStyle(NeoCodeTheme.textMuted)
+                    } else {
+                        ForEach(files) { file in
+                            GitCommitFileRow(file: file)
+                        }
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(12)
             }
-            .frame(height: 104)
+            .frame(maxWidth: .infinity, minHeight: 104, maxHeight: 104, alignment: .topLeading)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(NeoCodeTheme.panelRaised)

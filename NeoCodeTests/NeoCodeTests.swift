@@ -829,6 +829,53 @@ struct NeoCodeCoreTests {
         #expect(clean.isPrimaryActionEnabled == false)
     }
 
+    @MainActor
+    @Test func gitCommitPreviewUsesCombinedPendingStatsForPartiallyStagedLines() async throws {
+        let repoURL = try createTemporaryGitRepository()
+        defer { try? FileManager.default.removeItem(at: repoURL) }
+
+        try write("one\n", to: repoURL.appendingPathComponent("example.txt"))
+        try runGit(["add", "example.txt"], in: repoURL)
+        try runGit(["commit", "-m", "Initial commit"], in: repoURL)
+
+        try write("one staged\n", to: repoURL.appendingPathComponent("example.txt"))
+        try runGit(["add", "example.txt"], in: repoURL)
+        try write("one final\n", to: repoURL.appendingPathComponent("example.txt"))
+
+        let preview = try await GitRepositoryService().commitPreview(in: repoURL.path)
+
+        #expect(preview.stagedAdditions == 1)
+        #expect(preview.stagedDeletions == 1)
+        #expect(preview.unstagedAdditions == 1)
+        #expect(preview.unstagedDeletions == 1)
+        #expect(preview.additions(includeUnstaged: true) == 1)
+        #expect(preview.deletions(includeUnstaged: true) == 1)
+        #expect(preview.changedFiles.count == 1)
+        #expect(preview.changedFiles[0].isStaged == true)
+        #expect(preview.changedFiles[0].isUnstaged == true)
+    }
+
+    @MainActor
+    @Test func gitCommitPreviewCountsUntrackedFilesWhenIncludingUnstagedChanges() async throws {
+        let repoURL = try createTemporaryGitRepository()
+        defer { try? FileManager.default.removeItem(at: repoURL) }
+
+        try write("tracked\n", to: repoURL.appendingPathComponent("tracked.txt"))
+        try runGit(["add", "tracked.txt"], in: repoURL)
+        try runGit(["commit", "-m", "Initial commit"], in: repoURL)
+
+        try write("alpha\nbeta\n", to: repoURL.appendingPathComponent("new-file.txt"))
+
+        let preview = try await GitRepositoryService().commitPreview(in: repoURL.path)
+
+        #expect(preview.changedFiles.count == 1)
+        #expect(preview.changedFiles[0].isUntracked == true)
+        #expect(preview.additions(includeUnstaged: false) == 0)
+        #expect(preview.deletions(includeUnstaged: false) == 0)
+        #expect(preview.additions(includeUnstaged: true) == 2)
+        #expect(preview.deletions(includeUnstaged: true) == 0)
+    }
+
 }
 
 @Suite(.serialized)
@@ -3389,6 +3436,46 @@ private func requestBodyData(from request: URLRequest) throws -> Data? {
     }
 
     return data
+}
+
+private func createTemporaryGitRepository() throws -> URL {
+    let repositoryURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: repositoryURL, withIntermediateDirectories: true)
+    try runGit(["init"], in: repositoryURL)
+    try runGit(["config", "user.name", "NeoCode Tests"], in: repositoryURL)
+    try runGit(["config", "user.email", "tests@neocode.invalid"], in: repositoryURL)
+    return repositoryURL
+}
+
+private func write(_ contents: String, to url: URL) throws {
+    try contents.write(to: url, atomically: true, encoding: .utf8)
+}
+
+@discardableResult
+private func runGit(_ arguments: [String], in repositoryURL: URL) throws -> String {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+    process.arguments = ["git"] + arguments
+    process.currentDirectoryURL = repositoryURL
+
+    let outputPipe = Pipe()
+    process.standardOutput = outputPipe
+    process.standardError = outputPipe
+
+    try process.run()
+    process.waitUntilExit()
+
+    let output = String(data: outputPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    guard process.terminationStatus == 0 else {
+        throw NSError(
+            domain: "NeoCodeTests",
+            code: Int(process.terminationStatus),
+            userInfo: [NSLocalizedDescriptionKey: output.trimmingCharacters(in: .whitespacesAndNewlines)]
+        )
+    }
+
+    return output
 }
 
 private func waitForProcessIdentifier(from runner: SubprocessRunner) async throws -> pid_t {
