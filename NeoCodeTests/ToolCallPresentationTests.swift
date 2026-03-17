@@ -34,14 +34,15 @@ struct ToolCallPresentationTests {
         let presentation = ToolCallPresentation(toolCall: toolCall)
 
         #expect(presentation.items.count == 2)
-        #expect(presentation.items[0].title == "Patched \(tempFileURL.path)")
-        #expect(presentation.items[1].title == "Added NeoCode/Models/Temp.swift")
+        #expect(presentation.items[0].title == "apply_patch - \(tempFileURL.path)")
+        #expect(presentation.items[1].title == "apply_patch - NeoCode/Models/Temp.swift")
 
-        guard case .diff(let file) = presentation.items[0].content else {
+        guard case .diff(let file, let style) = presentation.items[0].content else {
             Issue.record("Expected first item to render as a diff")
             return
         }
-        
+
+        #expect(style == .changesOnly)
         #expect(file.change == .modified)
         #expect(file.hunks.count == 1)
         #expect(file.hunks[0].oldRange == DiffLineRange(start: 2, count: 1))
@@ -71,26 +72,56 @@ struct ToolCallPresentationTests {
 
         #expect(presentation.items.count == 1)
 
-        guard case .diff(let file) = presentation.items[0].content else {
+        guard case .diff(let file, let style) = presentation.items[0].content else {
             Issue.record("Expected bash output to render as a diff")
             return
         }
 
+        #expect(style == .split)
         #expect(file.displayPath == "NeoCode/AppStore.swift")
         #expect(file.hunks.first?.oldRange == DiffLineRange(start: 10, count: 2))
         #expect(file.hunks.first?.newRange == DiffLineRange(start: 10, count: 3))
+    }
+
+    @Test func editPresentationUsesChangesOnlyViewAndFileTitle() {
+        let toolCall = ChatMessage.ToolCall(
+            name: "edit",
+            status: .completed,
+            input: .object([
+                "filePath": .string("NeoCode/AppStore.swift"),
+                "oldText": .string("first\nsecond\nthird\n"),
+                "newText": .string("first\nupdated\nthird\nfourth\n")
+            ])
+        )
+
+        let presentation = ToolCallPresentation(toolCall: toolCall)
+
+        #expect(presentation.items.count == 1)
+        #expect(presentation.items[0].title == "edit - NeoCode/AppStore.swift")
+
+        guard case .diff(let file, let style) = presentation.items[0].content else {
+            Issue.record("Expected edit tool to render as a changes-only diff")
+            return
+        }
+
+        #expect(style == .changesOnly)
+        #expect(file.hunks.first?.lines.map(\.kind) == [.removed, .added, .added])
     }
 
     @Test func nonDiffToolFallsBackToTextItem() {
         let toolCall = ChatMessage.ToolCall(
             name: "read",
             status: .completed,
-            detail: "read completed\n{\n  \"path\" : \"README.md\"\n}"
+            detail: "read completed\n{\n  \"path\" : \"README.md\"\n}",
+            input: .object([
+                "filePath": .string("README.md")
+            ])
         )
 
         let presentation = ToolCallPresentation(toolCall: toolCall)
 
         #expect(presentation.items.count == 1)
+        #expect(presentation.items[0].title == "read - README.md")
 
         guard case .text(let text) = presentation.items[0].content else {
             Issue.record("Expected non-diff tool to render as text")

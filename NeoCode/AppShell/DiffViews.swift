@@ -31,9 +31,16 @@ struct ToolCallItemCardView: View {
                             .padding(.leading, diffContentHorizontalInset)
                             .frame(maxWidth: maxCardWidth, alignment: .leading)
                     }
-                case .diff(let file):
-                    DiffFileView(file: file)
-                        .padding(.leading, diffContentHorizontalInset)
+                case .diff(let file, let style):
+                    Group {
+                        switch style {
+                        case .split:
+                            DiffFileView(file: file)
+                        case .changesOnly:
+                            DiffChangeListView(file: file)
+                        }
+                    }
+                    .padding(.leading, diffContentHorizontalInset)
                 }
             }
         }
@@ -126,6 +133,27 @@ private struct DiffFileView: View {
         LazyVStack(alignment: .leading, spacing: 0) {
             ForEach(rows) { row in
                 DiffRowView(row: row, lineNumberColumnWidth: lineNumberColumnWidth)
+            }
+        }
+        .background(NeoCodeTheme.diffContextBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct DiffChangeListView: View {
+    let file: DiffFile
+    private let rows: [DiffChangeRow]
+
+    init(file: DiffFile) {
+        self.file = file
+        rows = DiffChangeRowBuilder.makeRows(for: file)
+    }
+
+    var body: some View {
+        LazyVStack(alignment: .leading, spacing: 0) {
+            ForEach(rows) { row in
+                DiffChangeRowView(row: row)
             }
         }
         .background(NeoCodeTheme.diffContextBackground)
@@ -241,6 +269,71 @@ private enum DiffDisplayMetrics {
     }
 }
 
+private struct DiffChangeRow: Identifiable {
+    enum Content {
+        case line(prefix: String, text: String, kind: DiffDisplayCell.Kind)
+        case note(String)
+    }
+
+    let id: String
+    let content: Content
+}
+
+private struct DiffChangeRowView: View {
+    let row: DiffChangeRow
+
+    var body: some View {
+        switch row.content {
+        case .note(let text):
+            Text(text)
+                .font(.neoMonoSmall)
+                .foregroundStyle(NeoCodeTheme.diffContextText)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        case .line(let prefix, let text, let kind):
+            HStack(alignment: .top, spacing: 8) {
+                Text(prefix)
+                    .font(.neoMonoSmall)
+                    .foregroundStyle(textColor(for: kind))
+
+                Text(verbatim: text.isEmpty ? " " : text)
+                    .font(.neoMonoSmall)
+                    .foregroundStyle(textColor(for: kind))
+                    .lineLimit(nil)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(backgroundColor(for: kind))
+        }
+    }
+
+    private func backgroundColor(for kind: DiffDisplayCell.Kind) -> Color {
+        switch kind {
+        case .context:
+            return .clear
+        case .added:
+            return NeoCodeTheme.diffAddedBackground
+        case .removed:
+            return NeoCodeTheme.diffRemovedBackground
+        }
+    }
+
+    private func textColor(for kind: DiffDisplayCell.Kind) -> Color {
+        switch kind {
+        case .context:
+            return NeoCodeTheme.diffContextText
+        case .added:
+            return NeoCodeTheme.diffAddedText
+        case .removed:
+            return NeoCodeTheme.diffRemovedText
+        }
+    }
+}
+
 private struct DiffDisplayRow: Identifiable {
     enum Content {
         case split(left: DiffDisplayCell?, right: DiffDisplayCell?)
@@ -340,17 +433,50 @@ private enum DiffDisplayRowBuilder {
     }
 
     private static func emptyStateText(for change: DiffFile.ChangeKind) -> String {
-        switch change {
-        case .added:
-            return "New file created."
-        case .deleted:
-            return "File removed."
-        case .renamed:
-            return "File renamed with no inline hunk details."
-        case .copied:
-            return "File copied with no inline hunk details."
-        case .modified, .unknown:
-            return "No inline diff available."
+        diffEmptyStateText(for: change)
+    }
+}
+
+private enum DiffChangeRowBuilder {
+    static func makeRows(for file: DiffFile) -> [DiffChangeRow] {
+        let rows = file.hunks.enumerated().flatMap { hunkIndex, hunk in
+            hunk.lines.enumerated().compactMap { lineIndex, line in
+                switch line.kind {
+                case .added:
+                    return DiffChangeRow(
+                        id: "\(file.id):change:\(hunkIndex):\(lineIndex)",
+                        content: .line(prefix: "+", text: line.text, kind: .added)
+                    )
+                case .removed:
+                    return DiffChangeRow(
+                        id: "\(file.id):change:\(hunkIndex):\(lineIndex)",
+                        content: .line(prefix: "-", text: line.text, kind: .removed)
+                    )
+                case .context, .note:
+                    return nil
+                }
+            }
         }
+
+        if rows.isEmpty {
+            return [DiffChangeRow(id: "\(file.id):empty", content: .note(diffEmptyStateText(for: file.change)))]
+        }
+
+        return rows
+    }
+}
+
+private func diffEmptyStateText(for change: DiffFile.ChangeKind) -> String {
+    switch change {
+    case .added:
+        return "New file created."
+    case .deleted:
+        return "File removed."
+    case .renamed:
+        return "File renamed with no inline hunk details."
+    case .copied:
+        return "File copied with no inline hunk details."
+    case .modified, .unknown:
+        return "No added or removed lines."
     }
 }

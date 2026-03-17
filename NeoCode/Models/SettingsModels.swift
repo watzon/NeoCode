@@ -217,7 +217,8 @@ enum NeoCodeFontCatalog {
     static func postScriptName(for storedName: String, preferFixedPitch: Bool) -> String? {
         guard !storedName.isEmpty,
               storedName != defaultUIFontName,
-              storedName != defaultCodeFontName
+              storedName != defaultCodeFontName,
+              !usesSystemMonospaceStack(storedName)
         else {
             return nil
         }
@@ -227,6 +228,33 @@ enum NeoCodeFontCatalog {
         }
 
         return preferredMember(forFamily: storedName, preferFixedPitch: preferFixedPitch)?.postScriptName
+    }
+
+    static func displayName(for storedName: String, preferFixedPitch: Bool) -> String {
+        let fallback = preferFixedPitch ? defaultCodeFontName : defaultUIFontName
+        let trimmed = storedName.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !trimmed.isEmpty else {
+            return fallback
+        }
+
+        if usesSystemMonospaceStack(trimmed) {
+            return "System Monospace"
+        }
+
+        return trimmed
+    }
+
+    static func uiOptions(includingSelected storedName: String) -> [NeoCodeFontOption] {
+        options(includingSelected: storedName, in: uiOptions, preferFixedPitch: false)
+    }
+
+    static func codeOptions(includingSelected storedName: String) -> [NeoCodeFontOption] {
+        options(includingSelected: storedName, in: codeOptions, preferFixedPitch: true)
+    }
+
+    static func usesSystemMonospaceStack(_ storedName: String) -> Bool {
+        storedName.localizedCaseInsensitiveContains("ui-monospace")
     }
 
     private static func buildUIOptions() -> [NeoCodeFontOption] {
@@ -288,6 +316,20 @@ enum NeoCodeFontCatalog {
         }
     }
 
+    private static func options(
+        includingSelected storedName: String,
+        in baseOptions: [NeoCodeFontOption],
+        preferFixedPitch: Bool
+    ) -> [NeoCodeFontOption] {
+        guard !storedName.isEmpty,
+              !baseOptions.contains(where: { $0.id == storedName })
+        else {
+            return baseOptions
+        }
+
+        return [NeoCodeFontOption(id: storedName, title: displayName(for: storedName, preferFixedPitch: preferFixedPitch))] + baseOptions
+    }
+
     private struct FontMember {
         let postScriptName: String
         let displayName: String
@@ -315,8 +357,6 @@ struct NeoCodeAppearanceSettings: Codable, Hashable {
     var usesPointerCursor: Bool
     var uiFontSize: Double
     var codeFontSize: Double
-    var uiFontName: String
-    var codeFontName: String
     var selectedLightPresetID: String?
     var selectedDarkPresetID: String?
 
@@ -327,8 +367,6 @@ struct NeoCodeAppearanceSettings: Codable, Hashable {
         usesPointerCursor: Bool = false,
         uiFontSize: Double = 13,
         codeFontSize: Double = 12,
-        uiFontName: String = NeoCodeFontCatalog.defaultUIFontName,
-        codeFontName: String = NeoCodeFontCatalog.defaultCodeFontName,
         selectedLightPresetID: String? = nil,
         selectedDarkPresetID: String? = nil
     ) {
@@ -338,35 +376,9 @@ struct NeoCodeAppearanceSettings: Codable, Hashable {
         self.usesPointerCursor = usesPointerCursor
         self.uiFontSize = uiFontSize
         self.codeFontSize = codeFontSize
-        self.uiFontName = uiFontName
-        self.codeFontName = codeFontName
         self.selectedLightPresetID = selectedLightPresetID
         self.selectedDarkPresetID = selectedDarkPresetID
         syncPresetSelection()
-    }
-
-    init(
-        themeMode: NeoCodeThemeMode,
-        lightTheme: NeoCodeThemeProfile,
-        darkTheme: NeoCodeThemeProfile,
-        usesPointerCursor: Bool,
-        uiFontSize: Double,
-        codeFontSize: Double,
-        uiFontName: String,
-        codeFontName: String
-    ) {
-        self.init(
-            themeMode: themeMode,
-            lightTheme: lightTheme,
-            darkTheme: darkTheme,
-            usesPointerCursor: usesPointerCursor,
-            uiFontSize: uiFontSize,
-            codeFontSize: codeFontSize,
-            uiFontName: uiFontName,
-            codeFontName: codeFontName,
-            selectedLightPresetID: nil,
-            selectedDarkPresetID: nil
-        )
     }
 
     enum CodingKeys: String, CodingKey {
@@ -376,10 +388,10 @@ struct NeoCodeAppearanceSettings: Codable, Hashable {
         case usesPointerCursor
         case uiFontSize
         case codeFontSize
-        case uiFontName
-        case codeFontName
         case selectedLightPresetID
         case selectedDarkPresetID
+        case uiFontName
+        case codeFontName
     }
 
     init(from decoder: Decoder) throws {
@@ -390,11 +402,29 @@ struct NeoCodeAppearanceSettings: Codable, Hashable {
         usesPointerCursor = try container.decodeIfPresent(Bool.self, forKey: .usesPointerCursor) ?? false
         uiFontSize = try container.decodeIfPresent(Double.self, forKey: .uiFontSize) ?? 13
         codeFontSize = try container.decodeIfPresent(Double.self, forKey: .codeFontSize) ?? 12
-        uiFontName = try container.decodeIfPresent(String.self, forKey: .uiFontName) ?? NeoCodeFontCatalog.defaultUIFontName
-        codeFontName = try container.decodeIfPresent(String.self, forKey: .codeFontName) ?? NeoCodeFontCatalog.defaultCodeFontName
         selectedLightPresetID = try container.decodeIfPresent(String.self, forKey: .selectedLightPresetID)
         selectedDarkPresetID = try container.decodeIfPresent(String.self, forKey: .selectedDarkPresetID)
+
+        if container.contains(.uiFontName) || container.contains(.codeFontName) {
+            let legacyUIFontName = try container.decodeIfPresent(String.self, forKey: .uiFontName) ?? NeoCodeFontCatalog.defaultUIFontName
+            let legacyCodeFontName = try container.decodeIfPresent(String.self, forKey: .codeFontName) ?? NeoCodeFontCatalog.defaultCodeFontName
+            lightTheme.applyLegacyFontNames(uiFontName: legacyUIFontName, codeFontName: legacyCodeFontName)
+            darkTheme.applyLegacyFontNames(uiFontName: legacyUIFontName, codeFontName: legacyCodeFontName)
+        }
+
         syncPresetSelection()
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(themeMode, forKey: .themeMode)
+        try container.encode(lightTheme, forKey: .lightTheme)
+        try container.encode(darkTheme, forKey: .darkTheme)
+        try container.encode(usesPointerCursor, forKey: .usesPointerCursor)
+        try container.encode(uiFontSize, forKey: .uiFontSize)
+        try container.encode(codeFontSize, forKey: .codeFontSize)
+        try container.encodeIfPresent(selectedLightPresetID, forKey: .selectedLightPresetID)
+        try container.encodeIfPresent(selectedDarkPresetID, forKey: .selectedDarkPresetID)
     }
 
     mutating func syncPresetSelection() {
@@ -410,12 +440,16 @@ struct NeoCodeAppearanceSettings: Codable, Hashable {
     }
 
     mutating func applyPreset(_ preset: NeoCodeThemePreset, kind: ThemeProfileKind) {
+        guard let theme = preset.theme(for: kind) else {
+            return
+        }
+
         switch kind {
         case .light:
-            lightTheme = preset.lightTheme
+            lightTheme = theme
             selectedLightPresetID = preset.id
         case .dark:
-            darkTheme = preset.darkTheme
+            darkTheme = theme
             selectedDarkPresetID = preset.id
         }
     }
@@ -431,35 +465,90 @@ struct NeoCodeAppearanceSettings: Codable, Hashable {
 
     static func matchingPresetID(for profile: NeoCodeThemeProfile, kind: ThemeProfileKind) -> String? {
         NeoCodeThemePresetCatalog.presets.first { preset in
-            switch kind {
-            case .light:
-                return preset.lightTheme.matches(profile)
-            case .dark:
-                return preset.darkTheme.matches(profile)
-            }
+            preset.theme(for: kind)?.matches(profile) == true
         }?.id
     }
 }
 
 struct NeoCodeThemeProfile: Codable, Hashable {
+    static let defaultLightDiffAddedHex = "#2B7A4C"
+    static let defaultDarkDiffAddedHex = "#54B47C"
+    static let defaultLightDiffRemovedHex = "#9F5B16"
+    static let defaultDarkDiffRemovedHex = "#D68642"
+    static let defaultDiffAddedHex = defaultLightDiffAddedHex
+    static let defaultDiffRemovedHex = defaultLightDiffRemovedHex
+
     var accentHex: String
     var backgroundHex: String
     var foregroundHex: String
     var contrast: Double
     var isSidebarTranslucent: Bool
+    var diffAddedHex: String
+    var diffRemovedHex: String
+    var skillHex: String
+    var uiFontName: String
+    var codeFontName: String
 
     init(
         accentHex: String,
         backgroundHex: String,
         foregroundHex: String,
         contrast: Double,
-        isSidebarTranslucent: Bool
+        isSidebarTranslucent: Bool,
+        diffAddedHex: String = defaultDiffAddedHex,
+        diffRemovedHex: String = defaultDiffRemovedHex,
+        skillHex: String? = nil,
+        uiFontName: String = NeoCodeFontCatalog.defaultUIFontName,
+        codeFontName: String = NeoCodeFontCatalog.defaultCodeFontName
     ) {
         self.accentHex = accentHex
         self.backgroundHex = backgroundHex
         self.foregroundHex = foregroundHex
         self.contrast = contrast
         self.isSidebarTranslucent = isSidebarTranslucent
+        self.diffAddedHex = diffAddedHex
+        self.diffRemovedHex = diffRemovedHex
+        self.skillHex = skillHex ?? accentHex
+        self.uiFontName = Self.normalizedFontName(uiFontName, fallback: NeoCodeFontCatalog.defaultUIFontName)
+        self.codeFontName = Self.normalizedFontName(codeFontName, fallback: NeoCodeFontCatalog.defaultCodeFontName)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case accentHex
+        case backgroundHex
+        case foregroundHex
+        case contrast
+        case isSidebarTranslucent
+        case diffAddedHex
+        case diffRemovedHex
+        case skillHex
+        case uiFontName
+        case codeFontName
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        accentHex = try container.decodeIfPresent(String.self, forKey: .accentHex) ?? Self.darkDefault.accentHex
+        backgroundHex = try container.decodeIfPresent(String.self, forKey: .backgroundHex) ?? Self.darkDefault.backgroundHex
+        foregroundHex = try container.decodeIfPresent(String.self, forKey: .foregroundHex) ?? Self.darkDefault.foregroundHex
+        contrast = try container.decodeIfPresent(Double.self, forKey: .contrast) ?? Self.darkDefault.contrast
+        isSidebarTranslucent = try container.decodeIfPresent(Bool.self, forKey: .isSidebarTranslucent) ?? false
+
+        let isDark = Self.isDarkBackgroundHex(backgroundHex)
+        diffAddedHex = try container.decodeIfPresent(String.self, forKey: .diffAddedHex)
+            ?? (isDark ? Self.defaultDarkDiffAddedHex : Self.defaultLightDiffAddedHex)
+        diffRemovedHex = try container.decodeIfPresent(String.self, forKey: .diffRemovedHex)
+            ?? (isDark ? Self.defaultDarkDiffRemovedHex : Self.defaultLightDiffRemovedHex)
+        skillHex = try container.decodeIfPresent(String.self, forKey: .skillHex) ?? accentHex
+        uiFontName = Self.normalizedFontName(
+            try container.decodeIfPresent(String.self, forKey: .uiFontName),
+            fallback: NeoCodeFontCatalog.defaultUIFontName
+        )
+        codeFontName = Self.normalizedFontName(
+            try container.decodeIfPresent(String.self, forKey: .codeFontName),
+            fallback: NeoCodeFontCatalog.defaultCodeFontName
+        )
     }
 
     static let lightDefault = NeoCodeThemeProfile(
@@ -467,7 +556,9 @@ struct NeoCodeThemeProfile: Codable, Hashable {
         backgroundHex: "#F7F3E9",
         foregroundHex: "#241D12",
         contrast: 44,
-        isSidebarTranslucent: false
+        isSidebarTranslucent: false,
+        diffAddedHex: defaultLightDiffAddedHex,
+        diffRemovedHex: defaultLightDiffRemovedHex
     )
 
     static let darkDefault = NeoCodeThemeProfile(
@@ -475,8 +566,34 @@ struct NeoCodeThemeProfile: Codable, Hashable {
         backgroundHex: "#121315",
         foregroundHex: "#F1EBDD",
         contrast: 62,
-        isSidebarTranslucent: true
+        isSidebarTranslucent: true,
+        diffAddedHex: defaultDarkDiffAddedHex,
+        diffRemovedHex: defaultDarkDiffRemovedHex
     )
+
+    mutating func applyLegacyFontNames(uiFontName: String, codeFontName: String) {
+        self.uiFontName = Self.normalizedFontName(uiFontName, fallback: NeoCodeFontCatalog.defaultUIFontName)
+        self.codeFontName = Self.normalizedFontName(codeFontName, fallback: NeoCodeFontCatalog.defaultCodeFontName)
+    }
+
+    static func normalizedFontName(_ fontName: String?, fallback: String) -> String {
+        guard let trimmed = fontName?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+            return fallback
+        }
+
+        return trimmed
+    }
+
+    static func isDarkBackgroundHex(_ hex: String) -> Bool {
+        guard let color = NSColor(neoHex: hex)?.usingColorSpace(.deviceRGB) else {
+            return false
+        }
+
+        let luminance = 0.2126 * color.redComponent
+            + 0.7152 * color.greenComponent
+            + 0.0722 * color.blueComponent
+        return luminance < 0.5
+    }
 }
 
 enum ThemeProfileKind: String, Codable, Hashable, Identifiable {
@@ -492,209 +609,660 @@ struct NeoCodeThemePreset: Codable, Hashable, Identifiable {
     let badgeText: String
     let badgeBackgroundHex: String
     let badgeForegroundHex: String
-    let lightTheme: NeoCodeThemeProfile
-    let darkTheme: NeoCodeThemeProfile
+    let lightTheme: NeoCodeThemeProfile?
+    let darkTheme: NeoCodeThemeProfile?
+
+    func theme(for kind: ThemeProfileKind) -> NeoCodeThemeProfile? {
+        switch kind {
+        case .light:
+            return lightTheme
+        case .dark:
+            return darkTheme
+        }
+    }
 }
 
 enum NeoCodeThemePresetCatalog {
-    static let presets: [NeoCodeThemePreset] = {
+    private static let decodedPresets: ([NeoCodeThemePreset], String?) = {
         let data = Data(json.utf8)
-        return (try? JSONDecoder().decode([NeoCodeThemePreset].self, from: data)) ?? []
+
+        do {
+            return (try JSONDecoder().decode([NeoCodeThemePreset].self, from: data), nil)
+        } catch {
+            return ([], String(describing: error))
+        }
     }()
 
-    private static let json = """
+    static let presets: [NeoCodeThemePreset] = decodedPresets.0
+    static let decodeFailureDescription: String? = decodedPresets.1
+
+    static func presets(for kind: ThemeProfileKind) -> [NeoCodeThemePreset] {
+        presets.filter { $0.theme(for: kind) != nil }
+    }
+
+    private static let json = #"""
     [
       {
         "id": "absolutely",
         "title": "Absolutely",
         "badgeText": "Aa",
-        "badgeBackgroundHex": "#F3E8E2",
-        "badgeForegroundHex": "#C96D4D",
+        "badgeBackgroundHex": "#f9f9f7",
+        "badgeForegroundHex": "#cc7d5e",
         "lightTheme": {
-          "accentHex": "#DF7A53",
-          "backgroundHex": "#F8F1EA",
-          "foregroundHex": "#241915",
-          "contrast": 46,
-          "isSidebarTranslucent": false
+          "accentHex": "#cc7d5e",
+          "backgroundHex": "#f9f9f7",
+          "foregroundHex": "#2d2d2b",
+          "contrast": 45,
+          "isSidebarTranslucent": true,
+          "diffAddedHex": "#00c853",
+          "diffRemovedHex": "#ff5f38",
+          "skillHex": "#cc7d5e",
+          "uiFontName": "SF Pro",
+          "codeFontName": "SF Mono"
         },
         "darkTheme": {
-          "accentHex": "#F09369",
-          "backgroundHex": "#161313",
-          "foregroundHex": "#F6EEE9",
-          "contrast": 64,
-          "isSidebarTranslucent": false
+          "accentHex": "#cc7d5e",
+          "backgroundHex": "#2d2d2b",
+          "foregroundHex": "#f9f9f7",
+          "contrast": 60,
+          "isSidebarTranslucent": true,
+          "diffAddedHex": "#00c853",
+          "diffRemovedHex": "#ff5f38",
+          "skillHex": "#cc7d5e",
+          "uiFontName": "SF Pro",
+          "codeFontName": "SF Mono"
+        }
+      },
+      {
+        "id": "ayu",
+        "title": "Ayu",
+        "badgeText": "Aa",
+        "badgeBackgroundHex": "#0b0e14",
+        "badgeForegroundHex": "#e6b450",
+        "darkTheme": {
+          "accentHex": "#e6b450",
+          "backgroundHex": "#0b0e14",
+          "foregroundHex": "#bfbdb6",
+          "contrast": 60,
+          "isSidebarTranslucent": true,
+          "diffAddedHex": "#7fd962",
+          "diffRemovedHex": "#ea6c73",
+          "skillHex": "#cda1fa",
+          "uiFontName": "SF Pro",
+          "codeFontName": "SF Mono"
         }
       },
       {
         "id": "catppuccin",
         "title": "Catppuccin",
         "badgeText": "Aa",
-        "badgeBackgroundHex": "#ECE6FF",
-        "badgeForegroundHex": "#7C63E6",
+        "badgeBackgroundHex": "#eff1f5",
+        "badgeForegroundHex": "#8839ef",
         "lightTheme": {
-          "accentHex": "#8C6CFF",
-          "backgroundHex": "#F5F1FF",
-          "foregroundHex": "#241B39",
-          "contrast": 42,
-          "isSidebarTranslucent": false
+          "accentHex": "#8839ef",
+          "backgroundHex": "#eff1f5",
+          "foregroundHex": "#4c4f69",
+          "contrast": 45,
+          "isSidebarTranslucent": true,
+          "diffAddedHex": "#40a02b",
+          "diffRemovedHex": "#d20f39",
+          "skillHex": "#8839ef",
+          "uiFontName": "SF Pro",
+          "codeFontName": "SF Mono"
         },
         "darkTheme": {
-          "accentHex": "#B69CFF",
-          "backgroundHex": "#181626",
-          "foregroundHex": "#F3EEFF",
+          "accentHex": "#cba6f7",
+          "backgroundHex": "#1e1e2e",
+          "foregroundHex": "#cdd6f4",
           "contrast": 60,
-          "isSidebarTranslucent": false
+          "isSidebarTranslucent": true,
+          "diffAddedHex": "#a6e3a1",
+          "diffRemovedHex": "#f38ba8",
+          "skillHex": "#cba6f7",
+          "uiFontName": "SF Pro",
+          "codeFontName": "SF Mono"
         }
       },
       {
         "id": "codex",
         "title": "Codex",
         "badgeText": "Aa",
-        "badgeBackgroundHex": "#F5F7FF",
-        "badgeForegroundHex": "#2A63FF",
+        "badgeBackgroundHex": "#ffffff",
+        "badgeForegroundHex": "#0169cc",
         "lightTheme": {
-          "accentHex": "#0285FF",
-          "backgroundHex": "#FFFFFF",
-          "foregroundHex": "#0D0D0D",
+          "accentHex": "#0169cc",
+          "backgroundHex": "#ffffff",
+          "foregroundHex": "#0d0d0d",
           "contrast": 45,
-          "isSidebarTranslucent": false
+          "isSidebarTranslucent": true,
+          "diffAddedHex": "#00a240",
+          "diffRemovedHex": "#e02e2a",
+          "skillHex": "#751ed9",
+          "uiFontName": "SF Pro",
+          "codeFontName": "SF Mono"
         },
         "darkTheme": {
-          "accentHex": "#339CFF",
-          "backgroundHex": "#181818",
-          "foregroundHex": "#FFFFFF",
+          "accentHex": "#0169cc",
+          "backgroundHex": "#111111",
+          "foregroundHex": "#fcfcfc",
           "contrast": 60,
-          "isSidebarTranslucent": false
+          "isSidebarTranslucent": true,
+          "diffAddedHex": "#00a240",
+          "diffRemovedHex": "#e02e2a",
+          "skillHex": "#b06dff",
+          "uiFontName": "SF Pro",
+          "codeFontName": "SF Mono"
+        }
+      },
+      {
+        "id": "dracula",
+        "title": "Dracula",
+        "badgeText": "Aa",
+        "badgeBackgroundHex": "#282a36",
+        "badgeForegroundHex": "#ff79c6",
+        "darkTheme": {
+          "accentHex": "#ff79c6",
+          "backgroundHex": "#282a36",
+          "foregroundHex": "#f8f8f2",
+          "contrast": 60,
+          "isSidebarTranslucent": true,
+          "diffAddedHex": "#50fa7b",
+          "diffRemovedHex": "#ff5555",
+          "skillHex": "#ff79c6",
+          "uiFontName": "SF Pro",
+          "codeFontName": "SF Mono"
         }
       },
       {
         "id": "everforest",
         "title": "Everforest",
         "badgeText": "Aa",
-        "badgeBackgroundHex": "#EFF3D8",
-        "badgeForegroundHex": "#708238",
+        "badgeBackgroundHex": "#fdf6e3",
+        "badgeForegroundHex": "#93b259",
         "lightTheme": {
-          "accentHex": "#7A8F42",
-          "backgroundHex": "#F4F1E4",
-          "foregroundHex": "#283222",
-          "contrast": 43,
-          "isSidebarTranslucent": false
+          "accentHex": "#93b259",
+          "backgroundHex": "#fdf6e3",
+          "foregroundHex": "#5c6a72",
+          "contrast": 45,
+          "isSidebarTranslucent": true,
+          "diffAddedHex": "#8da101",
+          "diffRemovedHex": "#f85552",
+          "skillHex": "#df69ba",
+          "uiFontName": "SF Pro",
+          "codeFontName": "SF Mono"
         },
         "darkTheme": {
-          "accentHex": "#9FBC69",
-          "backgroundHex": "#202622",
-          "foregroundHex": "#E6E8D5",
-          "contrast": 61,
-          "isSidebarTranslucent": false
+          "accentHex": "#a7c080",
+          "backgroundHex": "#2d353b",
+          "foregroundHex": "#d3c6aa",
+          "contrast": 60,
+          "isSidebarTranslucent": true,
+          "diffAddedHex": "#a7c080",
+          "diffRemovedHex": "#e67e80",
+          "skillHex": "#d699b6",
+          "uiFontName": "SF Pro",
+          "codeFontName": "SF Mono"
         }
       },
       {
         "id": "github",
         "title": "GitHub",
         "badgeText": "Aa",
-        "badgeBackgroundHex": "#EDF4FF",
-        "badgeForegroundHex": "#2F6FEB",
+        "badgeBackgroundHex": "#ffffff",
+        "badgeForegroundHex": "#0969da",
         "lightTheme": {
-          "accentHex": "#2F6FEB",
-          "backgroundHex": "#FFFFFF",
-          "foregroundHex": "#1F2328",
-          "contrast": 43,
-          "isSidebarTranslucent": false
+          "accentHex": "#0969da",
+          "backgroundHex": "#ffffff",
+          "foregroundHex": "#1f2328",
+          "contrast": 45,
+          "isSidebarTranslucent": true,
+          "diffAddedHex": "#1a7f37",
+          "diffRemovedHex": "#cf222e",
+          "skillHex": "#8250df",
+          "uiFontName": "SF Pro",
+          "codeFontName": "SF Mono"
         },
         "darkTheme": {
-          "accentHex": "#58A6FF",
-          "backgroundHex": "#0D1117",
-          "foregroundHex": "#E6EDF3",
-          "contrast": 66,
-          "isSidebarTranslucent": false
+          "accentHex": "#1f6feb",
+          "backgroundHex": "#0d1117",
+          "foregroundHex": "#e6edf3",
+          "contrast": 60,
+          "isSidebarTranslucent": true,
+          "diffAddedHex": "#3fb950",
+          "diffRemovedHex": "#f85149",
+          "skillHex": "#bc8cff",
+          "uiFontName": "SF Pro",
+          "codeFontName": "SF Mono"
         }
       },
       {
         "id": "gruvbox",
         "title": "Gruvbox",
         "badgeText": "Aa",
-        "badgeBackgroundHex": "#F4ECD8",
-        "badgeForegroundHex": "#B57614",
+        "badgeBackgroundHex": "#fbf1c7",
+        "badgeForegroundHex": "#458588",
         "lightTheme": {
-          "accentHex": "#B57614",
-          "backgroundHex": "#FBF1C7",
-          "foregroundHex": "#3C3836",
-          "contrast": 47,
-          "isSidebarTranslucent": false
+          "accentHex": "#458588",
+          "backgroundHex": "#fbf1c7",
+          "foregroundHex": "#3c3836",
+          "contrast": 45,
+          "isSidebarTranslucent": true,
+          "diffAddedHex": "#3c3836",
+          "diffRemovedHex": "#cc241d",
+          "skillHex": "#b16286",
+          "uiFontName": "SF Pro",
+          "codeFontName": "SF Mono"
         },
         "darkTheme": {
-          "accentHex": "#FABD2F",
+          "accentHex": "#458588",
           "backgroundHex": "#282828",
-          "foregroundHex": "#EBDBB2",
-          "contrast": 64,
-          "isSidebarTranslucent": false
+          "foregroundHex": "#ebdbb2",
+          "contrast": 60,
+          "isSidebarTranslucent": true,
+          "diffAddedHex": "#ebdbb2",
+          "diffRemovedHex": "#cc241d",
+          "skillHex": "#b16286",
+          "uiFontName": "SF Pro",
+          "codeFontName": "SF Mono"
         }
       },
       {
         "id": "linear",
         "title": "Linear",
         "badgeText": "Aa",
-        "badgeBackgroundHex": "#EFEFFF",
-        "badgeForegroundHex": "#5D6BFF",
+        "badgeBackgroundHex": "#f7f8fa",
+        "badgeForegroundHex": "#5e6ad2",
         "lightTheme": {
-          "accentHex": "#5E6AD2",
-          "backgroundHex": "#F7F7FA",
-          "foregroundHex": "#101218",
-          "contrast": 41,
-          "isSidebarTranslucent": false
+          "accentHex": "#5e6ad2",
+          "backgroundHex": "#f7f8fa",
+          "foregroundHex": "#2a3140",
+          "contrast": 45,
+          "isSidebarTranslucent": false,
+          "diffAddedHex": "#00a240",
+          "diffRemovedHex": "#ba2623",
+          "skillHex": "#8160d8",
+          "uiFontName": "Inter",
+          "codeFontName": "SF Mono"
         },
         "darkTheme": {
-          "accentHex": "#8490FF",
-          "backgroundHex": "#08090A",
-          "foregroundHex": "#F7F8F8",
-          "contrast": 63,
-          "isSidebarTranslucent": false
+          "accentHex": "#5e6ad2",
+          "backgroundHex": "#17181d",
+          "foregroundHex": "#e6e9ef",
+          "contrast": 60,
+          "isSidebarTranslucent": false,
+          "diffAddedHex": "#7ad9c0",
+          "diffRemovedHex": "#fa423e",
+          "skillHex": "#c2a1ff",
+          "uiFontName": "Inter",
+          "codeFontName": "SF Mono"
+        }
+      },
+      {
+        "id": "lobster",
+        "title": "Lobster",
+        "badgeText": "Aa",
+        "badgeBackgroundHex": "#111827",
+        "badgeForegroundHex": "#ff5c5c",
+        "darkTheme": {
+          "accentHex": "#ff5c5c",
+          "backgroundHex": "#111827",
+          "foregroundHex": "#e4e4e7",
+          "contrast": 60,
+          "isSidebarTranslucent": false,
+          "diffAddedHex": "#22c55e",
+          "diffRemovedHex": "#ff5c5c",
+          "skillHex": "#3b82f6",
+          "uiFontName": "Satoshi",
+          "codeFontName": "SF Mono"
+        }
+      },
+      {
+        "id": "material",
+        "title": "Material",
+        "badgeText": "Aa",
+        "badgeBackgroundHex": "#212121",
+        "badgeForegroundHex": "#80cbc4",
+        "darkTheme": {
+          "accentHex": "#80cbc4",
+          "backgroundHex": "#212121",
+          "foregroundHex": "#eeffff",
+          "contrast": 60,
+          "isSidebarTranslucent": false,
+          "diffAddedHex": "#c3e88d",
+          "diffRemovedHex": "#f07178",
+          "skillHex": "#c792ea",
+          "uiFontName": "Satoshi",
+          "codeFontName": "SF Mono"
+        }
+      },
+      {
+        "id": "matrix",
+        "title": "Matrix",
+        "badgeText": "Aa",
+        "badgeBackgroundHex": "#040805",
+        "badgeForegroundHex": "#1eff5a",
+        "darkTheme": {
+          "accentHex": "#1eff5a",
+          "backgroundHex": "#040805",
+          "foregroundHex": "#b8ffca",
+          "contrast": 60,
+          "isSidebarTranslucent": false,
+          "diffAddedHex": "#1eff5a",
+          "diffRemovedHex": "#fa423e",
+          "skillHex": "#1eff5a",
+          "uiFontName": "ui-monospace, \"SFMono-Regular\", \"SF Mono\", Menlo, Consolas, \"Liberation Mono\", monospace",
+          "codeFontName": "SF Mono"
+        }
+      },
+      {
+        "id": "monokai",
+        "title": "Monokai",
+        "badgeText": "Aa",
+        "badgeBackgroundHex": "#272822",
+        "badgeForegroundHex": "#99947c",
+        "darkTheme": {
+          "accentHex": "#99947c",
+          "backgroundHex": "#272822",
+          "foregroundHex": "#f8f8f2",
+          "contrast": 60,
+          "isSidebarTranslucent": false,
+          "diffAddedHex": "#86b42b",
+          "diffRemovedHex": "#c4265e",
+          "skillHex": "#8c6bc8",
+          "uiFontName": "ui-monospace, \"SFMono-Regular\", \"SF Mono\", Menlo, Consolas, \"Liberation Mono\", monospace",
+          "codeFontName": "SF Mono"
+        }
+      },
+      {
+        "id": "night-owl",
+        "title": "Night Owl",
+        "badgeText": "Aa",
+        "badgeBackgroundHex": "#011627",
+        "badgeForegroundHex": "#44596b",
+        "darkTheme": {
+          "accentHex": "#44596b",
+          "backgroundHex": "#011627",
+          "foregroundHex": "#d6deeb",
+          "contrast": 60,
+          "isSidebarTranslucent": false,
+          "diffAddedHex": "#c5e478",
+          "diffRemovedHex": "#ef5350",
+          "skillHex": "#c792ea",
+          "uiFontName": "ui-monospace, \"SFMono-Regular\", \"SF Mono\", Menlo, Consolas, \"Liberation Mono\", monospace",
+          "codeFontName": "SF Mono"
+        }
+      },
+      {
+        "id": "nord",
+        "title": "Nord",
+        "badgeText": "Aa",
+        "badgeBackgroundHex": "#2e3440",
+        "badgeForegroundHex": "#88c0d0",
+        "darkTheme": {
+          "accentHex": "#88c0d0",
+          "backgroundHex": "#2e3440",
+          "foregroundHex": "#d8dee9",
+          "contrast": 60,
+          "isSidebarTranslucent": false,
+          "diffAddedHex": "#a3be8c",
+          "diffRemovedHex": "#bf616a",
+          "skillHex": "#b48ead",
+          "uiFontName": "ui-monospace, \"SFMono-Regular\", \"SF Mono\", Menlo, Consolas, \"Liberation Mono\", monospace",
+          "codeFontName": "SF Mono"
         }
       },
       {
         "id": "notion",
         "title": "Notion",
         "badgeText": "Aa",
-        "badgeBackgroundHex": "#F4F4F4",
-        "badgeForegroundHex": "#111111",
+        "badgeBackgroundHex": "#ffffff",
+        "badgeForegroundHex": "#3183d8",
         "lightTheme": {
-          "accentHex": "#111111",
-          "backgroundHex": "#FFFFFF",
-          "foregroundHex": "#191919",
-          "contrast": 40,
-          "isSidebarTranslucent": false
+          "accentHex": "#3183d8",
+          "backgroundHex": "#ffffff",
+          "foregroundHex": "#37352f",
+          "contrast": 45,
+          "isSidebarTranslucent": false,
+          "diffAddedHex": "#008000",
+          "diffRemovedHex": "#a31515",
+          "skillHex": "#0000ff",
+          "uiFontName": "SF Pro",
+          "codeFontName": "SF Mono"
         },
         "darkTheme": {
-          "accentHex": "#F1F1EF",
+          "accentHex": "#3183d8",
           "backgroundHex": "#191919",
-          "foregroundHex": "#F1F1EF",
-          "contrast": 58,
-          "isSidebarTranslucent": false
+          "foregroundHex": "#d9d9d8",
+          "contrast": 60,
+          "isSidebarTranslucent": false,
+          "diffAddedHex": "#4ec9b0",
+          "diffRemovedHex": "#fa423e",
+          "skillHex": "#3183d8",
+          "uiFontName": "SF Pro",
+          "codeFontName": "SF Mono"
         }
       },
       {
         "id": "one",
         "title": "One",
         "badgeText": "Aa",
-        "badgeBackgroundHex": "#EDF3FF",
-        "badgeForegroundHex": "#4C8DFF",
+        "badgeBackgroundHex": "#fafafa",
+        "badgeForegroundHex": "#526fff",
         "lightTheme": {
-          "accentHex": "#4C8DFF",
-          "backgroundHex": "#FAFBFC",
-          "foregroundHex": "#22252A",
-          "contrast": 42,
-          "isSidebarTranslucent": false
+          "accentHex": "#526fff",
+          "backgroundHex": "#fafafa",
+          "foregroundHex": "#383a42",
+          "contrast": 45,
+          "isSidebarTranslucent": false,
+          "diffAddedHex": "#3bba54",
+          "diffRemovedHex": "#e45649",
+          "skillHex": "#526fff",
+          "uiFontName": "SF Pro",
+          "codeFontName": "SF Mono"
         },
         "darkTheme": {
-          "accentHex": "#61AFEF",
-          "backgroundHex": "#282C34",
-          "foregroundHex": "#ABB2BF",
-          "contrast": 63,
-          "isSidebarTranslucent": false
+          "accentHex": "#4d78cc",
+          "backgroundHex": "#282c34",
+          "foregroundHex": "#abb2bf",
+          "contrast": 60,
+          "isSidebarTranslucent": false,
+          "diffAddedHex": "#8cc265",
+          "diffRemovedHex": "#e05561",
+          "skillHex": "#c162de",
+          "uiFontName": "SF Pro",
+          "codeFontName": "SF Mono"
+        }
+      },
+      {
+        "id": "oscurange",
+        "title": "Oscurange",
+        "badgeText": "Aa",
+        "badgeBackgroundHex": "#0b0b0f",
+        "badgeForegroundHex": "#f9b98c",
+        "darkTheme": {
+          "accentHex": "#f9b98c",
+          "backgroundHex": "#0b0b0f",
+          "foregroundHex": "#e6e6e6",
+          "contrast": 60,
+          "isSidebarTranslucent": false,
+          "diffAddedHex": "#40c977",
+          "diffRemovedHex": "#fa423e",
+          "skillHex": "#479ffa",
+          "uiFontName": "SF Pro",
+          "codeFontName": "SF Mono"
+        }
+      },
+      {
+        "id": "proof",
+        "title": "Proof",
+        "badgeText": "Aa",
+        "badgeBackgroundHex": "#f5f3ed",
+        "badgeForegroundHex": "#3d755d",
+        "lightTheme": {
+          "accentHex": "#3d755d",
+          "backgroundHex": "#f5f3ed",
+          "foregroundHex": "#2f312d",
+          "contrast": 45,
+          "isSidebarTranslucent": true,
+          "diffAddedHex": "#3d755d",
+          "diffRemovedHex": "#ba2623",
+          "skillHex": "#5f6ac2",
+          "uiFontName": "SF Pro",
+          "codeFontName": "SF Mono"
+        }
+      },
+      {
+        "id": "rose-pine",
+        "title": "Rose Pine",
+        "badgeText": "Aa",
+        "badgeBackgroundHex": "#faf4ed",
+        "badgeForegroundHex": "#d7827e",
+        "lightTheme": {
+          "accentHex": "#d7827e",
+          "backgroundHex": "#faf4ed",
+          "foregroundHex": "#575279",
+          "contrast": 45,
+          "isSidebarTranslucent": true,
+          "diffAddedHex": "#56949f",
+          "diffRemovedHex": "#797593",
+          "skillHex": "#907aa9",
+          "uiFontName": "SF Pro",
+          "codeFontName": "SF Mono"
+        },
+        "darkTheme": {
+          "accentHex": "#ea9a97",
+          "backgroundHex": "#232136",
+          "foregroundHex": "#e0def4",
+          "contrast": 60,
+          "isSidebarTranslucent": false,
+          "diffAddedHex": "#9ccfd8",
+          "diffRemovedHex": "#908caa",
+          "skillHex": "#c4a7e7",
+          "uiFontName": "SF Pro",
+          "codeFontName": "SF Mono"
+        }
+      },
+      {
+        "id": "sentry",
+        "title": "Sentry",
+        "badgeText": "Aa",
+        "badgeBackgroundHex": "#2d2935",
+        "badgeForegroundHex": "#7055f6",
+        "darkTheme": {
+          "accentHex": "#7055f6",
+          "backgroundHex": "#2d2935",
+          "foregroundHex": "#e6dff9",
+          "contrast": 60,
+          "isSidebarTranslucent": false,
+          "diffAddedHex": "#8ee6d7",
+          "diffRemovedHex": "#fa423e",
+          "skillHex": "#7055f6",
+          "uiFontName": "SF Pro",
+          "codeFontName": "SF Mono"
+        }
+      },
+      {
+        "id": "solarized",
+        "title": "Solarized",
+        "badgeText": "Aa",
+        "badgeBackgroundHex": "#fdf6e3",
+        "badgeForegroundHex": "#b58900",
+        "lightTheme": {
+          "accentHex": "#b58900",
+          "backgroundHex": "#fdf6e3",
+          "foregroundHex": "#657b83",
+          "contrast": 45,
+          "isSidebarTranslucent": true,
+          "diffAddedHex": "#859900",
+          "diffRemovedHex": "#dc322f",
+          "skillHex": "#d33682",
+          "uiFontName": "SF Pro",
+          "codeFontName": "SF Mono"
+        },
+        "darkTheme": {
+          "accentHex": "#d30102",
+          "backgroundHex": "#002b36",
+          "foregroundHex": "#839496",
+          "contrast": 60,
+          "isSidebarTranslucent": false,
+          "diffAddedHex": "#859900",
+          "diffRemovedHex": "#dc322f",
+          "skillHex": "#d33682",
+          "uiFontName": "SF Pro",
+          "codeFontName": "SF Mono"
+        }
+      },
+      {
+        "id": "temple",
+        "title": "Temple",
+        "badgeText": "Aa",
+        "badgeBackgroundHex": "#02120c",
+        "badgeForegroundHex": "#e4f222",
+        "darkTheme": {
+          "accentHex": "#e4f222",
+          "backgroundHex": "#02120c",
+          "foregroundHex": "#c7e6da",
+          "contrast": 60,
+          "isSidebarTranslucent": false,
+          "diffAddedHex": "#40c977",
+          "diffRemovedHex": "#fa423e",
+          "skillHex": "#e4f222",
+          "uiFontName": "SF Pro",
+          "codeFontName": "SF Mono"
+        }
+      },
+      {
+        "id": "tokyo-night",
+        "title": "Tokyo Night",
+        "badgeText": "Aa",
+        "badgeBackgroundHex": "#1a1b26",
+        "badgeForegroundHex": "#3d59a1",
+        "darkTheme": {
+          "accentHex": "#3d59a1",
+          "backgroundHex": "#1a1b26",
+          "foregroundHex": "#a9b1d6",
+          "contrast": 60,
+          "isSidebarTranslucent": false,
+          "diffAddedHex": "#449dab",
+          "diffRemovedHex": "#914c54",
+          "skillHex": "#9d7cd8",
+          "uiFontName": "SF Pro",
+          "codeFontName": "SF Mono"
+        }
+      },
+      {
+        "id": "vscode-plus",
+        "title": "VS Code Plus",
+        "badgeText": "Aa",
+        "badgeBackgroundHex": "#ffffff",
+        "badgeForegroundHex": "#007acc",
+        "lightTheme": {
+          "accentHex": "#007acc",
+          "backgroundHex": "#ffffff",
+          "foregroundHex": "#000000",
+          "contrast": 45,
+          "isSidebarTranslucent": true,
+          "diffAddedHex": "#008000",
+          "diffRemovedHex": "#ee0000",
+          "skillHex": "#0000ff",
+          "uiFontName": "SF Pro",
+          "codeFontName": "SF Mono"
+        },
+        "darkTheme": {
+          "accentHex": "#007acc",
+          "backgroundHex": "#1e1e1e",
+          "foregroundHex": "#d4d4d4",
+          "contrast": 60,
+          "isSidebarTranslucent": false,
+          "diffAddedHex": "#369432",
+          "diffRemovedHex": "#f44747",
+          "skillHex": "#000080",
+          "uiFontName": "SF Pro",
+          "codeFontName": "SF Mono"
         }
       }
     ]
-    """
+    """#
 }
 
 struct NeoCodeThemeProfileTransfer: Codable, Hashable {
@@ -704,14 +1272,26 @@ struct NeoCodeThemeProfileTransfer: Codable, Hashable {
     var backgroundHex: String
     var foregroundHex: String
     var contrast: Double
+    var isSidebarTranslucent: Bool
+    var diffAddedHex: String
+    var diffRemovedHex: String
+    var skillHex: String
+    var uiFontName: String
+    var codeFontName: String
 
     init(
-        version: Int = 1,
+        version: Int = 2,
         name: String? = nil,
         accentHex: String,
         backgroundHex: String,
         foregroundHex: String,
-        contrast: Double
+        contrast: Double,
+        isSidebarTranslucent: Bool = false,
+        diffAddedHex: String = NeoCodeThemeProfile.defaultDiffAddedHex,
+        diffRemovedHex: String = NeoCodeThemeProfile.defaultDiffRemovedHex,
+        skillHex: String? = nil,
+        uiFontName: String = NeoCodeFontCatalog.defaultUIFontName,
+        codeFontName: String = NeoCodeFontCatalog.defaultCodeFontName
     ) {
         self.version = version
         self.name = name
@@ -719,6 +1299,53 @@ struct NeoCodeThemeProfileTransfer: Codable, Hashable {
         self.backgroundHex = backgroundHex
         self.foregroundHex = foregroundHex
         self.contrast = contrast
+        self.isSidebarTranslucent = isSidebarTranslucent
+        self.diffAddedHex = diffAddedHex
+        self.diffRemovedHex = diffRemovedHex
+        self.skillHex = skillHex ?? accentHex
+        self.uiFontName = NeoCodeThemeProfile.normalizedFontName(uiFontName, fallback: NeoCodeFontCatalog.defaultUIFontName)
+        self.codeFontName = NeoCodeThemeProfile.normalizedFontName(codeFontName, fallback: NeoCodeFontCatalog.defaultCodeFontName)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case version
+        case name
+        case accentHex
+        case backgroundHex
+        case foregroundHex
+        case contrast
+        case isSidebarTranslucent
+        case diffAddedHex
+        case diffRemovedHex
+        case skillHex
+        case uiFontName
+        case codeFontName
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 1
+        name = try container.decodeIfPresent(String.self, forKey: .name)
+        accentHex = try container.decodeIfPresent(String.self, forKey: .accentHex) ?? NeoCodeThemeProfile.darkDefault.accentHex
+        backgroundHex = try container.decodeIfPresent(String.self, forKey: .backgroundHex) ?? NeoCodeThemeProfile.darkDefault.backgroundHex
+        foregroundHex = try container.decodeIfPresent(String.self, forKey: .foregroundHex) ?? NeoCodeThemeProfile.darkDefault.foregroundHex
+        contrast = try container.decodeIfPresent(Double.self, forKey: .contrast) ?? NeoCodeThemeProfile.darkDefault.contrast
+        isSidebarTranslucent = try container.decodeIfPresent(Bool.self, forKey: .isSidebarTranslucent) ?? false
+
+        let isDark = NeoCodeThemeProfile.isDarkBackgroundHex(backgroundHex)
+        diffAddedHex = try container.decodeIfPresent(String.self, forKey: .diffAddedHex)
+            ?? (isDark ? NeoCodeThemeProfile.defaultDarkDiffAddedHex : NeoCodeThemeProfile.defaultLightDiffAddedHex)
+        diffRemovedHex = try container.decodeIfPresent(String.self, forKey: .diffRemovedHex)
+            ?? (isDark ? NeoCodeThemeProfile.defaultDarkDiffRemovedHex : NeoCodeThemeProfile.defaultLightDiffRemovedHex)
+        skillHex = try container.decodeIfPresent(String.self, forKey: .skillHex) ?? accentHex
+        uiFontName = NeoCodeThemeProfile.normalizedFontName(
+            try container.decodeIfPresent(String.self, forKey: .uiFontName),
+            fallback: NeoCodeFontCatalog.defaultUIFontName
+        )
+        codeFontName = NeoCodeThemeProfile.normalizedFontName(
+            try container.decodeIfPresent(String.self, forKey: .codeFontName),
+            fallback: NeoCodeFontCatalog.defaultCodeFontName
+        )
     }
 
     init(profile: NeoCodeThemeProfile, name: String? = nil) {
@@ -727,7 +1354,13 @@ struct NeoCodeThemeProfileTransfer: Codable, Hashable {
             accentHex: profile.accentHex,
             backgroundHex: profile.backgroundHex,
             foregroundHex: profile.foregroundHex,
-            contrast: profile.contrast
+            contrast: profile.contrast,
+            isSidebarTranslucent: profile.isSidebarTranslucent,
+            diffAddedHex: profile.diffAddedHex,
+            diffRemovedHex: profile.diffRemovedHex,
+            skillHex: profile.skillHex,
+            uiFontName: profile.uiFontName,
+            codeFontName: profile.codeFontName
         )
     }
 
@@ -737,7 +1370,12 @@ struct NeoCodeThemeProfileTransfer: Codable, Hashable {
             backgroundHex: backgroundHex,
             foregroundHex: foregroundHex,
             contrast: contrast,
-            isSidebarTranslucent: false
+            isSidebarTranslucent: isSidebarTranslucent,
+            diffAddedHex: diffAddedHex,
+            diffRemovedHex: diffRemovedHex,
+            skillHex: skillHex,
+            uiFontName: uiFontName,
+            codeFontName: codeFontName
         )
     }
 }
@@ -747,6 +1385,12 @@ private extension NeoCodeThemeProfile {
         accentHex.caseInsensitiveCompare(other.accentHex) == .orderedSame &&
         backgroundHex.caseInsensitiveCompare(other.backgroundHex) == .orderedSame &&
         foregroundHex.caseInsensitiveCompare(other.foregroundHex) == .orderedSame &&
+        diffAddedHex.caseInsensitiveCompare(other.diffAddedHex) == .orderedSame &&
+        diffRemovedHex.caseInsensitiveCompare(other.diffRemovedHex) == .orderedSame &&
+        skillHex.caseInsensitiveCompare(other.skillHex) == .orderedSame &&
+        uiFontName.caseInsensitiveCompare(other.uiFontName) == .orderedSame &&
+        codeFontName.caseInsensitiveCompare(other.codeFontName) == .orderedSame &&
+        isSidebarTranslucent == other.isSidebarTranslucent &&
         Int(contrast.rounded()) == Int(other.contrast.rounded())
     }
 }

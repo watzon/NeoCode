@@ -155,7 +155,7 @@ struct AssistantTurnView: View {
         let block = blocks[index]
         let previous = blocks[index - 1]
 
-        if previous.isCompactSibling(of: block) {
+        if previous.endsWithToolCall || previous.isCompactSibling(of: block) {
             return 8
         }
 
@@ -233,6 +233,14 @@ enum AssistantTurnBlock: Identifiable, Hashable {
         case .toolCluster(let messages):
             return messages.map(\.id).joined(separator: "-")
         }
+    }
+
+    var endsWithToolCall: Bool {
+        if case .toolCluster = self {
+            return true
+        }
+
+        return false
     }
 
     func isCompactSibling(of other: AssistantTurnBlock) -> Bool {

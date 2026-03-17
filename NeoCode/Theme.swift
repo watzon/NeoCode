@@ -48,16 +48,16 @@ enum NeoCodeTheme {
     }
 
     static var currentUIFontName: String {
-        appearanceSettings.uiFontName
+        activeThemeProfile.uiFontName
     }
 
     static var currentCodeFontName: String {
-        appearanceSettings.codeFontName
+        activeThemeProfile.codeFontName
     }
 
     static func uiAppKitFont(size: CGFloat, weight: NSFont.Weight = .regular) -> NSFont {
         if let customFont = resolvedFont(
-            storedName: appearanceSettings.uiFontName,
+            storedName: currentUIFontName,
             size: size,
             weight: weight,
             fallback: NSFont.systemFont(ofSize: size, weight: weight),
@@ -71,7 +71,7 @@ enum NeoCodeTheme {
 
     static func codeAppKitFont(size: CGFloat, weight: NSFont.Weight = .regular) -> NSFont {
         if let customFont = resolvedFont(
-            storedName: appearanceSettings.codeFontName,
+            storedName: currentCodeFontName,
             size: size,
             weight: weight,
             fallback: NSFont.monospacedSystemFont(ofSize: size, weight: weight),
@@ -90,6 +90,16 @@ enum NeoCodeTheme {
         fallback: NSFont,
         preferFixedPitch: Bool
     ) -> NSFont? {
+        if NeoCodeFontCatalog.usesSystemMonospaceStack(storedName) {
+            return adjustedFont(
+                NSFont.monospacedSystemFont(ofSize: size, weight: weight),
+                size: size,
+                weight: weight,
+                fallback: fallback,
+                preferFixedPitch: preferFixedPitch
+            )
+        }
+
         guard let postScriptName = NeoCodeFontCatalog.postScriptName(for: storedName, preferFixedPitch: preferFixedPitch),
               let baseFont = NSFont(name: postScriptName, size: size)
         else {
@@ -129,6 +139,10 @@ enum NeoCodeTheme {
         .custom(font.fontName, size: font.pointSize)
     }
 
+    private static var activeThemeProfile: NeoCodeThemeProfile {
+        isDark(currentAppearance) ? appearanceSettings.darkTheme : appearanceSettings.lightTheme
+    }
+
     private static func dynamicColor(_ keyPath: KeyPath<ResolvedPalette, NSColor>) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in
             resolvedPalette(for: isDark(appearance))[keyPath: keyPath]
@@ -140,6 +154,14 @@ enum NeoCodeTheme {
             profile: isDark ? appearanceSettings.darkTheme : appearanceSettings.lightTheme,
             isDark: isDark
         )
+    }
+
+    private static var currentAppearance: NSAppearance {
+        if let appearance = NSApp?.effectiveAppearance {
+            return appearance
+        }
+
+        return NSAppearance(named: .aqua)!
     }
 
     private static func isDark(_ appearance: NSAppearance) -> Bool {
@@ -221,6 +243,7 @@ private struct ResolvedPalette {
     let diffRemovedText: NSColor
     let diffHunkBackground: NSColor
     let diffHunkText: NSColor
+
     init(profile: NeoCodeThemeProfile, isDark: Bool) {
         let background = NSColor(neoHex: profile.backgroundHex)
             ?? (isDark ? NSColor(red: 0.07, green: 0.08, blue: 0.10, alpha: 1) : NSColor(red: 0.97, green: 0.95, blue: 0.91, alpha: 1))
@@ -228,6 +251,13 @@ private struct ResolvedPalette {
             ?? (isDark ? NSColor(red: 0.94, green: 0.93, blue: 0.89, alpha: 1) : NSColor(red: 0.16, green: 0.12, blue: 0.08, alpha: 1))
         let accent = NSColor(neoHex: profile.accentHex)
             ?? NSColor(red: 0.87, green: 0.66, blue: 0.34, alpha: 1)
+        let diffAdded = NSColor(neoHex: profile.diffAddedHex)
+            ?? (isDark ? NSColor(neoHex: NeoCodeThemeProfile.defaultDarkDiffAddedHex) : NSColor(neoHex: NeoCodeThemeProfile.defaultLightDiffAddedHex))
+            ?? .systemGreen
+        let diffRemoved = NSColor(neoHex: profile.diffRemovedHex)
+            ?? (isDark ? NSColor(neoHex: NeoCodeThemeProfile.defaultDarkDiffRemovedHex) : NSColor(neoHex: NeoCodeThemeProfile.defaultLightDiffRemovedHex))
+            ?? .systemOrange
+        let skill = NSColor(neoHex: profile.skillHex) ?? accent
 
         let contrast = min(max(profile.contrast, 20), 80) / 100
         let warning = isDark
@@ -252,12 +282,12 @@ private struct ResolvedPalette {
             diffContextBackground = panelRaised
             diffContextText = foreground.withAlphaComponent(0.84)
             diffLineNumber = foreground.withAlphaComponent(0.36)
-            diffAddedBackground = accent.mixed(with: background, ratio: 0.80)
-            diffAddedText = accent.lighter(by: 0.18)
-            diffRemovedBackground = warning.mixed(with: background, ratio: 0.82)
-            diffRemovedText = warning.lighter(by: 0.16)
-            diffHunkBackground = accent.mixed(with: background, ratio: 0.88)
-            diffHunkText = accent.lighter(by: 0.10)
+            diffAddedBackground = diffAdded.mixed(with: background, ratio: 0.80)
+            diffAddedText = diffAdded.lighter(by: 0.18)
+            diffRemovedBackground = diffRemoved.mixed(with: background, ratio: 0.82)
+            diffRemovedText = diffRemoved.lighter(by: 0.16)
+            diffHunkBackground = skill.mixed(with: background, ratio: 0.88)
+            diffHunkText = skill.lighter(by: 0.10)
         } else {
             canvas = background.darker(by: 0.04 + contrast * 0.02)
             panel = background.lighter(by: 0.01)
@@ -273,12 +303,12 @@ private struct ResolvedPalette {
             diffContextBackground = panelRaised
             diffContextText = foreground.withAlphaComponent(0.84)
             diffLineNumber = foreground.withAlphaComponent(0.32)
-            diffAddedBackground = success.mixed(with: background, ratio: 0.86)
-            diffAddedText = success.darker(by: 0.06)
-            diffRemovedBackground = warning.mixed(with: background, ratio: 0.90)
-            diffRemovedText = warning.darker(by: 0.02)
-            diffHunkBackground = accent.mixed(with: background, ratio: 0.90)
-            diffHunkText = accent.darker(by: 0.08)
+            diffAddedBackground = diffAdded.mixed(with: background, ratio: 0.86)
+            diffAddedText = diffAdded.darker(by: 0.06)
+            diffRemovedBackground = diffRemoved.mixed(with: background, ratio: 0.90)
+            diffRemovedText = diffRemoved.darker(by: 0.02)
+            diffHunkBackground = skill.mixed(with: background, ratio: 0.90)
+            diffHunkText = skill.darker(by: 0.08)
         }
 
         self.accent = accent

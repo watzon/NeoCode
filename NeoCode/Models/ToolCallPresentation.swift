@@ -2,9 +2,14 @@ import Foundation
 
 struct ToolCallPresentation: Hashable {
     struct Item: Identifiable, Hashable {
+        enum DiffStyle: Hashable {
+            case split
+            case changesOnly
+        }
+
         enum Content: Hashable {
             case text(String)
-            case diff(DiffFile)
+            case diff(DiffFile, DiffStyle)
         }
 
         let id: String
@@ -23,13 +28,25 @@ struct ToolCallPresentation: Hashable {
 
 private enum ToolCallPresentationBuilder {
     static func makeItems(for toolCall: ChatMessage.ToolCall) -> [ToolCallPresentation.Item] {
-        if let bundle = diffBundle(for: toolCall), !bundle.files.isEmpty {
+        if let bundle = changesOnlyDiffBundle(for: toolCall), !bundle.files.isEmpty {
             return bundle.files.map { file in
                 ToolCallPresentation.Item(
                     id: "\(toolCall.name):\(file.id)",
-                    title: diffTitle(for: file),
+                    title: toolTitle(for: toolCall.name, path: file.displayPath),
                     subtitle: diffSubtitle(for: file),
-                    content: .diff(file),
+                    content: .diff(file, ToolCallPresentation.Item.DiffStyle.changesOnly),
+                    defaultExpanded: false
+                )
+            }
+        }
+
+        if let bundle = unifiedDiffBundle(for: toolCall), !bundle.files.isEmpty {
+            return bundle.files.map { file in
+                ToolCallPresentation.Item(
+                    id: "\(toolCall.name):\(file.id)",
+                    title: diffTitle(for: toolCall, file: file),
+                    subtitle: diffSubtitle(for: file),
+                    content: .diff(file, ToolCallPresentation.Item.DiffStyle.split),
                     defaultExpanded: false
                 )
             }
@@ -38,7 +55,7 @@ private enum ToolCallPresentationBuilder {
         return [
             ToolCallPresentation.Item(
                 id: "\(toolCall.name):detail",
-                title: toolCall.name,
+                title: toolTitle(for: toolCall.name, path: toolFilePath(for: toolCall)),
                 subtitle: nil,
                 content: .text(fallbackText(for: toolCall)),
                 defaultExpanded: toolCall.status == .pending || toolCall.status == .running
@@ -62,10 +79,19 @@ private enum ToolCallPresentationBuilder {
         return ""
     }
 
-    private static func diffBundle(for toolCall: ChatMessage.ToolCall) -> DiffBundle? {
+    private static func changesOnlyDiffBundle(for toolCall: ChatMessage.ToolCall) -> DiffBundle? {
         if let bundle = ApplyPatchDiffParser.parse(toolCall: toolCall) {
             return bundle
         }
+
+        if let bundle = EditToolDiffParser.parse(toolCall: toolCall) {
+            return bundle
+        }
+
+        return nil
+    }
+
+    private static func unifiedDiffBundle(for toolCall: ChatMessage.ToolCall) -> DiffBundle? {
 
         for candidate in unifiedDiffCandidates(for: toolCall) {
             if let bundle = UnifiedDiffParser.parse(candidate) {
@@ -74,6 +100,11 @@ private enum ToolCallPresentationBuilder {
         }
 
         return nil
+    }
+
+    private static func toolTitle(for toolName: String, path: String?) -> String {
+        guard let path, !path.isEmpty else { return toolName }
+        return "\(toolName) - \(path)"
     }
 
     private static func unifiedDiffCandidates(for toolCall: ChatMessage.ToolCall) -> [String] {
@@ -93,7 +124,11 @@ private enum ToolCallPresentationBuilder {
         }
     }
 
-    private static func diffTitle(for file: DiffFile) -> String {
+    private static func diffTitle(for toolCall: ChatMessage.ToolCall, file: DiffFile) -> String {
+        if let filePath = toolFilePath(for: toolCall), normalizedFilePath(filePath) == normalizedFilePath(file.displayPath) {
+            return toolTitle(for: toolCall.name, path: file.displayPath)
+        }
+
         switch file.change {
         case .added:
             return "Added \(file.displayPath)"
@@ -108,6 +143,30 @@ private enum ToolCallPresentationBuilder {
         }
     }
 
+    private static func toolFilePath(for toolCall: ChatMessage.ToolCall) -> String? {
+        let normalizedName = toolCall.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let preferredKeys = ["filepath", "filePath", "absolutePath"]
+        let pathKeys = preferredKeys + ["path"]
+        let keys: [String]
+        switch normalizedName {
+        case "read", "edit", "write", "delete", "remove", "stat", "move", "copy":
+            keys = pathKeys
+        default:
+            keys = preferredKeys
+        }
+
+        let candidates: [String?] = [
+            toolCall.input.flatMap { $0.stringValue(forKeys: keys) },
+            toolCall.output.flatMap { $0.stringValue(forKeys: keys) }
+        ]
+
+        return candidates.compactMap { candidate -> String? in
+            guard let candidate else { return nil }
+            let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }.first
+    }
+
     private static func diffSubtitle(for file: DiffFile) -> String? {
         guard let oldPath = file.oldPath,
               let newPath = file.newPath,
@@ -117,6 +176,66 @@ private enum ToolCallPresentationBuilder {
         }
 
         return "from \(oldPath)"
+    }
+}
+
+private enum EditToolDiffParser {
+    static func parse(toolCall: ChatMessage.ToolCall) -> DiffBundle? {
+        guard toolCall.name.caseInsensitiveCompare("edit") == .orderedSame,
+              let input = toolCall.input,
+              let filePath = input.stringValue(forKeys: ["filepath", "filePath", "path", "absolutePath"]),
+              let oldText = input.stringValue(forKeys: ["oldText", "old_text", "oldString", "old_string", "old", "before"]),
+              let newText = input.stringValue(forKeys: ["newText", "new_text", "newString", "new_string", "new", "after"])
+        else {
+            return nil
+        }
+
+        return DiffBundle(
+            sourceFormat: .unknown,
+            files: [
+                DiffFile(
+                    id: "edit:\(filePath)",
+                    oldPath: filePath,
+                    newPath: filePath,
+                    change: .modified,
+                    hunks: [
+                        DiffHunk(
+                            header: "",
+                            oldRange: nil,
+                            newRange: nil,
+                            lines: diffLines(oldText: oldText, newText: newText)
+                        )
+                    ],
+                    isBinary: false
+                )
+            ]
+        )
+    }
+
+    private static func diffLines(oldText: String, newText: String) -> [DiffLine] {
+        let oldLines = textLines(from: oldText)
+        let newLines = textLines(from: newText)
+        let difference = newLines.difference(from: oldLines)
+
+        return difference.sorted { lhs, rhs in
+            changeSortKey(lhs) < changeSortKey(rhs)
+        }.map { change in
+            switch change {
+            case .remove(_, let line, _):
+                return DiffLine(kind: .removed, text: line)
+            case .insert(_, let line, _):
+                return DiffLine(kind: .added, text: line)
+            }
+        }
+    }
+
+    private static func changeSortKey(_ change: CollectionDifference<String>.Change) -> (Int, Int) {
+        switch change {
+        case .remove(let offset, _, _):
+            return (offset, 0)
+        case .insert(let offset, _, _):
+            return (offset, 1)
+        }
     }
 }
 
@@ -522,6 +641,11 @@ private func normalizedLines(from text: String) -> [String] {
         .map(String.init)
 }
 
+private func textLines(from text: String) -> [String] {
+    guard !text.isEmpty else { return [] }
+    return normalizedLines(from: text)
+}
+
 private func readFileLines(at path: String) -> [String]? {
     guard let contents = try? String(contentsOfFile: path, encoding: .utf8) else {
         return nil
@@ -556,6 +680,10 @@ private func normalizeDiffPath(_ rawPath: String) -> String? {
     return rawPath
 }
 
+private func normalizedFilePath(_ path: String) -> String {
+    URL(fileURLWithPath: path).standardizedFileURL.path
+}
+
 private extension String {
     func dropPrefix(_ prefix: String) -> String? {
         guard hasPrefix(prefix) else { return nil }
@@ -576,6 +704,15 @@ private extension JSONValue {
 
     func stringValue(forKey key: String) -> String? {
         object?[key]?.string
+    }
+
+    func stringValue(forKeys keys: [String]) -> String? {
+        for key in keys {
+            if let value = stringValue(forKey: key) {
+                return value
+            }
+        }
+        return nil
     }
 
     var diffStringCandidates: [String] {

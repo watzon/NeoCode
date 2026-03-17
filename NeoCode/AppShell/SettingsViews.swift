@@ -395,7 +395,7 @@ private struct AppearanceSettingsView: View {
                     subtitle: "Warm daylight palette for your brighter workspace.",
                     profile: profileBinding(.light),
                     selectedPreset: selectedPreset(for: .light),
-                    presets: NeoCodeThemePresetCatalog.presets,
+                    presets: NeoCodeThemePresetCatalog.presets(for: .light),
                     onImport: { importTarget = .light },
                     onCopy: { copyTheme(kind: .light) },
                     onSelectPreset: { applyPreset($0, kind: .light) }
@@ -406,7 +406,7 @@ private struct AppearanceSettingsView: View {
                     subtitle: "Low-glare palette for the main NeoCode shell.",
                     profile: profileBinding(.dark),
                     selectedPreset: selectedPreset(for: .dark),
-                    presets: NeoCodeThemePresetCatalog.presets,
+                    presets: NeoCodeThemePresetCatalog.presets(for: .dark),
                     onImport: { importTarget = .dark },
                     onCopy: { copyTheme(kind: .dark) },
                     onSelectPreset: { applyPreset($0, kind: .dark) }
@@ -415,7 +415,7 @@ private struct AppearanceSettingsView: View {
 
             SettingsCard(
                 title: "Interface",
-                detail: "Choose the fonts and sizing NeoCode uses across the shell, composer, transcript, and code surfaces."
+                detail: "Adjust cursor behavior and base sizing. Font families now live with each theme profile above."
             ) {
                 VStack(spacing: 0) {
                     SettingsControlRow(
@@ -429,26 +429,6 @@ private struct AppearanceSettingsView: View {
                     )
 
                     SettingsDivider()
-                    
-                    SettingsControlRow(
-                        title: "UI font",
-                        detail: "Used for labels, navigation, settings, and conversation chrome.",
-                        accessory: {
-                            SettingsFontPicker(
-                                title: store.appSettings.appearance.uiFontName,
-                                selectedID: store.appSettings.appearance.uiFontName,
-                                options: NeoCodeFontCatalog.uiOptions,
-                                emptyMessage: "No fonts found.",
-                                placeholder: "Search UI fonts"
-                            ) { option in
-                                store.updateAppearance { appearance in
-                                    appearance.uiFontName = option.id
-                                }
-                            }
-                        }
-                    )
-
-                    SettingsDivider()
 
                     SettingsControlRow(
                         title: "UI font size",
@@ -458,26 +438,6 @@ private struct AppearanceSettingsView: View {
                                 value: appearanceBinding(\.uiFontSize),
                                 range: NeoCodeAppearanceSettings.minimumUIFontSize...NeoCodeAppearanceSettings.maximumUIFontSize
                             )
-                        }
-                    )
-
-                    SettingsDivider()
-
-                    SettingsControlRow(
-                        title: "Code font",
-                        detail: "Used for transcript code, diffs, file references, and inline code blocks.",
-                        accessory: {
-                            SettingsFontPicker(
-                                title: store.appSettings.appearance.codeFontName,
-                                selectedID: store.appSettings.appearance.codeFontName,
-                                options: NeoCodeFontCatalog.codeOptions,
-                                emptyMessage: "No monospaced fonts found.",
-                                placeholder: "Search code fonts"
-                            ) { option in
-                                store.updateAppearance { appearance in
-                                    appearance.codeFontName = option.id
-                                }
-                            }
                         }
                     )
 
@@ -551,7 +511,7 @@ private struct AppearanceSettingsView: View {
 
     private func selectedPreset(for kind: ThemeProfileKind) -> NeoCodeThemePreset? {
         guard let presetID = store.appSettings.appearance.selectedPresetID(for: kind) else { return nil }
-        return NeoCodeThemePresetCatalog.presets.first(where: { $0.id == presetID })
+        return NeoCodeThemePresetCatalog.presets.first(where: { $0.id == presetID && $0.theme(for: kind) != nil })
     }
 
     private func applyPreset(_ preset: NeoCodeThemePreset, kind: ThemeProfileKind) {
@@ -644,6 +604,14 @@ private struct AppearancePreviewPane: View {
     let profile: NeoCodeThemeProfile
     let isDark: Bool
 
+    private var uiFontTitle: String {
+        NeoCodeFontCatalog.displayName(for: profile.uiFontName, preferFixedPitch: false)
+    }
+
+    private var codeFontTitle: String {
+        NeoCodeFontCatalog.displayName(for: profile.codeFontName, preferFixedPitch: true)
+    }
+
     var body: some View {
         let background = Color(neoHex: profile.backgroundHex) ?? (isDark ? Color.black : Color.white)
         let foreground = Color(neoHex: profile.foregroundHex) ?? (isDark ? Color.white : Color.black)
@@ -659,6 +627,8 @@ private struct AppearancePreviewPane: View {
                 Text("  accent: \"\(profile.accentHex.uppercased())\",")
                     .foregroundStyle(accent)
                 Text("  background: \"\(profile.backgroundHex.uppercased())\",")
+                Text("  uiFont: \"\(uiFontTitle)\",")
+                Text("  codeFont: \"\(codeFontTitle)\",")
                 Text("  contrast: \(Int(profile.contrast))")
                     .foregroundStyle(foreground.opacity(0.8))
                 Text("}")
@@ -752,6 +722,42 @@ private struct AppearanceThemeEditorCard: View {
                                 .font(.neoMono)
                                 .foregroundStyle(NeoCodeTheme.textSecondary)
                                 .frame(width: 30, alignment: .trailing)
+                        }
+                    }
+                )
+
+                SettingsDivider()
+
+                SettingsControlRow(
+                    title: "UI font",
+                    detail: "Used for labels, navigation, settings, and conversation chrome in this theme.",
+                    accessory: {
+                        SettingsFontPicker(
+                            title: NeoCodeFontCatalog.displayName(for: profile.uiFontName, preferFixedPitch: false),
+                            selectedID: profile.uiFontName,
+                            options: NeoCodeFontCatalog.uiOptions(includingSelected: profile.uiFontName),
+                            emptyMessage: "No fonts found.",
+                            placeholder: "Search UI fonts"
+                        ) { option in
+                            profile.uiFontName = option.id
+                        }
+                    }
+                )
+
+                SettingsDivider()
+
+                SettingsControlRow(
+                    title: "Code font",
+                    detail: "Used for transcript code, diffs, file references, and inline code in this theme.",
+                    accessory: {
+                        SettingsFontPicker(
+                            title: NeoCodeFontCatalog.displayName(for: profile.codeFontName, preferFixedPitch: true),
+                            selectedID: profile.codeFontName,
+                            options: NeoCodeFontCatalog.codeOptions(includingSelected: profile.codeFontName),
+                            emptyMessage: "No monospaced fonts found.",
+                            placeholder: "Search code fonts"
+                        ) { option in
+                            profile.codeFontName = option.id
                         }
                     }
                 )
@@ -999,6 +1005,8 @@ private struct ThemePresetPicker: View {
 
     @State private var isPresented = false
 
+    private let menuMaxHeight: CGFloat = 320
+
     private var triggerTitle: String {
         selectedPreset?.title ?? "Custom"
     }
@@ -1013,19 +1021,24 @@ private struct ThemePresetPicker: View {
         .background {
             AnchoredFloatingPanelPresenter(isPresented: isPresented, direction: .down, onDismiss: closeMenu) {
                 DropdownMenuSurface(width: 220) {
-                    ForEach(presets) { preset in
-                        DropdownMenuRow(isSelected: preset.id == selectedPreset?.id, action: {
-                            onSelectPreset(preset)
-                            closeMenu()
-                        }) {
-                            HStack(spacing: 10) {
-                                ThemePresetBadgeView(preset: preset)
-                                Text(preset.title)
-                                    .font(.neoAction)
-                                    .lineLimit(1)
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 2) {
+                            ForEach(presets) { preset in
+                                DropdownMenuRow(isSelected: preset.id == selectedPreset?.id, action: {
+                                    onSelectPreset(preset)
+                                    closeMenu()
+                                }) {
+                                    HStack(spacing: 10) {
+                                        ThemePresetBadgeView(preset: preset)
+                                        Text(preset.title)
+                                            .font(.neoAction)
+                                            .lineLimit(1)
+                                    }
+                                }
                             }
                         }
                     }
+                    .frame(maxHeight: menuMaxHeight)
                 }
             }
         }

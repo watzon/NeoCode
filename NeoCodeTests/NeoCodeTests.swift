@@ -2731,13 +2731,13 @@ struct NeoCodeMainActorTests {
                     backgroundHex: "#14181F",
                     foregroundHex: "#F4F7FA",
                     contrast: 68,
-                    isSidebarTranslucent: false
+                    isSidebarTranslucent: false,
+                    uiFontName: "Instrument Sans",
+                    codeFontName: "JetBrains Mono"
                 ),
                 usesPointerCursor: true,
                 uiFontSize: 15,
-                codeFontSize: 14,
-                uiFontName: "Instrument Sans",
-                codeFontName: "JetBrains Mono"
+                codeFontSize: 14
             )
         )
 
@@ -2797,10 +2797,12 @@ struct NeoCodeMainActorTests {
     @MainActor
     @Test func appearanceSettingsInferPresetSelectionFromMatchingThemes() throws {
         let codex = try #require(NeoCodeThemePresetCatalog.presets.first(where: { $0.id == "codex" }))
+        let lightTheme = try #require(codex.lightTheme)
+        let darkTheme = try #require(codex.darkTheme)
         let appearance = NeoCodeAppearanceSettings(
             themeMode: .system,
-            lightTheme: codex.lightTheme,
-            darkTheme: codex.darkTheme
+            lightTheme: lightTheme,
+            darkTheme: darkTheme
         )
 
         #expect(appearance.selectedLightPresetID == "codex")
@@ -2814,7 +2816,12 @@ struct NeoCodeMainActorTests {
             accentHex: "#0285FF",
             backgroundHex: "#FFFFFF",
             foregroundHex: "#0D0D0D",
-            contrast: 45
+            contrast: 45,
+            diffAddedHex: "#00A240",
+            diffRemovedHex: "#E02E2A",
+            skillHex: "#751ED9",
+            uiFontName: "Inter",
+            codeFontName: "JetBrains Mono"
         )
 
         let data = try JSONEncoder().encode(transfer)
@@ -2822,7 +2829,50 @@ struct NeoCodeMainActorTests {
 
         #expect(decoded == transfer)
         #expect(decoded.profile.accentHex == "#0285FF")
-        #expect(decoded.profile.isSidebarTranslucent == false)
+        #expect(decoded.profile.diffAddedHex == "#00A240")
+        #expect(decoded.profile.skillHex == "#751ED9")
+        #expect(decoded.profile.uiFontName == "Inter")
+        #expect(decoded.profile.codeFontName == "JetBrains Mono")
+    }
+
+    @MainActor
+    @Test func appearanceSettingsMigrateLegacyGlobalFontsIntoBothThemes() throws {
+        let payload = #"""
+        {
+          "themeMode": "dark",
+          "lightTheme": {
+            "accentHex": "#FFFFFF",
+            "backgroundHex": "#F5F5F5",
+            "foregroundHex": "#111111",
+            "contrast": 45,
+            "isSidebarTranslucent": false
+          },
+          "darkTheme": {
+            "accentHex": "#000000",
+            "backgroundHex": "#111111",
+            "foregroundHex": "#F5F5F5",
+            "contrast": 60,
+            "isSidebarTranslucent": true
+          },
+          "uiFontName": "Inter",
+          "codeFontName": "JetBrains Mono"
+        }
+        """#
+
+        let appearance = try JSONDecoder().decode(NeoCodeAppearanceSettings.self, from: Data(payload.utf8))
+
+        #expect(appearance.lightTheme.uiFontName == "Inter")
+        #expect(appearance.lightTheme.codeFontName == "JetBrains Mono")
+        #expect(appearance.darkTheme.uiFontName == "Inter")
+        #expect(appearance.darkTheme.codeFontName == "JetBrains Mono")
+    }
+
+    @MainActor
+    @Test func codexPresetCatalogIncludesAllCodexThemes() {
+        #expect(NeoCodeThemePresetCatalog.decodeFailureDescription == nil)
+        #expect(NeoCodeThemePresetCatalog.presets.count == 25)
+        #expect(NeoCodeThemePresetCatalog.presets(for: .light).count == 13)
+        #expect(NeoCodeThemePresetCatalog.presets(for: .dark).count == 24)
     }
 
     @MainActor
