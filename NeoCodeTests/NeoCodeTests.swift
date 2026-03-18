@@ -1285,6 +1285,61 @@ struct NeoCodeMainActorTests {
     }
 
     @MainActor
+    @Test func appStoreActivationIncrementsLifecycleRefreshToken() {
+        let store = AppStore(projects: [])
+
+        let initialToken = store.lifecycleRefreshToken
+        store.handleApplicationDidBecomeActive()
+
+        #expect(store.lifecycleRefreshToken == initialToken + 1)
+    }
+
+    @MainActor
+    @Test func reconcileLoadedTranscriptDropsStaleInProgressSuffixWhenNotPreserving() {
+        let existing = [
+            ChatMessage(
+                id: "msg_done",
+                messageID: "server_1",
+                role: .assistant,
+                text: "Done",
+                timestamp: .distantPast,
+                emphasis: .normal,
+                isInProgress: false
+            ),
+            ChatMessage(
+                id: "msg_stale",
+                messageID: "local_1",
+                role: .assistant,
+                text: "Working",
+                timestamp: .now,
+                emphasis: .normal,
+                isInProgress: true
+            ),
+        ]
+        let incoming = [
+            ChatMessage(
+                id: "msg_done",
+                messageID: "server_1",
+                role: .assistant,
+                text: "Done",
+                timestamp: .now,
+                emphasis: .normal,
+                isInProgress: false
+            ),
+        ]
+
+        let reconciled = AppStore.reconcileLoadedTranscript(
+            existing: existing,
+            incoming: incoming,
+            preserveInProgressSuffix: false
+        )
+
+        #expect(reconciled.count == 1)
+        #expect(reconciled.last?.id == "msg_done")
+        #expect(reconciled.contains(where: { $0.id == "msg_stale" }) == false)
+    }
+
+    @MainActor
     @Test func appStoreMarksStreamingPlaceholderCompleteWhenMessageCompletesWithoutFinalPartUpdate() {
         let now = Date(timeIntervalSince1970: 1_710_616_186)
         let store = AppStore(projects: [

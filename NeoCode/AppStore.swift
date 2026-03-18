@@ -151,6 +151,7 @@ final class AppStore {
         loadingSessionCountsByProjectID.values.contains { $0 > 0 }
     }
     var loadingTranscriptSessionID: String?
+    private(set) var lifecycleRefreshToken = 0
     var isSending = false
     var queuedMessagesBySessionID: [String: [ComposerQueuedMessage]] = [:]
     var isRespondingToPrompt = false
@@ -1959,6 +1960,8 @@ final class AppStore {
     }
 
     func handleApplicationDidBecomeActive() {
+        lifecycleRefreshToken &+= 1
+
         guard let projectPath = selectedProject?.path else { return }
         scheduleGitRefresh(
             reason: "application-active",
@@ -3348,9 +3351,18 @@ final class AppStore {
         do {
             let messages = try await service.listMessages(sessionID: sessionID)
             guard !Task.isCancelled else { return }
+            let shouldPreserveInProgressSuffix = hasBufferedTextDeltas(for: sessionID)
+                || liveSessionStatuses[sessionID] == .busy
+                || {
+                    if case .retry = liveSessionStatuses[sessionID] {
+                        return true
+                    }
+                    return false
+                }()
             let transcript = Self.reconcileLoadedTranscript(
                 existing: transcript(for: sessionID),
-                incoming: ChatMessage.makeTranscript(from: messages)
+                incoming: ChatMessage.makeTranscript(from: messages),
+                preserveInProgressSuffix: shouldPreserveInProgressSuffix
             )
             messageInfosBySessionID[sessionID] = Dictionary(uniqueKeysWithValues: messages.map { ($0.info.id, $0.info) })
             for message in messages {
@@ -5239,10 +5251,18 @@ final class AppStore {
         return lookup
     }
 
-    static func reconcileLoadedTranscript(existing: [ChatMessage], incoming: [ChatMessage]) -> [ChatMessage] {
+    static func reconcileLoadedTranscript(
+        existing: [ChatMessage],
+        incoming: [ChatMessage],
+        preserveInProgressSuffix: Bool = true
+    ) -> [ChatMessage] {
         guard !existing.isEmpty else { return incoming }
         guard !incoming.isEmpty else {
-            return preservedLocalTranscriptSuffix(existing: existing, incomingIDs: []) ?? incoming
+            return preservedLocalTranscriptSuffix(
+                existing: existing,
+                incomingIDs: [],
+                preserveInProgressSuffix: preserveInProgressSuffix
+            ) ?? incoming
         }
 
         let existingByID = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
@@ -5255,14 +5275,24 @@ final class AppStore {
             return preferredTranscriptMessage(existing: existingMessage, incoming: incomingMessage)
         }
 
-        if let preservedSuffix = preservedLocalTranscriptSuffix(existing: existing, incomingIDs: incomingIDs) {
+        if let preservedSuffix = preservedLocalTranscriptSuffix(
+            existing: existing,
+            incomingIDs: incomingIDs,
+            preserveInProgressSuffix: preserveInProgressSuffix
+        ) {
             reconciled.append(contentsOf: preservedSuffix)
         }
 
         return reconciled
     }
 
-    private static func preservedLocalTranscriptSuffix(existing: [ChatMessage], incomingIDs: Set<String>) -> [ChatMessage]? {
+    private static func preservedLocalTranscriptSuffix(
+        existing: [ChatMessage],
+        incomingIDs: Set<String>,
+        preserveInProgressSuffix: Bool
+    ) -> [ChatMessage]? {
+        guard preserveInProgressSuffix else { return nil }
+
         var trailingMessages: [ChatMessage] = []
 
         for message in existing.reversed() {

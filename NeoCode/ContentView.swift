@@ -12,6 +12,7 @@ struct ContentView: View {
     @Environment(AppStore.self) private var store
     @Environment(OpenCodeRuntime.self) private var runtime
     @Environment(AppUpdateService.self) private var updateService
+    @Environment(\.scenePhase) private var scenePhase
     @State private var toastMessage: String?
 
     private let uiTestModeKey = "NEOCODE_UI_TEST_MODE"
@@ -134,6 +135,8 @@ struct ContentView: View {
         }
 
         return "\(mode)-\(store.dashboardProjectSignature)"
+            + ":\(scenePhaseTaskKey)"
+            + ":\(store.lifecycleRefreshToken)"
     }
 
     private var selectionSyncTaskKey: String {
@@ -143,7 +146,20 @@ struct ContentView: View {
 
         let projectID = store.selectedProject?.id.uuidString ?? "none"
         let sessionID = store.selectedSessionID ?? "dashboard"
-        return "\(projectID):\(sessionID)"
+        return "\(projectID):\(sessionID):\(scenePhaseTaskKey):\(store.lifecycleRefreshToken)"
+    }
+
+    private var scenePhaseTaskKey: String {
+        switch scenePhase {
+        case .active:
+            return "active"
+        case .inactive:
+            return "inactive"
+        case .background:
+            return "background"
+        @unknown default:
+            return "unknown"
+        }
     }
 }
 
