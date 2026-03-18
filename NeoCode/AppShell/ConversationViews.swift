@@ -130,7 +130,7 @@ struct ConversationView: View {
 
     private let bottomAnchorSpacerHeight: CGFloat = 1
     private let autoScrollThreshold: CGFloat = 72
-    private let olderMessagesLoadThreshold: CGFloat = 48
+    private let olderMessagesLoadThreshold: CGFloat = 300
     private let transcriptPageSize = 120
     private let transcriptColumnWidth: CGFloat = 820
     private let transcriptHorizontalInset: CGFloat = 32
@@ -477,6 +477,10 @@ struct ConversationView: View {
                             .frame(height: contentBottomInset)
                             .id(bottomAnchorID)
                     } else {
+                        if hasOlderMessages || isLoadingOlderMessages {
+                            olderMessagesLoadControl(using: proxy)
+                        }
+
                         if let error = store.lastError {
                             InlineStatusView(text: error, tone: .warning)
                         }
@@ -701,6 +705,45 @@ struct ConversationView: View {
         .frame(maxWidth: .infinity, alignment: .center)
     }
 
+    @ViewBuilder
+    private func olderMessagesLoadControl(using proxy: ScrollViewProxy) -> some View {
+        HStack(spacing: 10) {
+            if isLoadingOlderMessages {
+                ProgressView()
+                    .controlSize(.small)
+
+                Text("Loading older messages...")
+                    .font(.neoMonoSmall)
+                    .foregroundStyle(NeoCodeTheme.textSecondary)
+            } else {
+                Button {
+                    loadOlderMessages(using: proxy)
+                } label: {
+                    Text("Load older messages")
+                        .font(.neoMonoSmall)
+                        .foregroundStyle(NeoCodeTheme.textPrimary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(
+                            Capsule()
+                                .fill(NeoCodeTheme.panelRaised)
+                        )
+                        .overlay(
+                            Capsule()
+                                .stroke(NeoCodeTheme.line, lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+
+                Text(remainingOlderMessagesLabel)
+                    .font(.neoMonoSmall)
+                    .foregroundStyle(NeoCodeTheme.textMuted)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.bottom, 4)
+    }
+
     private var bottomAnchorID: String {
         "bottom-\(sessionID)"
     }
@@ -767,6 +810,12 @@ struct ConversationView: View {
 
     private var transcriptRevision: Int {
         store.transcriptRevisionToken(for: sessionID)
+    }
+
+    private var remainingOlderMessagesLabel: String {
+        let remaining = max(transcriptCount - loadedMessageCount, 0)
+        guard remaining > 0 else { return "" }
+        return "\(remaining) earlier \(remaining == 1 ? "message" : "messages") hidden"
     }
 
     private var promptSurface: SessionPromptSurface {
@@ -955,6 +1004,10 @@ private struct RevertHistorySheet: View {
     let onCancel: () -> Void
     let onConfirm: () -> Void
 
+    private let maxVisibleChanges = 5
+    private let changeRowHeight: CGFloat = 46
+    private let changeRowSpacing: CGFloat = 8
+
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .top, spacing: 12) {
@@ -988,7 +1041,7 @@ private struct RevertHistorySheet: View {
                     .foregroundStyle(NeoCodeTheme.textPrimary)
 
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 8) {
+                    LazyVStack(alignment: .leading, spacing: changeRowSpacing) {
                         ForEach(preview.changedFiles) { change in
                             HStack(alignment: .firstTextBaseline, spacing: 10) {
                                 Text(change.path)
@@ -1023,7 +1076,7 @@ private struct RevertHistorySheet: View {
                         }
                     }
                 }
-                .frame(height: min(CGFloat(max(preview.changedFiles.count, 1)) * 46, 220))
+                .frame(height: changeListHeight)
             }
 
             Text("This matches the TUI behavior: the transcript rewinds, the prompt comes back into the composer, and file edits after that point are rolled back.")
@@ -1056,8 +1109,16 @@ private struct RevertHistorySheet: View {
             }
         }
         .padding(22)
-        .frame(width: 520, height: 420, alignment: .topLeading)
+        .frame(width: 520, alignment: .topLeading)
+        .fixedSize(horizontal: false, vertical: true)
         .background(NeoCodeTheme.panel)
+    }
+
+    private var changeListHeight: CGFloat {
+        let visibleChangeCount = min(preview.changedFiles.count, maxVisibleChanges)
+        let rowHeights = CGFloat(visibleChangeCount) * changeRowHeight
+        let totalSpacing = CGFloat(max(visibleChangeCount - 1, 0)) * changeRowSpacing
+        return rowHeights + totalSpacing
     }
 
     private var summaryText: String {
