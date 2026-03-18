@@ -17,6 +17,7 @@ struct PrimaryContentScreen: View {
 
 struct DashboardScreen: View {
     @Environment(AppStore.self) private var store
+    @Environment(\.locale) private var locale
 
     var body: some View {
         VStack(spacing: 0) {
@@ -28,7 +29,7 @@ struct DashboardScreen: View {
                     if let snapshot = store.dashboardSnapshot,
                        snapshot.totalProjects > 0 {
                         HStack(alignment: .center, spacing: 12) {
-                            Text("Welcome to NeoCode!")
+                            Text(localized("Welcome to NeoCode!", locale: locale))
                                 .font(.system(size: 28, weight: .bold, design: .default))
                                 .foregroundStyle(NeoCodeTheme.textPrimary)
 
@@ -44,32 +45,34 @@ struct DashboardScreen: View {
                             DashboardStatCard(
                                 icon: "folder.fill",
                                 iconColor: NeoCodeTheme.accent,
-                                title: "Projects",
+                                title: localized("Projects", locale: locale),
                                 value: DashboardFormat.count(snapshot.totalProjects),
-                                subtitle: "\(DashboardFormat.count(snapshot.indexedSessionCount)) of \(DashboardFormat.count(snapshot.knownSessionCount)) cached"
+                                subtitle: String(format: localized("%@ of %@ cached", locale: locale), DashboardFormat.count(snapshot.indexedSessionCount), DashboardFormat.count(snapshot.knownSessionCount))
                             )
                             DashboardStatCard(
                                 icon: "sparkles",
                                 iconColor: NeoCodeTheme.warning,
-                                title: "Tokens",
+                                title: localized("Tokens", locale: locale),
                                 value: DashboardFormat.count(snapshot.tokens.total),
                                 subtitle: store.selectedDashboardRange == .allTime
-                                    ? "All-time usage"
-                                    : "Usage in last \(store.selectedDashboardRange.shortTitle.lowercased())"
+                                    ? localized("All-time usage", locale: locale)
+                                    : String(format: localized("Usage in last %@", locale: locale), store.selectedDashboardRange.shortTitle(locale: locale).lowercased())
                             )
                             DashboardStatCard(
                                 icon: "bubble.left.and.bubble.right.fill",
                                 iconColor: Color(red: 0.55, green: 0.65, blue: 0.85),
-                                title: "Messages",
+                                title: localized("Messages", locale: locale),
                                 value: DashboardFormat.count(snapshot.totalMessages),
-                                subtitle: "\(DashboardFormat.count(snapshot.userMessages)) user · \(DashboardFormat.count(snapshot.assistantMessages)) assistant"
+                                subtitle: String(format: localized("%@ user · %@ assistant", locale: locale), DashboardFormat.count(snapshot.userMessages), DashboardFormat.count(snapshot.assistantMessages))
                             )
                             DashboardStatCard(
                                 icon: "dollarsign.circle.fill",
                                 iconColor: NeoCodeTheme.success,
-                                title: "Cost",
+                                title: localized("Cost", locale: locale),
                                 value: DashboardFormat.currency(snapshot.totalCost),
-                                subtitle: snapshot.latestActivityAt.map { "Last activity \(DashboardFormat.relativeDate($0))" } ?? "No activity"
+                                subtitle: snapshot.latestActivityAt.map {
+                                    String(format: localized("Last activity %@", locale: locale), DashboardFormat.relativeDate($0))
+                                } ?? localized("No activity", locale: locale)
                             )
                         }
 
@@ -88,13 +91,13 @@ struct DashboardScreen: View {
                         }
                     } else if store.projects.isEmpty {
                         DashboardEmptyState(
-                            title: "Add your first project",
-                            detail: "Use the folder button in the Threads sidebar to add a workspace. NeoCode will build your dashboard from the sessions it discovers there."
+                            title: localized("Add your first project", locale: locale),
+                            detail: localized("Use the folder button in the Threads sidebar to add a workspace. NeoCode will build your dashboard from the sessions it discovers there.", locale: locale)
                         )
                     } else {
                         DashboardEmptyState(
-                            title: "Preparing the dashboard",
-                            detail: "NeoCode is scanning your tracked projects and building a reusable usage cache. As soon as the first summaries land, they will appear here."
+                            title: localized("Preparing the dashboard", locale: locale),
+                            detail: localized("NeoCode is scanning your tracked projects and building a reusable usage cache. As soon as the first summaries land, they will appear here.", locale: locale)
                         )
                     }
                 }
@@ -131,12 +134,13 @@ struct DashboardScreen: View {
 // MARK: - Header Section
 
 private struct DashboardHeader: View {
+    @Environment(\.locale) private var locale
     let snapshot: DashboardSnapshot?
     let status: DashboardRefreshStatus
 
     var body: some View {
         HStack(alignment: .center, spacing: 16) {
-            Text("Dashboard")
+            Text(localized("Dashboard", locale: locale))
                 .font(.system(size: 15, weight: .semibold, design: .default))
                 .foregroundStyle(NeoCodeTheme.textPrimary)
 
@@ -161,6 +165,7 @@ private struct DashboardHeader: View {
 // MARK: - Hero Section
 
 private struct DashboardHeroCard: View {
+    @Environment(\.locale) private var locale
     let snapshot: DashboardSnapshot?
     let status: DashboardRefreshStatus
     @State private var isHovered = false
@@ -180,7 +185,7 @@ private struct DashboardHeroCard: View {
                                 )
                             )
                         
-                        Text("Dashboard")
+                        Text(localized("Dashboard", locale: locale))
                             .font(.system(size: 32, weight: .bold, design: .rounded))
                             .foregroundStyle(NeoCodeTheme.textPrimary)
                     }
@@ -251,7 +256,7 @@ private struct DashboardHeroCard: View {
 
                             HStack(spacing: 16) {
                                 Label {
-                                    Text("\(DashboardFormat.count(status.processedSessions)) of \(DashboardFormat.count(status.totalSessions)) sessions")
+                                    Text(String(format: localized("%@ of %@ sessions", locale: locale), DashboardFormat.count(status.processedSessions), DashboardFormat.count(status.totalSessions)))
                                         .foregroundStyle(NeoCodeTheme.textMuted)
                                 } icon: {
                                     Image(systemName: "checkmark.circle.fill")
@@ -327,9 +332,9 @@ private struct DashboardHeroCard: View {
     private var subtitle: String {
         if let snapshot,
            snapshot.knownSessionCount > 0 {
-            return "A cached view of model mix, token totals, tool usage, and project activity across your tracked OpenCode workspaces."
+            return localized("A cached view of model mix, token totals, tool usage, and project activity across your tracked OpenCode workspaces.", locale: locale)
         }
-        return "NeoCode keeps a historical usage cache so the dashboard can load instantly on future launches and only refresh the sessions that changed."
+        return localized("NeoCode keeps a historical usage cache so the dashboard can load instantly on future launches and only refresh the sessions that changed.", locale: locale)
     }
 
     private var statusColor: Color {
@@ -445,28 +450,29 @@ private struct DashboardStatCard: View {
 // MARK: - Token Breakdown Card
 
 private struct DashboardTokenBreakdownCard: View {
+    @Environment(\.locale) private var locale
     let snapshot: DashboardSnapshot
 
     var body: some View {
-        DashboardGlassCard(title: "Token Breakdown", subtitle: "Model usage distribution across categories") {
+        DashboardGlassCard(title: localized("Token Breakdown", locale: locale), subtitle: localized("Model usage distribution across categories", locale: locale)) {
             VStack(alignment: .leading, spacing: 12) {
                 DashboardTokenRow(
-                    label: "Input",
+                    label: localized("Input", locale: locale),
                     value: snapshot.tokens.input,
                     total: snapshot.tokens.total
                 )
                 DashboardTokenRow(
-                    label: "Output",
+                    label: localized("Output", locale: locale),
                     value: snapshot.tokens.output,
                     total: snapshot.tokens.total
                 )
                 DashboardTokenRow(
-                    label: "Reasoning",
+                    label: localized("Reasoning", locale: locale),
                     value: snapshot.tokens.reasoning,
                     total: snapshot.tokens.total
                 )
                 DashboardTokenRow(
-                    label: "Cache",
+                    label: localized("Cache", locale: locale),
                     value: snapshot.tokens.cacheRead + snapshot.tokens.cacheWrite,
                     total: snapshot.tokens.total
                 )
@@ -520,12 +526,13 @@ private struct DashboardTokenRow: View {
 // MARK: - Models Card
 
 private struct DashboardModelsCard: View {
+    @Environment(\.locale) private var locale
     let models: [DashboardModelUsageSummary]
 
     var body: some View {
-        DashboardGlassCard(title: "Most Used Models", subtitle: "Ranked by assistant message count") {
+        DashboardGlassCard(title: localized("Most Used Models", locale: locale), subtitle: localized("Ranked by assistant message count", locale: locale)) {
             if models.isEmpty {
-                DashboardInlineEmptyState(label: "No assistant usage has been cached yet.")
+                DashboardInlineEmptyState(label: localized("No assistant usage has been cached yet.", locale: locale))
             } else {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(models.enumerated()), id: \.element.id) { index, model in
@@ -573,12 +580,13 @@ private struct DashboardModelRow: View {
 // MARK: - Tools Card
 
 private struct DashboardToolsCard: View {
+    @Environment(\.locale) private var locale
     let tools: [DashboardToolUsageSummary]
 
     var body: some View {
-        DashboardGlassCard(title: "Tool Activity", subtitle: "Most frequently used tools") {
+        DashboardGlassCard(title: localized("Tool Activity", locale: locale), subtitle: localized("Most frequently used tools", locale: locale)) {
             if tools.isEmpty {
-                DashboardInlineEmptyState(label: "No tool activity has been cached yet.")
+                DashboardInlineEmptyState(label: localized("No tool activity has been cached yet.", locale: locale))
             } else {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(tools.enumerated()), id: \.element.id) { index, tool in
@@ -620,13 +628,14 @@ private struct DashboardToolRow: View {
 
 private struct DashboardProjectsCard: View {
     @Environment(AppStore.self) private var store
+    @Environment(\.locale) private var locale
 
     let projects: [DashboardProjectUsageSummary]
 
     var body: some View {
-        DashboardGlassCard(title: "Projects", subtitle: "Per-project activity summary") {
+        DashboardGlassCard(title: localized("Projects", locale: locale), subtitle: localized("Per-project activity summary", locale: locale)) {
             if projects.isEmpty {
-                DashboardInlineEmptyState(label: "No tracked projects are ready yet.")
+                DashboardInlineEmptyState(label: localized("No tracked projects are ready yet.", locale: locale))
             } else {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(projects) { project in
@@ -726,13 +735,14 @@ private struct DashboardGlassCard<Content: View>: View {
 // MARK: - Pills
 
 private struct DashboardTimePill: View {
+    @Environment(\.locale) private var locale
     let date: Date
 
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: "clock")
                 .font(.system(size: 9))
-            Text("Updated \(DashboardFormat.relativeDate(date))")
+            Text(String(format: localized("Updated %@", locale: locale), DashboardFormat.relativeDate(date)))
                 .font(.system(size: 10, weight: .regular, design: .monospaced))
         }
         .foregroundStyle(NeoCodeTheme.textMuted)
@@ -762,26 +772,27 @@ private struct DashboardStatusPill: View {
 }
 
 private struct DashboardRangeSelect: View {
+    @Environment(\.locale) private var locale
     let selectedRange: DashboardTimeRange
     let onSelect: (DashboardTimeRange) -> Void
 
     var body: some View {
         NeoCodeSelect(
-            title: selectedRange.shortTitle,
+            title: selectedRange.shortTitle(locale: locale),
             selectedID: selectedRange.id,
             items: DashboardTimeRange.allCases,
-            emptyMessage: "No ranges available.",
-            placeholder: "Filter range",
+            emptyMessage: localized("No ranges available.", locale: locale),
+            placeholder: localized("Filter range", locale: locale),
             isSearchable: false,
             direction: .down,
             menuWidth: 180,
             showsSelectionIndicator: true
         ) { range in
-            Text(range.title)
+            Text(range.title(locale: locale))
                 .font(.neoBody)
                 .foregroundStyle(NeoCodeTheme.textPrimary)
         } searchableText: { range in
-            [range.title, range.shortTitle]
+            [range.title(locale: locale), range.shortTitle(locale: locale)]
         } onSelect: { range in
             onSelect(range)
         } triggerLeading: {
@@ -790,8 +801,8 @@ private struct DashboardRangeSelect: View {
                 .foregroundStyle(NeoCodeTheme.textSecondary)
         }
         .frame(width: 132, alignment: .trailing)
-        .accessibilityLabel("Dashboard range")
-        .accessibilityValue(selectedRange.title)
+        .accessibilityLabel(localized("Dashboard range", locale: locale))
+        .accessibilityValue(selectedRange.title(locale: locale))
     }
 }
 

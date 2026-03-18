@@ -4,6 +4,7 @@ import SwiftUI
 struct SessionHeaderView: View {
     @Environment(AppStore.self) private var store
     @Environment(OpenCodeRuntime.self) private var runtime
+    @Environment(\.locale) private var locale
     @State private var isRenaming = false
     @State private var isCommitSheetPresented = false
     @State private var renameTitle = ""
@@ -103,20 +104,20 @@ struct SessionHeaderView: View {
                 .environment(store)
                 .environment(runtime)
         }
-        .alert("Rename Thread", isPresented: $isRenaming) {
-            TextField("Thread name", text: $renameTitle)
+        .alert(localized("Rename Thread", locale: locale), isPresented: $isRenaming) {
+            TextField(localized("Thread name", locale: locale), text: $renameTitle)
                 .neoWritingToolsDisabled()
-            Button("Cancel", role: .cancel) {
+            Button(localized("Cancel", locale: locale), role: .cancel) {
                 renameTitle = session.title
             }
-            Button("Save") {
+            Button(localized("Save", locale: locale)) {
                 let newTitle = renameTitle
                 Task {
                     await store.renameSession(session.id, to: newTitle, using: runtime)
                 }
             }
         } message: {
-            Text("Give this thread a new name.")
+            Text(localized("Give this thread a new name.", locale: locale))
         }
     }
 
@@ -212,17 +213,18 @@ struct SessionHeaderView: View {
 }
 
 struct SessionActionMenuContent: View {
+    @Environment(\.locale) private var locale
     let canCompact: Bool
     let onCompact: () -> Void
     let onRename: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
-        Button("Rename", action: onRename)
-        Button("Compact", action: onCompact)
+        Button(localized("Rename", locale: locale), action: onRename)
+        Button(localized("Compact", locale: locale), action: onCompact)
             .disabled(!canCompact)
         Divider()
-        Button("Delete", role: .destructive, action: onDelete)
+        Button(localized("Delete", locale: locale), role: .destructive, action: onDelete)
     }
 }
 

@@ -3896,6 +3896,7 @@ struct NeoCodeMainActorTests {
         let persistence = PersistedAppSettingsStore(defaults: defaults, key: "appSettings")
         let settings = NeoCodeAppSettings(
             general: .init(
+                appLanguage: .spanish,
                 startupBehavior: .lastWorkspace,
                 sendKeyBehavior: .commandReturn,
                 restoresPromptDrafts: false,
@@ -3937,6 +3938,13 @@ struct NeoCodeMainActorTests {
         #expect(settings.sendKeyBehavior == .returnKey)
         #expect(settings.restoresPromptDrafts == true)
         #expect(settings.remembersYoloModePerThread == true)
+        #expect(settings.appLanguage == .system)
+    }
+
+    @MainActor
+    @Test func localizedHelperResolvesSpanishStrings() {
+        #expect(localized("Updates", locale: Locale(identifier: "es")) == "Actualizaciones")
+        #expect(localized("Language", locale: Locale(identifier: "es")) == "Idioma")
     }
 
     @MainActor

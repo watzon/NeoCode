@@ -105,6 +105,7 @@ struct ConversationScreen: View {
 struct ConversationView: View {
     @Environment(AppStore.self) private var store
     @Environment(OpenCodeRuntime.self) private var runtime
+    @Environment(\.locale) private var locale
     @FocusState private var composerFocused: Bool
     // Measured height of the full overlaid prompt dock. We use this to add
     // extra scroll content at the bottom without changing the scroll view's own
@@ -317,7 +318,7 @@ struct ConversationView: View {
     }
 
     private var slashCommands: [ComposerSlashCommand] {
-        let local = LocalComposerSlashCommand.allCases.map(ComposerSlashCommand.local)
+        let local = LocalComposerSlashCommand.allCases.map { ComposerSlashCommand.local($0, locale: locale) }
         let remote = store.availableCommands.map { command in
             let badgeTitle: String?
             switch command.source {

@@ -9,24 +9,32 @@ enum AppSettingsSection: String, Codable, CaseIterable, Hashable, Identifiable {
     var id: String { rawValue }
 
     var title: String {
+        title(locale: .autoupdatingCurrent)
+    }
+
+    func title(locale: Locale) -> String {
         switch self {
         case .general:
-            return "General"
+            return localized("General", locale: locale)
         case .appearance:
-            return "Appearance"
+            return localized("Appearance", locale: locale)
         case .updates:
-            return "Updates"
+            return localized("Updates", locale: locale)
         }
     }
 
     var subtitle: String {
+        subtitle(locale: .autoupdatingCurrent)
+    }
+
+    func subtitle(locale: Locale) -> String {
         switch self {
         case .general:
-            return "Startup, composer, autonomy, and notifications."
+            return localized("Startup, composer, autonomy, and notifications.", locale: locale)
         case .appearance:
-            return "Theme, fonts, and interface styling."
+            return localized("Theme, fonts, and interface styling.", locale: locale)
         case .updates:
-            return "Sparkle delivery, release status, and update controls."
+            return localized("Sparkle delivery, release status, and update controls.", locale: locale)
         }
     }
 
@@ -50,13 +58,17 @@ enum NeoCodeThemeMode: String, Codable, CaseIterable, Hashable, Identifiable {
     var id: String { rawValue }
 
     var title: String {
+        title(locale: .autoupdatingCurrent)
+    }
+
+    func title(locale: Locale) -> String {
         switch self {
         case .system:
-            return "System"
+            return localized("System", locale: locale)
         case .light:
-            return "Light"
+            return localized("Light", locale: locale)
         case .dark:
-            return "Dark"
+            return localized("Dark", locale: locale)
         }
     }
 
@@ -90,11 +102,15 @@ enum NeoCodeStartupBehavior: String, Codable, CaseIterable, Hashable, Identifiab
     var id: String { rawValue }
 
     var title: String {
+        title(locale: .autoupdatingCurrent)
+    }
+
+    func title(locale: Locale) -> String {
         switch self {
         case .dashboard:
-            return "Dashboard"
+            return localized("Dashboard", locale: locale)
         case .lastWorkspace:
-            return "Last workspace"
+            return localized("Last workspace", locale: locale)
         }
     }
 }
@@ -106,11 +122,15 @@ enum NeoCodeSendKeyBehavior: String, Codable, CaseIterable, Hashable, Identifiab
     var id: String { rawValue }
 
     var title: String {
+        title(locale: .autoupdatingCurrent)
+    }
+
+    func title(locale: Locale) -> String {
         switch self {
         case .returnKey:
-            return "Return"
+            return localized("Return", locale: locale)
         case .commandReturn:
-            return "Command-Return"
+            return localized("Command-Return", locale: locale)
         }
     }
 }
@@ -129,6 +149,7 @@ struct NeoCodeAppSettings: Codable, Hashable {
 }
 
 struct NeoCodeGeneralSettings: Codable, Hashable {
+    var appLanguage: NeoCodeAppLanguage
     var startupBehavior: NeoCodeStartupBehavior
     var sendKeyBehavior: NeoCodeSendKeyBehavior
     var restoresPromptDrafts: Bool
@@ -139,6 +160,7 @@ struct NeoCodeGeneralSettings: Codable, Hashable {
     var notifiesWhenInputIsRequired: Bool
 
     init(
+        appLanguage: NeoCodeAppLanguage = .system,
         startupBehavior: NeoCodeStartupBehavior = .dashboard,
         sendKeyBehavior: NeoCodeSendKeyBehavior = .returnKey,
         restoresPromptDrafts: Bool = true,
@@ -148,6 +170,7 @@ struct NeoCodeGeneralSettings: Codable, Hashable {
         notifiesWhenResponseCompletes: Bool = false,
         notifiesWhenInputIsRequired: Bool = false
     ) {
+        self.appLanguage = appLanguage
         self.startupBehavior = startupBehavior
         self.sendKeyBehavior = sendKeyBehavior
         self.restoresPromptDrafts = restoresPromptDrafts
@@ -162,6 +185,7 @@ struct NeoCodeGeneralSettings: Codable, Hashable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let legacyLaunchToDashboard = try container.decodeIfPresent(Bool.self, forKey: .launchToDashboard)
 
+        appLanguage = try container.decodeIfPresent(NeoCodeAppLanguage.self, forKey: .appLanguage) ?? .system
         startupBehavior = try container.decodeIfPresent(NeoCodeStartupBehavior.self, forKey: .startupBehavior)
             ?? ((legacyLaunchToDashboard ?? true) ? .dashboard : .lastWorkspace)
         sendKeyBehavior = try container.decodeIfPresent(NeoCodeSendKeyBehavior.self, forKey: .sendKeyBehavior) ?? .returnKey
@@ -175,6 +199,7 @@ struct NeoCodeGeneralSettings: Codable, Hashable {
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(appLanguage, forKey: .appLanguage)
         try container.encode(startupBehavior, forKey: .startupBehavior)
         try container.encode(sendKeyBehavior, forKey: .sendKeyBehavior)
         try container.encode(restoresPromptDrafts, forKey: .restoresPromptDrafts)
@@ -186,6 +211,7 @@ struct NeoCodeGeneralSettings: Codable, Hashable {
     }
 
     private enum CodingKeys: String, CodingKey {
+        case appLanguage
         case startupBehavior
         case sendKeyBehavior
         case restoresPromptDrafts

@@ -2,17 +2,18 @@ import SwiftUI
 
 struct UpdatesSettingsView: View {
     @Environment(AppUpdateService.self) private var updateService
+    @Environment(\.locale) private var locale
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             SettingsCard(
-                title: "Sparkle delivery",
-                detail: "NeoCode checks signed GitHub releases in the background and surfaces new versions in the titlebar instead of interrupting your flow with a modal window."
+                title: localized("Sparkle delivery", locale: locale),
+                detail: localized("NeoCode checks signed GitHub releases in the background and surfaces new versions in the titlebar instead of interrupting your flow with a modal window.", locale: locale)
             ) {
                 VStack(spacing: 0) {
                     SettingsControlRow(
-                        title: "Current version",
-                        detail: "The build currently running on this Mac.",
+                        title: localized("Current version", locale: locale),
+                        detail: localized("The build currently running on this Mac.", locale: locale),
                         accessory: {
                             Text(updateService.installedVersionDescription)
                                 .font(.neoMonoSmall)
@@ -23,10 +24,10 @@ struct UpdatesSettingsView: View {
                     SettingsDivider()
 
                     SettingsControlRow(
-                        title: "Automatic checks",
-                        detail: "Let Sparkle keep an eye on the release feed and raise the blue titlebar control when a newer signed build appears.",
+                        title: localized("Automatic checks", locale: locale),
+                        detail: localized("Let Sparkle keep an eye on the release feed and raise the blue titlebar control when a newer signed build appears.", locale: locale),
                         accessory: {
-                            Toggle("Automatic checks", isOn: automaticChecksBinding)
+                            Toggle(localized("Automatic checks", locale: locale), isOn: automaticChecksBinding)
                                 .labelsHidden()
                                 .toggleStyle(.switch)
                                 .disabled(!updateService.isAvailableInThisBuild)
@@ -47,8 +48,8 @@ struct UpdatesSettingsView: View {
                         SettingsDivider()
 
                         SettingsControlRow(
-                            title: "Available version",
-                            detail: "The newest signed release Sparkle has found for this channel.",
+                            title: localized("Available version", locale: locale),
+                            detail: localized("The newest signed release Sparkle has found for this channel.", locale: locale),
                             accessory: {
                                 Text(availableVersionDescription)
                                     .font(.neoMonoSmall)
@@ -60,8 +61,8 @@ struct UpdatesSettingsView: View {
                     SettingsDivider()
 
                     SettingsControlRow(
-                        title: "Last checked",
-                        detail: "The most recent time this Mac finished talking to the release feed.",
+                        title: localized("Last checked", locale: locale),
+                        detail: localized("The most recent time this Mac finished talking to the release feed.", locale: locale),
                         accessory: {
                             Text(lastCheckedDescription)
                                 .font(.neoMeta)
@@ -72,8 +73,8 @@ struct UpdatesSettingsView: View {
                     SettingsDivider()
 
                     SettingsControlRow(
-                        title: "Check manually",
-                        detail: "Ask Sparkle to validate the newest available release right now.",
+                        title: localized("Check manually", locale: locale),
+                        detail: localized("Ask Sparkle to validate the newest available release right now.", locale: locale),
                         accessory: {
                             Button(updateService.manualCheckButtonTitle) {
                                 updateService.checkForUpdates()
@@ -88,8 +89,8 @@ struct UpdatesSettingsView: View {
                         SettingsDivider()
 
                         SettingsControlRow(
-                            title: "Apply available update",
-                            detail: "Download the new build now or finish installing the copy Sparkle has already staged.",
+                            title: localized("Apply available update", locale: locale),
+                            detail: localized("Download the new build now or finish installing the copy Sparkle has already staged.", locale: locale),
                             accessory: {
                                 Button(primaryActionTitle) {
                                     updateService.performPrimaryAction()
@@ -114,7 +115,7 @@ struct UpdatesSettingsView: View {
 
     private var lastCheckedDescription: String {
         guard let lastCheckedAt = updateService.lastCheckedAt else {
-            return "Never"
+            return localized("Never", locale: locale)
         }
 
         return lastCheckedAt.formatted(date: .abbreviated, time: .shortened)

@@ -104,20 +104,21 @@ private struct ThreadsSidebarView: View {
 }
 
 struct EmptyProjectsSidebarView: View {
+    @Environment(\.locale) private var locale
     let onAddProject: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("No projects yet")
+            Text(localized("No projects yet", locale: locale))
                 .font(.neoBody)
                 .foregroundStyle(NeoCodeTheme.textPrimary)
 
-            Text("Add a project folder to start tracking its threads in NeoCode.")
+            Text(localized("Add a project folder to start tracking its threads in NeoCode.", locale: locale))
                 .font(.neoBody)
                 .foregroundStyle(NeoCodeTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Button("Add project", action: onAddProject)
+            Button(localized("Add project", locale: locale), action: onAddProject)
                 .buttonStyle(.plain)
                 .font(.neoMonoSmall)
                 .foregroundStyle(NeoCodeTheme.accent)
@@ -135,6 +136,7 @@ struct EmptyProjectsSidebarView: View {
 }
 
 struct SidebarActionBar: View {
+    @Environment(\.locale) private var locale
     let isDashboardSelected: Bool
     let onDashboard: () -> Void
     let onSettings: () -> Void
@@ -142,12 +144,12 @@ struct SidebarActionBar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             SidebarActionButton(
-                label: "Dashboard",
+                label: localized("Dashboard", locale: locale),
                 systemImage: "rectangle.grid.2x2",
                 isSelected: isDashboardSelected,
                 action: onDashboard
             )
-            SidebarActionButton(label: "Settings", systemImage: "gearshape", action: onSettings)
+            SidebarActionButton(label: localized("Settings", locale: locale), systemImage: "gearshape", action: onSettings)
         }
         .padding(.horizontal, 18)
         .padding(.bottom, 18)
@@ -180,11 +182,12 @@ struct SidebarActionButton: View {
 }
 
 struct ThreadsSectionHeader: View {
+    @Environment(\.locale) private var locale
     let onAddProject: () -> Void
 
     var body: some View {
         HStack {
-            Text("Threads")
+            Text(localized("Threads", locale: locale))
                 .font(.neoMeta)
                 .foregroundStyle(NeoCodeTheme.textMuted)
 
@@ -196,7 +199,7 @@ struct ThreadsSectionHeader: View {
                     .foregroundStyle(NeoCodeTheme.textSecondary)
             }
             .buttonStyle(.plain)
-            .neoTooltip("Add project")
+            .neoTooltip(localized("Add project", locale: locale))
         }
     }
 }
@@ -204,6 +207,7 @@ struct ThreadsSectionHeader: View {
 struct ProjectTreeNode: View {
     @Environment(AppStore.self) private var store
     @Environment(OpenCodeRuntime.self) private var runtime
+    @Environment(\.locale) private var locale
     @State private var isHovering = false
     @State private var showsAllSessions = false
 
@@ -223,7 +227,7 @@ struct ProjectTreeNode: View {
                         .frame(width: 12, height: 12)
                 }
                 .buttonStyle(.plain)
-                .neoTooltip(store.isProjectCollapsed(project.id) ? "Expand project" : "Collapse project")
+                .neoTooltip(store.isProjectCollapsed(project.id) ? localized("Expand project", locale: locale) : localized("Collapse project", locale: locale))
 
                 Text(project.name)
                     .font(.neoBody)

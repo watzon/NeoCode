@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct SettingsSidebarView: View {
     @Environment(AppStore.self) private var store
+    @Environment(\.locale) private var locale
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -15,7 +16,7 @@ struct SettingsSidebarView: View {
                     HStack(spacing: 6) {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 13, weight: .medium))
-                        Text("Back")
+                        Text(localized("Back", locale: locale))
                             .font(.neoAction)
                     }
                     .foregroundStyle(NeoCodeTheme.textSecondary)
@@ -27,12 +28,12 @@ struct SettingsSidebarView: View {
                     )
                 }
                 .buttonStyle(.plain)
-                .neoTooltip("Back to workspace")
+                .neoTooltip(localized("Back to workspace", locale: locale))
 
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(AppSettingsSection.allCases) { section in
                         SidebarActionButton(
-                            label: section.title,
+                            label: section.title(locale: locale),
                             systemImage: section.systemImage,
                             isSelected: store.selectedSettingsSection == section,
                             action: { store.selectSettingsSection(section) }
@@ -98,15 +99,16 @@ struct SettingsScreen: View {
 }
 
 private struct SettingsHeaderView: View {
+    @Environment(\.locale) private var locale
     let section: AppSettingsSection
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(section.title)
+            Text(section.title(locale: locale))
                 .font(.system(size: 18, weight: .semibold, design: .rounded))
                 .foregroundStyle(NeoCodeTheme.textPrimary)
 
-            Text(section.subtitle)
+            Text(section.subtitle(locale: locale))
                 .font(.neoBody)
                 .foregroundStyle(NeoCodeTheme.textSecondary)
         }
@@ -120,6 +122,7 @@ private struct SettingsHeaderView: View {
 
 private struct GeneralSettingsView: View {
     @Environment(AppStore.self) private var store
+    @Environment(\.locale) private var locale
     @State private var workspaceToolOptions: [WorkspaceToolSettingsOption] = [.autoDetect]
 
     private let workspaceToolService = WorkspaceToolService()
@@ -128,17 +131,49 @@ private struct GeneralSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             SettingsCard(
-                title: "Startup & workspace",
-                detail: "Choose how NeoCode opens and which app should handle projects before a workspace-specific override takes over."
+                title: localized("Startup & workspace", locale: locale),
+                detail: localized("Choose how NeoCode opens and which app should handle projects before a workspace-specific override takes over.", locale: locale)
             ) {
                 VStack(spacing: 0) {
                     SettingsControlRow(
-                        title: "On launch",
-                        detail: "Start on the dashboard or restore the last workspace you were actively using.",
+                        title: localized("Language", locale: locale),
+                        detail: localized("Choose whether NeoCode follows the system language or always uses a specific app language.", locale: locale),
                         accessory: {
-                            Picker("On launch", selection: generalBinding(\.startupBehavior)) {
+                            NeoCodeSelect(
+                                title: store.appSettings.general.appLanguage.title(locale: locale),
+                                selectedID: store.appSettings.general.appLanguage.id,
+                                items: NeoCodeAppLanguage.allCases,
+                                emptyMessage: localized("No languages found.", locale: locale),
+                                placeholder: localized("Search languages", locale: locale),
+                                isSearchable: false,
+                                direction: .down,
+                                menuWidth: 220,
+                                showsSelectionIndicator: false
+                            ) { language in
+                                Text(language.title(locale: locale))
+                                    .font(.neoBody)
+                                    .foregroundStyle(NeoCodeTheme.textPrimary)
+                                    .lineLimit(1)
+                            } searchableText: { language in
+                                [language.title(locale: locale), language.id]
+                            } onSelect: { language in
+                                store.updateGeneral { general in
+                                    general.appLanguage = language
+                                }
+                            }
+                            .frame(width: 220, alignment: .trailing)
+                        }
+                    )
+
+                    SettingsDivider()
+
+                    SettingsControlRow(
+                        title: localized("On launch", locale: locale),
+                        detail: localized("Start on the dashboard or restore the last workspace you were actively using.", locale: locale),
+                        accessory: {
+                            Picker(localized("On launch", locale: locale), selection: generalBinding(\.startupBehavior)) {
                                 ForEach(NeoCodeStartupBehavior.allCases) { behavior in
-                                    Text(behavior.title)
+                                    Text(behavior.title(locale: locale))
                                         .tag(behavior)
                                 }
                             }
@@ -151,15 +186,15 @@ private struct GeneralSettingsView: View {
                     SettingsDivider()
 
                     SettingsControlRow(
-                        title: "Open project with",
-                        detail: "Used when a project does not already have its own preferred editor or destination.",
+                        title: localized("Open project with", locale: locale),
+                        detail: localized("Used when a project does not already have its own preferred editor or destination.", locale: locale),
                         accessory: {
                             NeoCodeSelect(
-                                title: selectedWorkspaceToolOption.title,
+                                title: displayTitle(for: selectedWorkspaceToolOption),
                                 selectedID: selectedWorkspaceToolOptionID,
                                 items: workspaceToolOptions,
-                                emptyMessage: "No apps found.",
-                                placeholder: "Search apps",
+                                emptyMessage: localized("No apps found.", locale: locale),
+                                placeholder: localized("Search apps", locale: locale),
                                 isSearchable: true,
                                 direction: .down,
                                 menuWidth: 280,
@@ -167,7 +202,7 @@ private struct GeneralSettingsView: View {
                             ) { option in
                                 WorkspaceToolSettingsOptionLabel(option: option)
                             } searchableText: { option in
-                                [option.title, option.id]
+                                [displayTitle(for: option), option.id]
                             } onSelect: { option in
                                 store.updateGeneral { general in
                                     general.defaultWorkspaceToolID = option.id == Self.autoDetectToolID ? nil : option.id
@@ -182,17 +217,17 @@ private struct GeneralSettingsView: View {
             }
 
             SettingsCard(
-                title: "Composer",
-                detail: "Tune how prompts send and whether NeoCode should keep per-thread drafts waiting for you when you come back."
+                title: localized("Composer", locale: locale),
+                detail: localized("Tune how prompts send and whether NeoCode should keep per-thread drafts waiting for you when you come back.", locale: locale)
             ) {
                 VStack(spacing: 0) {
                     SettingsControlRow(
-                        title: "Send messages with",
-                        detail: "Choose whether Return sends immediately or only Command-Return sends while Return inserts a newline.",
+                        title: localized("Send messages with", locale: locale),
+                        detail: localized("Choose whether Return sends immediately or only Command-Return sends while Return inserts a newline.", locale: locale),
                         accessory: {
-                            Picker("Send messages with", selection: generalBinding(\.sendKeyBehavior)) {
+                            Picker(localized("Send messages with", locale: locale), selection: generalBinding(\.sendKeyBehavior)) {
                                 ForEach(NeoCodeSendKeyBehavior.allCases) { behavior in
-                                    Text(behavior.title)
+                                    Text(behavior.title(locale: locale))
                                         .tag(behavior)
                                 }
                             }
@@ -205,10 +240,10 @@ private struct GeneralSettingsView: View {
                     SettingsDivider()
 
                     SettingsControlRow(
-                        title: "Restore drafts when reopening threads",
-                        detail: "Keep unfinished prompt text tied to each thread so you can move around the app without losing context.",
+                        title: localized("Restore drafts when reopening threads", locale: locale),
+                        detail: localized("Keep unfinished prompt text tied to each thread so you can move around the app without losing context.", locale: locale),
                         accessory: {
-                            Toggle("Restore drafts when reopening threads", isOn: generalBinding(\.restoresPromptDrafts))
+                            Toggle(localized("Restore drafts when reopening threads", locale: locale), isOn: generalBinding(\.restoresPromptDrafts))
                                 .labelsHidden()
                                 .toggleStyle(.switch)
                         }
@@ -217,14 +252,14 @@ private struct GeneralSettingsView: View {
             }
 
             SettingsCard(
-                title: "Session autonomy",
-                detail: "Control whether NeoCode should remember safety-related per-thread behavior between launches."
+                title: localized("Session autonomy", locale: locale),
+                detail: localized("Control whether NeoCode should remember safety-related per-thread behavior between launches.", locale: locale)
             ) {
                 SettingsControlRow(
-                    title: "Remember YOLO mode per thread",
-                    detail: "Persist YOLO mode for each thread so permission auto-approval comes back the next time you open that workspace.",
+                    title: localized("Remember YOLO mode per thread", locale: locale),
+                    detail: localized("Persist YOLO mode for each thread so permission auto-approval comes back the next time you open that workspace.", locale: locale),
                     accessory: {
-                        Toggle("Remember YOLO mode per thread", isOn: generalBinding(\.remembersYoloModePerThread))
+                        Toggle(localized("Remember YOLO mode per thread", locale: locale), isOn: generalBinding(\.remembersYoloModePerThread))
                             .labelsHidden()
                             .toggleStyle(.switch)
                     }
@@ -232,15 +267,15 @@ private struct GeneralSettingsView: View {
             }
 
             SettingsCard(
-                title: "Power & notifications",
-                detail: "Keep long-running work alive and optionally notify you when NeoCode finishes or needs your input."
+                title: localized("Power & notifications", locale: locale),
+                detail: localized("Keep long-running work alive and optionally notify you when NeoCode finishes or needs your input.", locale: locale)
             ) {
                 VStack(spacing: 0) {
                     SettingsControlRow(
-                        title: "Prevent Mac sleep while responses are running",
-                        detail: "Ask macOS to keep the system awake while NeoCode is actively processing a response.",
+                        title: localized("Prevent Mac sleep while responses are running", locale: locale),
+                        detail: localized("Ask macOS to keep the system awake while NeoCode is actively processing a response.", locale: locale),
                         accessory: {
-                            Toggle("Prevent Mac sleep while responses are running", isOn: generalBinding(\.preventsSystemSleepWhileRunning))
+                            Toggle(localized("Prevent Mac sleep while responses are running", locale: locale), isOn: generalBinding(\.preventsSystemSleepWhileRunning))
                                 .labelsHidden()
                                 .toggleStyle(.switch)
                         }
@@ -249,10 +284,10 @@ private struct GeneralSettingsView: View {
                     SettingsDivider()
 
                     SettingsControlRow(
-                        title: "Notify when a response finishes",
-                        detail: "Show a macOS notification after a response completes while the app is unfocused.",
+                        title: localized("Notify when a response finishes", locale: locale),
+                        detail: localized("Show a macOS notification after a response completes while the app is unfocused.", locale: locale),
                         accessory: {
-                            Toggle("Notify when a response finishes", isOn: generalBinding(\.notifiesWhenResponseCompletes))
+                            Toggle(localized("Notify when a response finishes", locale: locale), isOn: generalBinding(\.notifiesWhenResponseCompletes))
                                 .labelsHidden()
                                 .toggleStyle(.switch)
                         }
@@ -261,10 +296,10 @@ private struct GeneralSettingsView: View {
                     SettingsDivider()
 
                     SettingsControlRow(
-                        title: "Notify when input is required",
-                        detail: "Show a macOS notification when a permission request or question is waiting for you while NeoCode is unfocused.",
+                        title: localized("Notify when input is required", locale: locale),
+                        detail: localized("Show a macOS notification when a permission request or question is waiting for you while NeoCode is unfocused.", locale: locale),
                         accessory: {
-                            Toggle("Notify when input is required", isOn: generalBinding(\.notifiesWhenInputIsRequired))
+                            Toggle(localized("Notify when input is required", locale: locale), isOn: generalBinding(\.notifiesWhenInputIsRequired))
                                 .labelsHidden()
                                 .toggleStyle(.switch)
                         }
@@ -301,6 +336,10 @@ private struct GeneralSettingsView: View {
     private func refreshWorkspaceToolOptions() {
         workspaceToolOptions = [.autoDetect] + workspaceToolService.projectOpenTools().map { WorkspaceToolSettingsOption(tool: $0) }
     }
+
+    private func displayTitle(for option: WorkspaceToolSettingsOption) -> String {
+        option.id == Self.autoDetectToolID ? localized("Auto detect", locale: locale) : option.title
+    }
 }
 
 private struct WorkspaceToolSettingsOption: Identifiable, Hashable {
@@ -333,13 +372,14 @@ private struct WorkspaceToolSettingsOption: Identifiable, Hashable {
 }
 
 private struct WorkspaceToolSettingsOptionLabel: View {
+    @Environment(\.locale) private var locale
     let option: WorkspaceToolSettingsOption
 
     var body: some View {
         HStack(spacing: 10) {
             WorkspaceToolSettingsOptionIcon(option: option)
 
-            Text(option.title)
+            Text(option.id == WorkspaceToolSettingsOption.autoDetectID ? localized("Auto detect", locale: locale) : option.title)
                 .font(.neoBody)
                 .foregroundStyle(NeoCodeTheme.textPrimary)
                 .lineLimit(1)
@@ -366,18 +406,19 @@ private struct WorkspaceToolSettingsOptionIcon: View {
 
 private struct AppearanceSettingsView: View {
     @Environment(AppStore.self) private var store
+    @Environment(\.locale) private var locale
     @State private var importTarget: ThemeProfileKind?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             SettingsCard(
-                title: "Theme",
-                detail: "Pick a presentation mode, then tune the light and dark palettes independently."
+                title: localized("Theme", locale: locale),
+                detail: localized("Pick a presentation mode, then tune the light and dark palettes independently.", locale: locale)
             ) {
                 VStack(alignment: .leading, spacing: 18) {
-                    Picker("Theme", selection: appearanceBinding(\.themeMode)) {
+                    Picker(localized("Theme", locale: locale), selection: appearanceBinding(\.themeMode)) {
                         ForEach(NeoCodeThemeMode.allCases) { mode in
-                            Label(mode.title, systemImage: mode.symbolName)
+                            Label(mode.title(locale: locale), systemImage: mode.symbolName)
                                 .tag(mode)
                         }
                     }
@@ -392,8 +433,8 @@ private struct AppearanceSettingsView: View {
 
             VStack(spacing: 16) {
                 AppearanceThemeEditorCard(
-                    title: "Light theme",
-                    subtitle: "Warm daylight palette for your brighter workspace.",
+                    title: localized("Light theme", locale: locale),
+                    subtitle: localized("Warm daylight palette for your brighter workspace.", locale: locale),
                     profile: profileBinding(.light),
                     selectedPreset: selectedPreset(for: .light),
                     presets: NeoCodeThemePresetCatalog.presets(for: .light),
@@ -403,8 +444,8 @@ private struct AppearanceSettingsView: View {
                 )
 
                 AppearanceThemeEditorCard(
-                    title: "Dark theme",
-                    subtitle: "Low-glare palette for the main NeoCode shell.",
+                    title: localized("Dark theme", locale: locale),
+                    subtitle: localized("Low-glare palette for the main NeoCode shell.", locale: locale),
                     profile: profileBinding(.dark),
                     selectedPreset: selectedPreset(for: .dark),
                     presets: NeoCodeThemePresetCatalog.presets(for: .dark),
@@ -415,15 +456,15 @@ private struct AppearanceSettingsView: View {
             }
 
             SettingsCard(
-                title: "Interface",
-                detail: "Adjust cursor behavior and base sizing. Font families now live with each theme profile above."
+                title: localized("Interface", locale: locale),
+                detail: localized("Adjust cursor behavior and base sizing. Font families now live with each theme profile above.", locale: locale)
             ) {
                 VStack(spacing: 0) {
                     SettingsControlRow(
-                        title: "Use pointer cursors",
-                        detail: "Prefer arrow-to-hand pointer transitions over the default app cursor.",
+                        title: localized("Use pointer cursors", locale: locale),
+                        detail: localized("Prefer arrow-to-hand pointer transitions over the default app cursor.", locale: locale),
                         accessory: {
-                            Toggle("Use pointer cursors", isOn: appearanceBinding(\.usesPointerCursor))
+                            Toggle(localized("Use pointer cursors", locale: locale), isOn: appearanceBinding(\.usesPointerCursor))
                                 .labelsHidden()
                                 .toggleStyle(.switch)
                         }
@@ -432,8 +473,8 @@ private struct AppearanceSettingsView: View {
                     SettingsDivider()
 
                     SettingsControlRow(
-                        title: "UI font size",
-                        detail: "Changes the base size used across labels, headers, and controls.",
+                        title: localized("UI font size", locale: locale),
+                        detail: localized("Changes the base size used across labels, headers, and controls.", locale: locale),
                         accessory: {
                             SettingsStepperControl(
                                 value: appearanceBinding(\.uiFontSize),
@@ -445,8 +486,8 @@ private struct AppearanceSettingsView: View {
                     SettingsDivider()
 
                     SettingsControlRow(
-                        title: "Code font size",
-                        detail: "Changes transcript, diff, and code-preview sizing throughout the app.",
+                        title: localized("Code font size", locale: locale),
+                        detail: localized("Changes transcript, diff, and code-preview sizing throughout the app.", locale: locale),
                         accessory: {
                             SettingsStepperControl(
                                 value: appearanceBinding(\.codeFontSize),
@@ -541,7 +582,7 @@ private struct AppearanceSettingsView: View {
         guard let data = try? encoder.encode(payload),
               let text = String(data: data, encoding: .utf8)
         else {
-            store.lastError = "Could not serialize the theme as JSON."
+            store.lastError = localized("Could not serialize the theme as JSON.", locale: locale)
             return
         }
 
@@ -572,7 +613,7 @@ private struct AppearanceSettingsView: View {
                 }
                 store.lastError = nil
             } catch {
-                store.lastError = "Could not import theme JSON."
+                store.lastError = localized("Could not import theme JSON.", locale: locale)
             }
         case .failure:
             break
@@ -581,15 +622,16 @@ private struct AppearanceSettingsView: View {
 }
 
 private struct AppearanceThemePreview: View {
+    @Environment(\.locale) private var locale
     let lightTheme: NeoCodeThemeProfile
     let darkTheme: NeoCodeThemeProfile
 
     var body: some View {
         HStack(spacing: 0) {
-            AppearancePreviewPane(title: "Light", profile: lightTheme, isDark: false)
+            AppearancePreviewPane(title: localized("Light", locale: locale), profile: lightTheme, isDark: false)
             Divider()
                 .overlay(NeoCodeTheme.line)
-            AppearancePreviewPane(title: "Dark", profile: darkTheme, isDark: true)
+            AppearancePreviewPane(title: localized("Dark", locale: locale), profile: darkTheme, isDark: true)
         }
         .frame(minHeight: 184)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -624,15 +666,15 @@ private struct AppearancePreviewPane: View {
                 .foregroundStyle(foreground.opacity(0.72))
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("const theme = {")
-                Text("  accent: \"\(profile.accentHex.uppercased())\",")
+                Text(verbatim: "const theme = {")
+                Text(verbatim: "  accent: \"\(profile.accentHex.uppercased())\",")
                     .foregroundStyle(accent)
-                Text("  background: \"\(profile.backgroundHex.uppercased())\",")
-                Text("  uiFont: \"\(uiFontTitle)\",")
-                Text("  codeFont: \"\(codeFontTitle)\",")
-                Text("  contrast: \(Int(profile.contrast))")
+                Text(verbatim: "  background: \"\(profile.backgroundHex.uppercased())\",")
+                Text(verbatim: "  uiFont: \"\(uiFontTitle)\",")
+                Text(verbatim: "  codeFont: \"\(codeFontTitle)\",")
+                Text(verbatim: "  contrast: \(Int(profile.contrast))")
                     .foregroundStyle(foreground.opacity(0.8))
-                Text("}")
+                Text(verbatim: "}")
             }
             .font(.system(size: 12, weight: .regular, design: .monospaced))
             .foregroundStyle(foreground)
@@ -654,6 +696,7 @@ private struct AppearancePreviewPane: View {
 }
 
 private struct AppearanceThemeEditorCard: View {
+    @Environment(\.locale) private var locale
     let title: String
     let subtitle: String
     @Binding var profile: NeoCodeThemeProfile
@@ -670,8 +713,8 @@ private struct AppearanceThemeEditorCard: View {
             headerAccessory: {
                 AnyView(
                     HStack(spacing: 10) {
-                        SettingsCardActionButton(title: "Import", action: onImport)
-                        SettingsCardActionButton(title: "Copy theme", action: onCopy)
+                        SettingsCardActionButton(title: localized("Import", locale: locale), action: onImport)
+                        SettingsCardActionButton(title: localized("Copy theme", locale: locale), action: onCopy)
                         ThemePresetPicker(
                             selectedPreset: selectedPreset,
                             presets: presets,
@@ -683,8 +726,8 @@ private struct AppearanceThemeEditorCard: View {
         ) {
             VStack(spacing: 0) {
                 SettingsControlRow(
-                    title: "Accent",
-                    detail: "Primary tint used for controls, highlights, and actions.",
+                    title: localized("Accent", locale: locale),
+                    detail: localized("Primary tint used for controls, highlights, and actions.", locale: locale),
                     accessory: {
                         HexColorField(text: $profile.accentHex)
                     }
@@ -693,8 +736,8 @@ private struct AppearanceThemeEditorCard: View {
                 SettingsDivider()
 
                 SettingsControlRow(
-                    title: "Background",
-                    detail: "Base surface color used to build canvas, panels, and cards.",
+                    title: localized("Background", locale: locale),
+                    detail: localized("Base surface color used to build canvas, panels, and cards.", locale: locale),
                     accessory: {
                         HexColorField(text: $profile.backgroundHex)
                     }
@@ -703,8 +746,8 @@ private struct AppearanceThemeEditorCard: View {
                 SettingsDivider()
 
                 SettingsControlRow(
-                    title: "Foreground",
-                    detail: "Primary text tone for readable content across the shell.",
+                    title: localized("Foreground", locale: locale),
+                    detail: localized("Primary text tone for readable content across the shell.", locale: locale),
                     accessory: {
                         HexColorField(text: $profile.foregroundHex)
                     }
@@ -713,8 +756,8 @@ private struct AppearanceThemeEditorCard: View {
                 SettingsDivider()
 
                 SettingsControlRow(
-                    title: "Contrast",
-                    detail: "Adjusts separation between surfaces, borders, and low-emphasis text.",
+                    title: localized("Contrast", locale: locale),
+                    detail: localized("Adjusts separation between surfaces, borders, and low-emphasis text.", locale: locale),
                     accessory: {
                         HStack(spacing: 12) {
                             Slider(value: $profile.contrast, in: 20...80, step: 1)
@@ -730,15 +773,15 @@ private struct AppearanceThemeEditorCard: View {
                 SettingsDivider()
 
                 SettingsControlRow(
-                    title: "UI font",
-                    detail: "Used for labels, navigation, settings, and conversation chrome in this theme.",
+                    title: localized("UI font", locale: locale),
+                    detail: localized("Used for labels, navigation, settings, and conversation chrome in this theme.", locale: locale),
                     accessory: {
                         SettingsFontPicker(
                             title: NeoCodeFontCatalog.displayName(for: profile.uiFontName, preferFixedPitch: false),
                             selectedID: profile.uiFontName,
                             options: NeoCodeFontCatalog.uiOptions(includingSelected: profile.uiFontName),
-                            emptyMessage: "No fonts found.",
-                            placeholder: "Search UI fonts"
+                            emptyMessage: localized("No fonts found.", locale: locale),
+                            placeholder: localized("Search UI fonts", locale: locale)
                         ) { option in
                             profile.uiFontName = option.id
                         }
@@ -748,15 +791,15 @@ private struct AppearanceThemeEditorCard: View {
                 SettingsDivider()
 
                 SettingsControlRow(
-                    title: "Code font",
-                    detail: "Used for transcript code, diffs, file references, and inline code in this theme.",
+                    title: localized("Code font", locale: locale),
+                    detail: localized("Used for transcript code, diffs, file references, and inline code in this theme.", locale: locale),
                     accessory: {
                         SettingsFontPicker(
                             title: NeoCodeFontCatalog.displayName(for: profile.codeFontName, preferFixedPitch: true),
                             selectedID: profile.codeFontName,
                             options: NeoCodeFontCatalog.codeOptions(includingSelected: profile.codeFontName),
-                            emptyMessage: "No monospaced fonts found.",
-                            placeholder: "Search code fonts"
+                            emptyMessage: localized("No monospaced fonts found.", locale: locale),
+                            placeholder: localized("Search code fonts", locale: locale)
                         ) { option in
                             profile.codeFontName = option.id
                         }
@@ -1001,6 +1044,7 @@ private struct SettingsCardActionButton: View {
 }
 
 private struct ThemePresetPicker: View {
+    @Environment(\.locale) private var locale
     let selectedPreset: NeoCodeThemePreset?
     let presets: [NeoCodeThemePreset]
     let onSelectPreset: (NeoCodeThemePreset) -> Void
@@ -1010,7 +1054,7 @@ private struct ThemePresetPicker: View {
     private let menuMaxHeight: CGFloat = 320
 
     private var triggerTitle: String {
-        selectedPreset?.title ?? "Custom"
+        selectedPreset?.title ?? localized("Custom", locale: locale)
     }
 
     var body: some View {

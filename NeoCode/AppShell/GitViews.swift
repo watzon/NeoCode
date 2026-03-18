@@ -2,6 +2,7 @@ import SwiftUI
 
 struct GitCommitSheet: View {
     @Environment(AppStore.self) private var store
+    @Environment(\.locale) private var locale
 
     @Binding var isPresented: Bool
 
@@ -28,7 +29,7 @@ struct GitCommitSheet: View {
                 Spacer()
             } else {
                 Spacer()
-                Text("No changes are ready to commit.")
+                Text(localized("No changes are ready to commit.", locale: locale))
                     .font(.neoBody)
                     .foregroundStyle(NeoCodeTheme.textSecondary)
                 Spacer()
@@ -48,7 +49,7 @@ struct GitCommitSheet: View {
 
     private var header: some View {
         HStack(alignment: .center) {
-            Text("Commit your changes")
+            Text(localized("Commit your changes", locale: locale))
                 .font(.system(size: 22, weight: .semibold, design: .default))
                 .foregroundStyle(NeoCodeTheme.textPrimary)
 
@@ -69,13 +70,13 @@ struct GitCommitSheet: View {
         let files = filteredFiles(preview)
 
         return VStack(alignment: .leading, spacing: 12) {
-            GitCommitMetadataRow(label: "Branch") {
+            GitCommitMetadataRow(label: localized("Branch", locale: locale)) {
                 Text(preview.branch)
                     .font(.neoMonoSmall)
                     .foregroundStyle(NeoCodeTheme.textPrimary)
             }
 
-            GitCommitMetadataRow(label: "Changes") {
+            GitCommitMetadataRow(label: localized("Changes", locale: locale)) {
                 HStack(spacing: 12) {
                     Text(fileSummary(preview))
                         .font(.neoMonoSmall)
@@ -89,8 +90,8 @@ struct GitCommitSheet: View {
                 }
             }
 
-            GitCommitMetadataRow(label: "Include unstaged") {
-                Toggle("Include unstaged", isOn: $includeUnstaged)
+            GitCommitMetadataRow(label: localized("Include unstaged", locale: locale)) {
+                Toggle(localized("Include unstaged", locale: locale), isOn: $includeUnstaged)
                     .labelsHidden()
                     .toggleStyle(.switch)
                     .scaleEffect(0.82)
@@ -100,7 +101,7 @@ struct GitCommitSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     if files.isEmpty {
-                        Text(includeUnstaged ? "No changed files were found." : "No staged files are ready to commit.")
+                        Text(includeUnstaged ? localized("No changed files were found.", locale: locale) : localized("No staged files are ready to commit.", locale: locale))
                             .font(.neoMonoSmall)
                             .foregroundStyle(NeoCodeTheme.textMuted)
                     } else {
@@ -126,7 +127,7 @@ struct GitCommitSheet: View {
 
     private var messageEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Commit message")
+            Text(localized("Commit message", locale: locale))
                 .font(.neoBody)
                 .foregroundStyle(NeoCodeTheme.textPrimary)
 
@@ -154,7 +155,7 @@ struct GitCommitSheet: View {
                     .frame(height: 68)
 
                 if commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text("Enter a commit message")
+                    Text(localized("Enter a commit message", locale: locale))
                         .font(.neoBody)
                         .foregroundStyle(NeoCodeTheme.textMuted)
                         .padding(.leading, editorHorizontalInset)
@@ -168,27 +169,27 @@ struct GitCommitSheet: View {
 
     private var actionPicker: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Next steps")
+            Text(localized("Next steps", locale: locale))
                 .font(.neoBody)
                 .foregroundStyle(NeoCodeTheme.textPrimary)
 
             VStack(spacing: 8) {
                 GitCommitActionButton(
-                    title: "Commit",
+                    title: localized("Commit", locale: locale),
                     systemImage: "point.bottomleft.forward.to.point.topright.scurvepath",
                     isSelected: selectedAction == .commit,
                     isDisabled: store.isPerformingGitOperation,
                     action: { selectedAction = .commit }
                 )
                 GitCommitActionButton(
-                    title: "Commit and push",
+                    title: localized("Commit and push", locale: locale),
                     systemImage: "arrow.up.circle",
                     isSelected: selectedAction == .commitAndPush,
                     isDisabled: store.isPerformingGitOperation || !store.gitStatus.hasRemote,
                     action: { selectedAction = .commitAndPush }
                 )
                 GitCommitActionButton(
-                    title: "Commit and create PR",
+                    title: localized("Commit and create PR", locale: locale),
                     systemImage: "arrow.triangle.pull",
                     isSelected: false,
                     isDisabled: true,
@@ -219,7 +220,7 @@ struct GitCommitSheet: View {
             return "\(operationState.title)..."
         }
 
-        return "Continue"
+        return localized("Continue", locale: locale)
     }
 
     private var canContinue: Bool {

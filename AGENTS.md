@@ -109,6 +109,7 @@
 - Reuse `NeoCodeTheme` colors and `Font.neo*` tokens before introducing new styling constants.
 - Match the existing warm, dark, terminal-adjacent visual language.
 - Keep the current split AppShell structure; add UI code to the relevant file in `NeoCode/AppShell/` instead of reintroducing a monolithic shell view file.
+- For app-owned UI copy, prefer the shared localization helpers and `NeoCode/Localization/Localizable.xcstrings`; keep user-facing strings translatable and respect the app-selected locale instead of hardcoding English in views or models.
 - Keep previews working when touching previewed views.
 - Preserve the existing minimum window sizing expectations around `980x600` unless the task explicitly changes shell layout requirements.
 

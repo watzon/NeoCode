@@ -163,11 +163,15 @@ struct ComposerQueuedMessage: Identifiable, Hashable {
         case steer
 
         var title: String {
+            title(locale: .autoupdatingCurrent)
+        }
+
+        func title(locale: Locale) -> String {
             switch self {
             case .sendWhenDone:
-                return "Send once done"
+                return localized("Send once done", locale: locale)
             case .steer:
-                return "Steer"
+                return localized("Steer", locale: locale)
             }
         }
     }
@@ -259,44 +263,52 @@ enum LocalComposerSlashCommand: String, CaseIterable, Hashable, Identifiable {
     nonisolated var name: String { rawValue }
 
     nonisolated var title: String {
+        title(locale: .autoupdatingCurrent)
+    }
+
+    nonisolated func title(locale: Locale) -> String {
         switch self {
         case .new:
-            return "New Session"
+            return localized("New Session", locale: locale)
         case .compact:
-            return "Compact Session"
+            return localized("Compact Session", locale: locale)
         case .model:
-            return "Switch Model"
+            return localized("Switch Model", locale: locale)
         case .agent:
-            return "Switch Agent"
+            return localized("Switch Agent", locale: locale)
         case .branch:
-            return "Switch Branch"
+            return localized("Switch Branch", locale: locale)
         case .reasoning:
-            return "Set Reasoning"
+            return localized("Set Reasoning", locale: locale)
         case .workspace:
-            return "Open Workspace"
+            return localized("Open Workspace", locale: locale)
         case .yolo:
-            return "Toggle YOLO"
+            return localized("Toggle YOLO", locale: locale)
         }
     }
 
     nonisolated var description: String {
+        description(locale: .autoupdatingCurrent)
+    }
+
+    nonisolated func description(locale: Locale) -> String {
         switch self {
         case .new:
-            return "Create a new session. Add text after it to seed the new draft."
+            return localized("Create a new session. Add text after it to seed the new draft.", locale: locale)
         case .compact:
-            return "Summarize the current session to reduce context size."
+            return localized("Summarize the current session to reduce context size.", locale: locale)
         case .model:
-            return "Change the selected model by name, provider, or model id."
+            return localized("Change the selected model by name, provider, or model id.", locale: locale)
         case .agent:
-            return "Change the selected agent by name."
+            return localized("Change the selected agent by name.", locale: locale)
         case .branch:
-            return "Change the selected git branch."
+            return localized("Change the selected git branch.", locale: locale)
         case .reasoning:
-            return "Set the current reasoning level, like low, medium, or high."
+            return localized("Set the current reasoning level, like low, medium, or high.", locale: locale)
         case .workspace:
-            return "Open the current project in the preferred workspace tool."
+            return localized("Open the current project in the preferred workspace tool.", locale: locale)
         case .yolo:
-            return "Turn YOLO mode on, off, or toggle it for the current session."
+            return localized("Turn YOLO mode on, off, or toggle it for the current session.", locale: locale)
         }
     }
 
@@ -344,14 +356,14 @@ struct ComposerSlashCommand: Identifiable, Hashable {
         }
     }
 
-    nonisolated static func local(_ command: LocalComposerSlashCommand) -> Self {
+    nonisolated static func local(_ command: LocalComposerSlashCommand, locale: Locale = .autoupdatingCurrent) -> Self {
         Self(
             kind: .local(command),
             name: command.name,
-            title: command.title,
-            description: command.description,
+            title: command.title(locale: locale),
+            description: command.description(locale: locale),
             badgeTitle: command.badgeTitle,
-            keywords: command.keywords
+            keywords: [command.title(locale: locale), command.description(locale: locale)] + command.aliases
         )
     }
 

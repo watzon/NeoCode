@@ -171,6 +171,7 @@ private struct AppSceneView: View {
             .environment(store)
             .environment(runtime)
             .environment(updateService)
+            .environment(\.locale, store.appSettings.general.appLanguage.locale)
             .onAppear {
                 NeoCodeTheme.configure(with: store.appSettings.appearance)
                 appDelegate.onDidBecomeActive = {

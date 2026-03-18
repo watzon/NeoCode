@@ -15,28 +15,36 @@ enum DashboardTimeRange: String, CaseIterable, Codable, Hashable, Identifiable, 
     var id: String { rawValue }
 
     var title: String {
+        title(locale: .autoupdatingCurrent)
+    }
+
+    func title(locale: Locale) -> String {
         switch self {
         case .sevenDays:
-            "Last 7 days"
+            localized("Last 7 days", locale: locale)
         case .thirtyDays:
-            "Last 30 days"
+            localized("Last 30 days", locale: locale)
         case .ninetyDays:
-            "Last 90 days"
+            localized("Last 90 days", locale: locale)
         case .allTime:
-            "All time"
+            localized("All time", locale: locale)
         }
     }
 
     var shortTitle: String {
+        shortTitle(locale: .autoupdatingCurrent)
+    }
+
+    func shortTitle(locale: Locale) -> String {
         switch self {
         case .sevenDays:
-            "7 days"
+            localized("7 days", locale: locale)
         case .thirtyDays:
-            "30 days"
+            localized("30 days", locale: locale)
         case .ninetyDays:
-            "90 days"
+            localized("90 days", locale: locale)
         case .allTime:
-            "All time"
+            localized("All time", locale: locale)
         }
     }
 
