@@ -120,7 +120,7 @@ struct AssistantTurnView: View {
                         case .toolCluster(let toolMessages):
                             ToolCallClusterRowView(messages: toolMessages, contentWidth: contentWidth)
                         case .output(let message):
-                            AssistantOutputView(message: message)
+                            AssistantOutputBlockView(message: message)
                         }
                     }
                     .padding(.top, topSpacing(at: index, in: turnBlocks))
@@ -180,6 +180,44 @@ struct AssistantTurnView: View {
         }
 
         return true
+    }
+}
+
+private struct AssistantOutputBlockView: View {
+    let message: ChatMessage
+    @State private var didCopy = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            AssistantOutputView(message: message)
+
+            HStack(spacing: 8) {
+                MessageHoverActionButton(
+                    systemImage: didCopy ? "checkmark" : "doc.on.doc",
+                    helpText: didCopy ? "Copied" : "Copy message"
+                ) {
+                    copyMessageText()
+                }
+
+                MessageHoverActionButton(
+                    systemImage: "arrow.triangle.branch",
+                    helpText: "Fork message",
+                    isDisabled: true
+                ) {}
+            }
+        }
+        .animation(.easeOut(duration: 0.16), value: didCopy)
+    }
+
+    private func copyMessageText() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(message.text, forType: .string)
+        didCopy = true
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            didCopy = false
+        }
     }
 }
 

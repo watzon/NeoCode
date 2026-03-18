@@ -146,6 +146,7 @@ struct ConversationView: View {
     // scrollbar track to shrink.
     private let composerBottomClearance: CGFloat = 180
     private let promptOverlayBottomClearance: CGFloat = 40
+    private let transcriptBottomPadding: CGFloat = 25
     private let scrollbarCompensation = ConversationLayout.scrollbarCompensation
     private let transcriptScrollSpaceName = "ConversationTranscriptScrollSpace"
 
@@ -756,7 +757,7 @@ struct ConversationView: View {
         // height measurement lags or under-reports during transitions.
         max(
             bottomAnchorSpacerHeight,
-            max(promptOverlayHeight, promptOverlayFallbackHeight) + bottomClearance
+            max(promptOverlayHeight, promptOverlayFallbackHeight) + bottomClearance + transcriptBottomPadding
         )
     }
 

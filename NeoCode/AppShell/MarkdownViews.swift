@@ -114,45 +114,11 @@ struct ProseMarkdownView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(elements.enumerated()), id: \.offset) { index, element in
-                if index == 0, let leadingLabel, !element.supportsInlineLeadingLabel {
-                    Text(leadingLabel.text)
-                        .font(.system(size: 13, weight: .bold, design: .default))
-                        .foregroundStyle(leadingLabel.color)
-                }
-
-                switch element {
-                case .heading(let level, let text):
-                    InlineMarkdownText(text: text, baseFont: headingFont(level))
-                        .foregroundStyle(textColor)
-                case .paragraph(let text):
-                    if index == 0, let leadingLabel {
-                        LabeledInlineMarkdownText(
-                            label: leadingLabel.text,
-                            labelColor: leadingLabel.color,
-                            text: text,
-                            baseFont: baseFont,
-                            textColor: textColor
-                        )
-                    } else {
-                        InlineMarkdownText(text: text, baseFont: baseFont)
-                            .foregroundStyle(textColor)
-                    }
-                case .list(let items):
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                            HStack(alignment: .top, spacing: 8) {
-                                Text(markerLabel(for: item.marker))
-                                    .font(.neoMono)
-                                    .foregroundStyle(markerColor(for: item.marker))
-                                    .frame(width: markerWidth(for: item.marker), alignment: .leading)
-
-                                InlineMarkdownText(text: item.text, baseFont: baseFont)
-                                    .foregroundStyle(textColor)
-                            }
-                            .padding(.leading, CGFloat(item.level) * 18)
-                        }
-                    }
+            ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
+                switch segment {
+                case .text(let attributed):
+                    Text(attributed)
+                        .textSelection(.enabled)
                 case .table(let table):
                     MarkdownTableView(table: table, baseFont: baseFont, textColor: textColor)
                 }
@@ -162,6 +128,58 @@ struct ProseMarkdownView: View {
 
     private var elements: [MarkdownElement] {
         MarkdownRenderCache.elements(for: markdown)
+    }
+
+    private var segments: [MarkdownSegment] {
+        var results: [MarkdownSegment] = []
+        var currentText = AttributedString()
+
+        func flushText() {
+            guard !currentText.characters.isEmpty else { return }
+            results.append(.text(currentText))
+            currentText = AttributedString()
+        }
+
+        for (index, element) in elements.enumerated() {
+            switch element {
+            case .table(let table):
+                flushText()
+                if index == 0, let leadingLabel {
+                    results.append(.text(leadingLabelAttributedString(leadingLabel, trailingNewlines: 2)))
+                }
+                results.append(.table(table))
+            case .heading(let level, let text):
+                if !currentText.characters.isEmpty {
+                    currentText.append(AttributedString("\n\n"))
+                } else if index == 0, let leadingLabel {
+                    currentText.append(leadingLabelAttributedString(leadingLabel))
+                }
+                currentText.append(styledInlineAttributedString(text: text, baseFont: headingFont(level), textColor: textColor))
+            case .paragraph(let text):
+                if !currentText.characters.isEmpty {
+                    currentText.append(AttributedString("\n\n"))
+                } else if index == 0, let leadingLabel {
+                    currentText.append(leadingLabelAttributedString(leadingLabel))
+                }
+                currentText.append(styledInlineAttributedString(text: text, baseFont: baseFont, textColor: textColor))
+            case .list(let items):
+                if !currentText.characters.isEmpty {
+                    currentText.append(AttributedString("\n\n"))
+                } else if index == 0, let leadingLabel {
+                    currentText.append(leadingLabelAttributedString(leadingLabel))
+                }
+
+                for (itemIndex, item) in items.enumerated() {
+                    if itemIndex > 0 {
+                        currentText.append(AttributedString("\n"))
+                    }
+                    currentText.append(attributedString(for: item))
+                }
+            }
+        }
+
+        flushText()
+        return results
     }
 
     private func headingFont(_ level: Int) -> Font {
@@ -202,6 +220,49 @@ struct ProseMarkdownView: View {
             return 24
         }
     }
+
+    private func leadingLabelAttributedString(_ leadingLabel: MarkdownLeadingLabel, trailingNewlines: Int = 0) -> AttributedString {
+        var attributed = AttributedString(leadingLabel.text)
+        attributed.font = .system(size: 13, weight: .bold, design: .default)
+        attributed.foregroundColor = leadingLabel.color
+
+        if trailingNewlines > 0 {
+            attributed.append(AttributedString(String(repeating: "\n", count: trailingNewlines)))
+        }
+
+        return attributed
+    }
+
+    private func attributedString(for item: MarkdownListItem) -> AttributedString {
+        var attributed = AttributedString(String(repeating: " ", count: item.level * 4))
+
+        var marker = AttributedString("\(markerLabel(for: item.marker)) ")
+        marker.font = Font.neoMono
+        marker.foregroundColor = markerColor(for: item.marker)
+        attributed.append(marker)
+        attributed.append(styledInlineAttributedString(text: item.text, baseFont: baseFont, textColor: textColor))
+        return attributed
+    }
+
+    private func styledInlineAttributedString(text: String, baseFont: Font, textColor: Color) -> AttributedString {
+        var attributed = MarkdownRenderCache.inlineAttributedString(for: text) ?? AttributedString(text)
+        attributed.font = baseFont
+        attributed.foregroundColor = textColor
+
+        for run in attributed.runs {
+            if run.inlinePresentationIntent == .code {
+                attributed[run.range].foregroundColor = NeoCodeTheme.accent
+                attributed[run.range].font = Font.neoMono
+            }
+        }
+
+        return attributed
+    }
+}
+
+enum MarkdownSegment {
+    case text(AttributedString)
+    case table(MarkdownTable)
 }
 
 enum MarkdownElement {
@@ -210,14 +271,6 @@ enum MarkdownElement {
     case list([MarkdownListItem])
     case table(MarkdownTable)
 
-    var supportsInlineLeadingLabel: Bool {
-        switch self {
-        case .paragraph:
-            return true
-        case .heading, .list, .table:
-            return false
-        }
-    }
 }
 
 struct MarkdownListItem {
@@ -353,41 +406,6 @@ struct InlineMarkdownText: View {
         }
         .font(baseFont)
         .textSelection(.enabled)
-    }
-
-    private var styledAttributedString: AttributedString? {
-        MarkdownRenderCache.inlineAttributedString(for: text)
-    }
-}
-
-struct LabeledInlineMarkdownText: View {
-    let label: String
-    let labelColor: Color
-    let text: String
-    let baseFont: Font
-    let textColor: Color
-
-    var body: some View {
-        Text("\(labelText)\(bodyText)")
-            .textSelection(.enabled)
-    }
-
-    private var labelText: Text {
-        Text(label)
-            .font(.system(size: 13, weight: .bold, design: .default))
-            .foregroundColor(labelColor)
-    }
-
-    private var bodyText: Text {
-        if let attributed = styledAttributedString {
-            return Text(attributed)
-                .font(baseFont)
-                .foregroundColor(textColor)
-        }
-
-        return Text(text)
-            .font(baseFont)
-            .foregroundColor(textColor)
     }
 
     private var styledAttributedString: AttributedString? {
