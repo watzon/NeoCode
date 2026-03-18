@@ -552,8 +552,12 @@ struct SessionTreeRow: View {
             return nil
         case .running:
             return "working"
-        case .attention:
+        case .awaitingInput:
             return "needs input"
+        case .retrying:
+            return "retrying"
+        case .error:
+            return "failed"
         }
     }
 
@@ -565,7 +569,7 @@ struct SessionTreeRow: View {
         switch session.status {
         case .idle, .running:
             return .accent
-        case .attention:
+        case .awaitingInput, .retrying, .error:
             return .warning
         }
     }

@@ -1560,7 +1560,7 @@ struct NeoCodeMainActorTests {
         )
 
         #expect(store.pendingPermission(for: "ses_1")?.id == "perm_1")
-        #expect(store.selectedSession?.status == .attention)
+        #expect(store.selectedSession?.status == .awaitingInput)
 
         store.apply(
             event: .permissionReplied(
@@ -1657,7 +1657,7 @@ struct NeoCodeMainActorTests {
         )
 
         #expect(store.pendingQuestion(for: "ses_1")?.id == "que_1")
-        #expect(store.selectedSession?.status == .attention)
+        #expect(store.selectedSession?.status == .awaitingInput)
 
         store.apply(
             event: .questionReplied(
@@ -1943,6 +1943,123 @@ struct NeoCodeMainActorTests {
         store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .idle))
 
         #expect(store.selectedSession?.status == .idle)
+    }
+
+    @MainActor
+    @Test func appStoreMapsRetryStatusToRetryingWhenSessionIsActive() {
+        let store = AppStore(projects: [
+            ProjectSummary(
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(id: "ses_1", title: "Existing", lastUpdatedAt: .distantPast),
+                ]
+            ),
+        ])
+
+        store.selectSession("ses_1")
+        store.apply(event: .messagePartDelta(OpenCodePartDelta(
+            sessionID: "ses_1",
+            messageID: "msg_1",
+            partID: "part_1",
+            field: "text",
+            delta: "Working"
+        )))
+        store.apply(event: .sessionStatusChanged(
+            sessionID: "ses_1",
+            status: .retry(attempt: 1, message: "Rate limited", next: 2)
+        ))
+
+        #expect(store.selectedSession?.status == .retrying)
+
+        guard case .retry(let attempt, let message, let next)? = store.selectedSessionActivity else {
+            Issue.record("Expected selectedSessionActivity to reflect retrying state")
+            return
+        }
+
+        #expect(attempt == 1)
+        #expect(message == "Rate limited")
+        #expect(next == 2)
+    }
+
+    @MainActor
+    @Test func appStoreTreatsAbortedToolErrorsAsIdleWhenSessionStops() {
+        let store = AppStore(projects: [
+            ProjectSummary(
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(
+                        id: "ses_1",
+                        title: "Existing",
+                        lastUpdatedAt: .distantPast,
+                        status: .running,
+                        transcript: [
+                            ChatMessage(
+                                id: "tool_1",
+                                role: .tool,
+                                text: "bash failed",
+                                timestamp: .now,
+                                emphasis: .subtle,
+                                kind: .toolCall(
+                                    ChatMessage.ToolCall(
+                                        name: "bash",
+                                        status: .error,
+                                        detail: "Tool execution aborted",
+                                        error: "Tool execution aborted"
+                                    )
+                                )
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+        ])
+
+        store.selectSession("ses_1")
+        store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .idle))
+
+        #expect(store.selectedSession?.status == .idle)
+    }
+
+    @MainActor
+    @Test func appStoreMarksNonAbortedToolErrorsAsFailed() {
+        let store = AppStore(projects: [
+            ProjectSummary(
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(
+                        id: "ses_1",
+                        title: "Existing",
+                        lastUpdatedAt: .distantPast,
+                        status: .running,
+                        transcript: [
+                            ChatMessage(
+                                id: "tool_1",
+                                role: .tool,
+                                text: "bash failed",
+                                timestamp: .now,
+                                emphasis: .subtle,
+                                kind: .toolCall(
+                                    ChatMessage.ToolCall(
+                                        name: "bash",
+                                        status: .error,
+                                        detail: "Permission denied",
+                                        error: "Permission denied"
+                                    )
+                                )
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+        ])
+
+        store.selectSession("ses_1")
+        store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .idle))
+
+        #expect(store.selectedSession?.status == .error)
     }
 
     @MainActor
@@ -3230,7 +3347,7 @@ struct NeoCodeMainActorTests {
         #expect(didSend == false)
         #expect(store.draft == "/review current diff")
         #expect(store.lastError == "command failed")
-        #expect(store.selectedSession?.status == .attention)
+        #expect(store.selectedSession?.status == .error)
         #expect(service.sentCommands.isEmpty)
     }
 

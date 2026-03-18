@@ -324,7 +324,7 @@ struct ComposerView: View {
     }
 
     private var isStopMode: Bool {
-        store.selectedSession?.status == .running && !canSend
+        store.selectedSession?.status.isActive == true && !canSend
     }
 
     private var activityState: ComposerActivityState? {
@@ -341,6 +341,10 @@ struct ComposerView: View {
 
         if store.selectedSession?.status == .running {
             return .thinking
+        }
+
+        if store.selectedSession?.status == .retrying {
+            return .retrying
         }
 
         return nil
@@ -373,7 +377,7 @@ struct ComposerView: View {
         if isStopMode {
             return "Stop current response"
         }
-        if store.selectedSession?.status == .running {
+        if store.selectedSession?.status.isActive == true {
             return "Queue message"
         }
         switch store.appSettings.general.sendKeyBehavior {

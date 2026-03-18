@@ -678,7 +678,45 @@ enum RuntimeStatus: String, Codable, Equatable, Hashable {
 enum SessionStatus: String, Codable, Equatable, Hashable {
     case idle
     case running
-    case attention
+    case awaitingInput
+    case retrying
+    case error
+
+    var isActive: Bool {
+        switch self {
+        case .running, .retrying:
+            return true
+        case .idle, .awaitingInput, .error:
+            return false
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawValue = try container.decode(String.self)
+
+        switch rawValue {
+        case Self.idle.rawValue:
+            self = .idle
+        case Self.running.rawValue:
+            self = .running
+        case Self.awaitingInput.rawValue:
+            self = .awaitingInput
+        case Self.retrying.rawValue:
+            self = .retrying
+        case Self.error.rawValue:
+            self = .error
+        case "attention":
+            self = .idle
+        default:
+            self = .idle
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 }
 
 enum SeedProjects {

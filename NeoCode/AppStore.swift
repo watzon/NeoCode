@@ -799,7 +799,7 @@ final class AppStore {
 
     private var hasRunningSessions: Bool {
         projects.contains { project in
-            project.sessions.contains { $0.status == .running }
+            project.sessions.contains { $0.status.isActive }
         }
     }
 
@@ -1340,7 +1340,7 @@ final class AppStore {
 
         if let selectedSessionID,
            self.projectID(for: selectedSessionID) == projectID,
-           session(for: selectedSessionID)?.status == .running,
+           session(for: selectedSessionID)?.status.isActive == true,
            enqueueDraft(in: selectedSessionID) {
             reevaluateRuntimeRetention(using: runtime)
             return
@@ -1438,7 +1438,7 @@ final class AppStore {
         guard !trimmed.isEmpty || !attachments.isEmpty else { return false }
 
         if allowQueueIfRunning,
-           session(for: sessionID)?.status == .running {
+           session(for: sessionID)?.status.isActive == true {
             return enqueueDraft(in: sessionID)
         }
 
@@ -1766,7 +1766,7 @@ final class AppStore {
     func stopSelectedSession(using runtime: OpenCodeRuntime) async {
         guard let sessionID = selectedSessionID,
               let projectID = projectID(for: sessionID),
-              session(for: sessionID)?.status == .running
+              session(for: sessionID)?.status.isActive == true
         else { return }
 
         guard let service = await liveService(for: projectID, runtime: runtime) else {
@@ -3159,7 +3159,7 @@ final class AppStore {
             logger.error(
                 "Failed to compact session \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)"
             )
-            setSessionStatus(.attention, sessionID: sessionID, projectID: projectID)
+            setSessionStatus(.error, sessionID: sessionID, projectID: projectID)
             lastError = error.localizedDescription
             isSending = false
             return false
@@ -3368,7 +3368,7 @@ final class AppStore {
             logger.error("Failed to load messages for session \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")
             if !keepsCurrentUI {
                 lastError = error.localizedDescription
-                setSessionStatus(.attention, sessionID: sessionID, projectID: projectID)
+                setSessionStatus(.error, sessionID: sessionID, projectID: projectID)
             }
         }
     }
@@ -3739,7 +3739,7 @@ final class AppStore {
     }
 
     private func terminationBlockReason(for session: SessionSummary) -> String? {
-        if session.status == .running || isSessionLocallyActive(session.id) {
+        if session.status.isActive || isSessionLocallyActive(session.id) {
             return "responding"
         }
 
@@ -3981,16 +3981,16 @@ final class AppStore {
         let previousStatus = projects[indices.project].sessions[indices.session].status
 
         switch status {
-        case .running:
+        case .running, .retrying:
             markSessionLocallyActive(sessionID)
-        case .idle, .attention:
+        case .idle, .awaitingInput, .error:
             clearLocalSessionActivity(sessionID)
         }
 
         projects[indices.project].sessions[indices.session].status = status
         updateFinishedIndicator(sessionID: sessionID, previousStatus: previousStatus, newStatus: status)
         refreshSystemSleepAssertion()
-        if status != .running {
+        if !status.isActive {
             cancelStreamingRecoveryCheck(for: sessionID)
             flushPendingProjectPersistence()
             return
@@ -4010,7 +4010,7 @@ final class AppStore {
         projects[indices.project].sessions[indices.session].status = resolvedStatus
         updateFinishedIndicator(sessionID: sessionID, previousStatus: previousStatus, newStatus: resolvedStatus)
         refreshSystemSleepAssertion()
-        if resolvedStatus != .running {
+        if !resolvedStatus.isActive {
             cancelStreamingRecoveryCheck(for: sessionID)
             flushPendingProjectPersistence()
             return
@@ -4072,11 +4072,11 @@ final class AppStore {
 
     private func resolvedSessionStatus(sessionID: String, transcript: [ChatMessage], fallback: SessionStatus = .idle) -> SessionStatus {
         if pendingPermission(for: sessionID) != nil {
-            return .attention
+            return .awaitingInput
         }
 
         if pendingQuestion(for: sessionID) != nil {
-            return .attention
+            return .awaitingInput
         }
 
         if let activity = effectiveLiveSessionActivity(for: sessionID, transcript: transcript) {
@@ -4086,7 +4086,7 @@ final class AppStore {
             case .busy:
                 return .running
             case .retry:
-                return .attention
+                return .retrying
             }
         }
 
@@ -4096,18 +4096,31 @@ final class AppStore {
     private func transcriptDerivedStatus(
         for transcript: [ChatMessage],
         sessionID: String,
-        fallback: SessionStatus = .idle
+        fallback _: SessionStatus = .idle
     ) -> SessionStatus {
         if isSessionLocallyActive(sessionID), transcript.contains(where: \.isInProgress) {
             return .running
         }
 
         if let toolCall = transcript.last?.kind.toolCall,
-           toolCall.status == .error {
-            return .attention
+           toolCall.status == .error,
+           !toolCallRepresentsAbort(toolCall) {
+            return .error
         }
 
-        return fallback == .attention ? .attention : .idle
+        return .idle
+    }
+
+    private func toolCallRepresentsAbort(_ toolCall: ChatMessage.ToolCall) -> Bool {
+        let messages = [toolCall.error, toolCall.detail]
+            .compactMap { $0?.lowercased() }
+
+        return messages.contains { message in
+            message.contains("tool execution aborted")
+                || message.contains("operation was aborted")
+                || message.contains("request aborted")
+                || message.contains("stream aborted")
+        }
     }
 
     private func effectiveLiveSessionActivity(
@@ -4144,7 +4157,7 @@ final class AppStore {
     }
 
     private func updateFinishedIndicator(sessionID: String, previousStatus: SessionStatus, newStatus: SessionStatus) {
-        if newStatus == .running {
+        if newStatus.isActive {
             observedRunningSessionIDs.insert(sessionID)
             finishedSessionIDs.remove(sessionID)
             return
@@ -4158,14 +4171,14 @@ final class AppStore {
 
         switch newStatus {
         case .idle:
-            if previousStatus == .running, selectedSessionID != sessionID {
+            if previousStatus.isActive, selectedSessionID != sessionID {
                 finishedSessionIDs.insert(sessionID)
             }
             observedRunningSessionIDs.remove(sessionID)
-        case .attention:
+        case .awaitingInput, .error:
             finishedSessionIDs.remove(sessionID)
             observedRunningSessionIDs.remove(sessionID)
-        case .running:
+        case .running, .retrying:
             break
         }
     }
@@ -5034,7 +5047,7 @@ final class AppStore {
             draft = stagedUI.originalText
             attachedFiles = stagedUI.originalAttachments
         }
-        setSessionStatus(.attention, sessionID: sessionID, projectID: projectID)
+        setSessionStatus(.error, sessionID: sessionID, projectID: projectID)
     }
 
     private func resolveSendFileReferences(for text: String, projectID: ProjectSummary.ID) async -> [ComposerPromptFileReference] {
@@ -5293,10 +5306,12 @@ final class AppStore {
         switch status {
         case .idle:
             return 0
-        case .running:
+        case .error:
             return 1
-        case .attention:
+        case .awaitingInput:
             return 2
+        case .running, .retrying:
+            return 3
         }
     }
 
