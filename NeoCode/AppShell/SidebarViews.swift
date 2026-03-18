@@ -196,7 +196,7 @@ struct ThreadsSectionHeader: View {
                     .foregroundStyle(NeoCodeTheme.textSecondary)
             }
             .buttonStyle(.plain)
-            .help("Add project")
+            .neoTooltip("Add project")
         }
     }
 }
@@ -223,7 +223,7 @@ struct ProjectTreeNode: View {
                         .frame(width: 12, height: 12)
                 }
                 .buttonStyle(.plain)
-                .help(store.isProjectCollapsed(project.id) ? "Expand project" : "Collapse project")
+                .neoTooltip(store.isProjectCollapsed(project.id) ? "Expand project" : "Collapse project")
 
                 Text(project.name)
                     .font(.neoBody)

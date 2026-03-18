@@ -180,7 +180,7 @@ struct WindowTitlebarUpdateButton: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(!model.isInteractive)
-                .help(model.label)
+                .neoTooltip(model.label)
                 .frame(width: Self.containerWidth, height: 20, alignment: .leading)
                 .onHover { isHovering in
                     withAnimation(.snappy(duration: 0.18, extraBounce: 0)) {

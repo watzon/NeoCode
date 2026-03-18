@@ -420,7 +420,7 @@ private struct SessionStatsMenuButton: View {
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .help(helpText)
+        .neoTooltip(helpText)
         .accessibilityLabel("Session stats")
         .accessibilityValue(accessibilityValue)
         .background {

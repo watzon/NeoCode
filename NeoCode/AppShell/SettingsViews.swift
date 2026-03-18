@@ -27,7 +27,7 @@ struct SettingsSidebarView: View {
                     )
                 }
                 .buttonStyle(.plain)
-                .help("Back to workspace")
+                .neoTooltip("Back to workspace")
 
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(AppSettingsSection.allCases) { section in

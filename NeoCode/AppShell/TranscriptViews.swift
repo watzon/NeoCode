@@ -855,6 +855,6 @@ private struct MessageHoverActionButton: View {
         }
         .buttonStyle(.plain)
         .disabled(isDisabled)
-        .help(helpText ?? "")
+        .neoTooltip(helpText)
     }
 }

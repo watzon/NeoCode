@@ -241,7 +241,7 @@ struct ComposerView: View {
                                 .frame(width: 24, height: 24)
                         }
                         .buttonStyle(.plain)
-                        .help(isFavorited ? "Remove from favorites" : "Add to favorites")
+                        .neoTooltip(isFavorited ? "Remove from favorites" : "Add to favorites")
                     }
                 } searchableText: { model in
                     [model.title, model.providerID, model.modelID]
@@ -301,7 +301,7 @@ struct ComposerView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(!canTriggerPrimaryAction)
-                .help(primaryActionHelp)
+                .neoTooltip(primaryActionHelp)
                 .accessibilityLabel(primaryActionHelp)
             }
         }
@@ -676,7 +676,7 @@ private struct ComposerActivityIndicator: View {
             )
         }
             .frame(width: 40, height: 36)
-            .help(state.helpText)
+            .neoTooltip(state.helpText)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Agent activity")
             .accessibilityValue(state.accessibilityValue)
@@ -804,7 +804,7 @@ private struct YoloModeToggleButton: View {
             )
         }
         .buttonStyle(.plain)
-        .help(isEnabled ? "YOLO mode enabled: auto-approve all permission prompts for this session." : "Enable YOLO mode to auto-approve all permission prompts for this session.")
+        .neoTooltip(isEnabled ? "YOLO mode enabled: auto-approve all permission prompts for this session." : "Enable YOLO mode to auto-approve all permission prompts for this session.")
         .accessibilityLabel("YOLO mode")
         .accessibilityValue(isEnabled ? "On" : "Off")
     }
@@ -1068,6 +1068,8 @@ private final class ComposerNSTextView: NSTextView {
         NSLayoutConstraint.activate([
             label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: textContainerInset.width + (textContainer?.lineFragmentPadding ?? 5)),
             label.topAnchor.constraint(equalTo: topAnchor, constant: textContainerInset.height),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+            label.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor),
         ])
 
         updatePlaceholderVisibility()
@@ -1389,7 +1391,7 @@ private struct ComposerImageAttachmentChip: View {
                     }
                     .buttonStyle(.plain)
                     .frame(width: previewWidth, height: previewHeight)
-                    .help("Remove attachment")
+                    .neoTooltip("Remove attachment")
                     .accessibilityLabel("Remove attachment")
                     .transition(.opacity)
                 }
