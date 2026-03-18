@@ -191,19 +191,21 @@ private struct AssistantOutputBlockView: View {
         VStack(alignment: .leading, spacing: 8) {
             AssistantOutputView(message: message)
 
-            HStack(spacing: 8) {
-                MessageHoverActionButton(
-                    systemImage: didCopy ? "checkmark" : "doc.on.doc",
-                    helpText: didCopy ? "Copied" : "Copy message"
-                ) {
-                    copyMessageText()
-                }
+            if !message.isInProgress {
+                HStack(spacing: 8) {
+                    MessageHoverActionButton(
+                        systemImage: didCopy ? "checkmark" : "doc.on.doc",
+                        helpText: didCopy ? "Copied" : "Copy message"
+                    ) {
+                        copyMessageText()
+                    }
 
-                MessageHoverActionButton(
-                    systemImage: "arrow.triangle.branch",
-                    helpText: "Fork message",
-                    isDisabled: true
-                ) {}
+                    MessageHoverActionButton(
+                        systemImage: "arrow.triangle.branch",
+                        helpText: "Fork message",
+                        isDisabled: true
+                    ) {}
+                }
             }
         }
         .animation(.easeOut(duration: 0.16), value: didCopy)

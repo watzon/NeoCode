@@ -158,6 +158,20 @@ struct ComposerAttachment: Identifiable, Hashable {
 }
 
 struct ComposerQueuedMessage: Identifiable, Hashable {
+    enum DeliveryMode: String, Hashable {
+        case sendWhenDone
+        case steer
+
+        var title: String {
+            switch self {
+            case .sendWhenDone:
+                return "Send once done"
+            case .steer:
+                return "Steer"
+            }
+        }
+    }
+
     struct OptionsSnapshot: Hashable {
         let model: ComposerModelOption?
         let agentName: String?
@@ -169,19 +183,22 @@ struct ComposerQueuedMessage: Identifiable, Hashable {
     var attachments: [ComposerAttachment]
     let createdAt: Date
     var options: OptionsSnapshot
+    var deliveryMode: DeliveryMode
 
     init(
         id: UUID = UUID(),
         text: String,
         attachments: [ComposerAttachment] = [],
         createdAt: Date = .now,
-        options: OptionsSnapshot
+        options: OptionsSnapshot,
+        deliveryMode: DeliveryMode = .sendWhenDone
     ) {
         self.id = id
         self.text = text
         self.attachments = attachments
         self.createdAt = createdAt
         self.options = options
+        self.deliveryMode = deliveryMode
     }
 
     var hasText: Bool {

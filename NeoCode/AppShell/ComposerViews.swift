@@ -409,19 +409,75 @@ struct QueuedMessagesView: View {
     let messages: [ComposerQueuedMessage]
     let onEdit: (ComposerQueuedMessage.ID) -> Void
     let onRemove: (ComposerQueuedMessage.ID) -> Void
+    let onDeliveryModeChange: (ComposerQueuedMessage.ID, ComposerQueuedMessage.DeliveryMode) -> Void
+
+    @State private var isHovering = false
+
+    private let collapsedBaseHeight: CGFloat = 100
+    private let collapsedOverlap: CGFloat = 20
+    private let expandedSpacing: CGFloat = 8
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(messages.enumerated()), id: \.element.id) { entry in
-                QueuedMessageCard(
-                    message: entry.element,
-                    position: entry.offset + 1,
-                    totalCount: messages.count,
-                    onEdit: { onEdit(entry.element.id) },
-                    onRemove: { onRemove(entry.element.id) }
-                )
+        let layout = isHovering || messages.count <= 1
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: expandedSpacing))
+            : AnyLayout(ZStackLayout(alignment: .top))
+
+        layout {
+            queuedCards
+        }
+        .frame(height: isHovering || messages.count <= 1 ? nil : collapsedHeight, alignment: .top)
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                isHovering = hovering
             }
         }
+    }
+
+    private var collapsedHeight: CGFloat {
+        collapsedBaseHeight + CGFloat(max(messages.count - 1, 0)) * collapsedOverlap
+    }
+
+    private var queuedCards: some View {
+        ForEach(Array(messages.enumerated()), id: \.element.id) { entry in
+            queuedCard(for: entry)
+                .offset(y: collapsedYOffset(for: entry.offset))
+                .scaleEffect(collapsedScale(for: entry.offset), anchor: .top)
+                .opacity(collapsedOpacity(for: entry.offset))
+                .zIndex(collapsedZIndex(for: entry.offset))
+        }
+    }
+
+    private func queuedCard(for entry: (offset: Int, element: ComposerQueuedMessage)) -> some View {
+        QueuedMessageCard(
+            message: entry.element,
+            position: entry.offset + 1,
+            totalCount: messages.count,
+            allowsSteer: entry.offset == 0,
+            onEdit: { onEdit(entry.element.id) },
+            onRemove: { onRemove(entry.element.id) },
+            onDeliveryModeChange: { onDeliveryModeChange(entry.element.id, $0) }
+        )
+    }
+
+    private func collapsedYOffset(for index: Int) -> CGFloat {
+        guard !(isHovering || messages.count <= 1) else { return 0 }
+        return CGFloat(messages.count - index - 1) * collapsedOverlap
+    }
+
+    private func collapsedScale(for index: Int) -> CGFloat {
+        guard !(isHovering || messages.count <= 1) else { return 1 }
+        let depth = CGFloat(messages.count - index - 1)
+        return 1 - min(depth, 3) * 0.015
+    }
+
+    private func collapsedOpacity(for index: Int) -> Double {
+        guard !(isHovering || messages.count <= 1) else { return 1 }
+        return index == 0 ? 0.94 : 1
+    }
+
+    private func collapsedZIndex(for index: Int) -> Double {
+        Double(index)
     }
 }
 
@@ -433,8 +489,10 @@ private struct QueuedMessageCard: View {
     let message: ComposerQueuedMessage
     let position: Int
     let totalCount: Int
+    let allowsSteer: Bool
     let onEdit: () -> Void
     let onRemove: () -> Void
+    let onDeliveryModeChange: (ComposerQueuedMessage.DeliveryMode) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -450,6 +508,26 @@ private struct QueuedMessageCard: View {
                 }
 
                 Spacer(minLength: 0)
+
+                if allowsSteer {
+                    Button(message.deliveryMode == .steer ? "Steer on" : "Steer") {
+                        let nextMode: ComposerQueuedMessage.DeliveryMode = message.deliveryMode == .steer ? .sendWhenDone : .steer
+                        onDeliveryModeChange(nextMode)
+                    }
+                    .buttonStyle(.plain)
+                    .font(.neoMonoSmall)
+                    .foregroundStyle(message.deliveryMode == .steer ? NeoCodeTheme.canvas : NeoCodeTheme.textSecondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule()
+                            .fill(message.deliveryMode == .steer ? NeoCodeTheme.accent : NeoCodeTheme.panelSoft)
+                            .overlay(
+                                Capsule()
+                                    .stroke(message.deliveryMode == .steer ? NeoCodeTheme.accent : NeoCodeTheme.lineSoft, lineWidth: 1)
+                            )
+                    )
+                }
 
                 Button("Edit", action: onEdit)
                     .buttonStyle(.plain)
@@ -481,7 +559,7 @@ private struct QueuedMessageCard: View {
                 }
             }
 
-            Text("Waiting for the current response to finish before sending.")
+            Text(message.deliveryMode == .steer ? "Will steer the agent at the next possible moment." : "Waiting for the current response to finish before sending.")
                 .font(.neoMonoSmall)
                 .foregroundStyle(NeoCodeTheme.textMuted)
         }

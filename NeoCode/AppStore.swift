@@ -1843,6 +1843,23 @@ final class AppStore {
         applyQueuedMessageOptions(queuedMessage.options)
     }
 
+    func updateQueuedMessageDeliveryMode(
+        id: ComposerQueuedMessage.ID,
+        to deliveryMode: ComposerQueuedMessage.DeliveryMode,
+        in sessionID: String? = nil
+    ) {
+        let targetSessionID = sessionID ?? selectedSessionID
+        guard let targetSessionID,
+              var queue = queuedMessagesBySessionID[targetSessionID],
+              let queuedIndex = queue.firstIndex(where: { $0.id == id })
+        else {
+            return
+        }
+
+        queue[queuedIndex].deliveryMode = deliveryMode
+        queuedMessagesBySessionID[targetSessionID] = queue
+    }
+
     func removeQueuedMessage(id: ComposerQueuedMessage.ID, in sessionID: String? = nil) {
         let targetSessionID = sessionID ?? selectedSessionID
         guard let targetSessionID,
@@ -2831,6 +2848,29 @@ final class AppStore {
         var queue = queuedMessagesBySessionID[sessionID] ?? []
         queue.insert(message, at: 0)
         queuedMessagesBySessionID[sessionID] = queue
+    }
+
+    private func insertQueuedMessage(_ message: ComposerQueuedMessage, at index: Int, in sessionID: String) {
+        var queue = queuedMessagesBySessionID[sessionID] ?? []
+        let safeIndex = min(max(index, 0), queue.count)
+        queue.insert(message, at: safeIndex)
+        queuedMessagesBySessionID[sessionID] = queue
+    }
+
+    private func removeQueuedMessage(id: ComposerQueuedMessage.ID, in sessionID: String) -> (message: ComposerQueuedMessage, index: Int)? {
+        guard var queue = queuedMessagesBySessionID[sessionID],
+              let index = queue.firstIndex(where: { $0.id == id })
+        else {
+            return nil
+        }
+
+        let message = queue.remove(at: index)
+        if queue.isEmpty {
+            queuedMessagesBySessionID.removeValue(forKey: sessionID)
+        } else {
+            queuedMessagesBySessionID[sessionID] = queue
+        }
+        return (message, index)
     }
 
     func displayAgentName(_ rawName: String) -> String {
@@ -4256,6 +4296,76 @@ final class AppStore {
 
         if !didSend {
             prependQueuedMessage(queuedMessage, in: sessionID)
+        }
+        return didSend
+    }
+
+    @discardableResult
+    func sendQueuedSteerMessageIfPossible(
+        id: ComposerQueuedMessage.ID,
+        in sessionID: String,
+        projectID: ProjectSummary.ID,
+        projectPath: String,
+        using service: any OpenCodeServicing
+    ) async -> Bool {
+        guard pendingPermission(for: sessionID) == nil,
+              pendingQuestion(for: sessionID) == nil,
+              let queuedEntry = removeQueuedMessage(id: id, in: sessionID)
+        else {
+            return false
+        }
+
+        let queuedMessage = queuedEntry.message
+        guard queuedMessage.deliveryMode == .steer else {
+            insertQueuedMessage(queuedMessage, at: queuedEntry.index, in: sessionID)
+            return false
+        }
+
+        let fileReferences = await ProjectFileSearchService.shared.resolveFileReferences(in: projectPath, text: queuedMessage.text)
+        let didSend = await sendMessage(
+            text: queuedMessage.text,
+            attachments: queuedMessage.attachments,
+            fileReferences: fileReferences,
+            options: OpenCodePromptOptions(
+                model: queuedMessage.options.model,
+                agentName: queuedMessage.options.agentName,
+                variant: queuedMessage.options.variant
+            ),
+            using: service,
+            projectID: projectID,
+            sessionID: sessionID,
+            clearComposerOnSend: false,
+            restoreComposerOnFailure: false
+        )
+
+        if !didSend {
+            insertQueuedMessage(queuedMessage, at: queuedEntry.index, in: sessionID)
+        }
+        return didSend
+    }
+
+    @discardableResult
+    func sendQueuedSteerMessageIfPossible(
+        id: ComposerQueuedMessage.ID,
+        in sessionID: String,
+        using runtime: OpenCodeRuntime
+    ) async -> Bool {
+        guard let projectID = projectID(for: sessionID),
+              let service = await liveService(for: projectID, runtime: runtime),
+              let projectPath = projectPath(for: projectID)
+        else {
+            return false
+        }
+
+        let didSend = await sendQueuedSteerMessageIfPossible(
+            id: id,
+            in: sessionID,
+            projectID: projectID,
+            projectPath: projectPath,
+            using: service
+        )
+        if didSend {
+            scheduleStreamingRecoveryCheck(for: sessionID, projectID: projectID, using: runtime)
         }
         return didSend
     }

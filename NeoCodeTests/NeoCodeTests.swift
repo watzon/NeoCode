@@ -3251,6 +3251,7 @@ struct NeoCodeMainActorTests {
         #expect(service.sentPrompts.isEmpty)
         #expect(store.queuedMessages(for: "ses_1").count == 1)
         #expect(store.queuedMessages(for: "ses_1").first?.text == "Queued follow-up")
+        #expect(store.queuedMessages(for: "ses_1").first?.deliveryMode == .sendWhenDone)
         #expect(store.draft.isEmpty)
     }
 
@@ -3286,6 +3287,47 @@ struct NeoCodeMainActorTests {
         #expect(store.draft == "Queued follow-up")
         #expect(store.queuedMessages(for: "ses_1").count == 1)
         #expect(store.queuedMessages(for: "ses_1").first?.text == "Work in progress")
+    }
+
+    @MainActor
+    @Test func appStoreCanSendQueuedSteerMessageWhileSessionIsRunning() async throws {
+        let projectID = UUID()
+        let store = AppStore(projects: [
+            ProjectSummary(
+                id: projectID,
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(id: "ses_1", title: "Existing", lastUpdatedAt: .distantPast, status: .running),
+                ]
+            ),
+        ])
+        let service = MockOpenCodeService()
+
+        store.selectSession("ses_1")
+        store.draft = "Queued follow-up"
+        _ = await store.sendDraft(
+            using: service,
+            projectID: projectID,
+            sessionID: "ses_1",
+            allowQueueIfRunning: true
+        )
+
+        let queuedID = try #require(store.queuedMessages(for: "ses_1").first?.id)
+        store.updateQueuedMessageDeliveryMode(id: queuedID, to: .steer, in: "ses_1")
+
+        let didSend = await store.sendQueuedSteerMessageIfPossible(
+            id: queuedID,
+            in: "ses_1",
+            projectID: projectID,
+            projectPath: "/tmp/NeoCode",
+            using: service
+        )
+
+        #expect(didSend == true)
+        #expect(store.queuedMessages(for: "ses_1").isEmpty)
+        #expect(service.sentPrompts.count == 1)
+        #expect(service.sentPrompts[0].text == "Queued follow-up")
     }
 
     @MainActor

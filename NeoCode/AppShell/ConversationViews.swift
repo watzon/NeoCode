@@ -137,6 +137,8 @@ struct ConversationView: View {
     private let composerTopPadding: CGFloat = 8
     private let composerBottomPadding: CGFloat = 14
     private let composerControlSpacing: CGFloat = 12
+    private let queuedMessageReservedHeight: CGFloat = 100
+    private let queuedMessageStackOverlap: CGFloat = 20
     private let loadingPromptFallbackHeight: CGFloat = 96
     private let permissionPromptFallbackHeight: CGFloat = 280
     private let questionPromptFallbackHeight: CGFloat = 360
@@ -491,7 +493,6 @@ struct ConversationView: View {
                                 transcriptGroupView(group)
                             }
                         }
-                        .padding(.bottom, queuedMessagesContentPadding)
 
                         Color.clear
                             .frame(height: contentBottomInset)
@@ -622,7 +623,14 @@ struct ConversationView: View {
                 QueuedMessagesView(
                     messages: store.queuedMessages(for: sessionID),
                     onEdit: { store.editQueuedMessage(id: $0, in: sessionID) },
-                    onRemove: { store.removeQueuedMessage(id: $0, in: sessionID) }
+                    onRemove: { store.removeQueuedMessage(id: $0, in: sessionID) },
+                    onDeliveryModeChange: { id, mode in
+                        store.updateQueuedMessageDeliveryMode(id: id, to: mode, in: sessionID)
+                        guard mode == .steer else { return }
+                        Task {
+                            await store.sendQueuedSteerMessageIfPossible(id: id, in: sessionID, using: runtime)
+                        }
+                    }
                 )
                 .frame(width: transcriptColumnWidth)
                 .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
@@ -757,14 +765,14 @@ struct ConversationView: View {
         // height measurement lags or under-reports during transitions.
         max(
             bottomAnchorSpacerHeight,
-            max(promptOverlayHeight, promptOverlayFallbackHeight) + bottomClearance + transcriptBottomPadding
+            max(promptOverlayHeight, promptOverlayFallbackHeight) + queuedMessagesBottomInset + bottomClearance + transcriptBottomPadding
         )
     }
 
-    private var queuedMessagesContentPadding: CGFloat {
-        let messageCount = store.queuedMessages(for: sessionID).count
-        guard messageCount > 0 else { return 0 }
-        return CGFloat(messageCount) * 100
+    private var queuedMessagesBottomInset: CGFloat {
+        let queuedCount = store.queuedMessages(for: sessionID).count
+        guard queuedCount > 0 else { return 0 }
+        return queuedMessageReservedHeight + CGFloat(max(queuedCount - 1, 0)) * queuedMessageStackOverlap
     }
 
     private var promptOverlayFallbackHeight: CGFloat {
