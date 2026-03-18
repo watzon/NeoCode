@@ -1,13 +1,17 @@
 import Foundation
 
 actor DashboardStatsService {
-    private let persistence = PersistedDashboardStatsStore()
+    private let persistence: PersistedDashboardStatsStore
 
     private var hasLoadedCache = false
     private var catalogsByPath: [String: DashboardProjectCatalog] = [:]
     private var sessionsByKey: [String: DashboardSessionCacheEntry] = [:]
 
-    func prepare(projects: [DashboardProjectDescriptor]) async -> DashboardSnapshot {
+    init(persistence: PersistedDashboardStatsStore = PersistedDashboardStatsStore()) {
+        self.persistence = persistence
+    }
+
+    func prepare(projects: [DashboardProjectDescriptor], range: DashboardTimeRange = .allTime) async -> DashboardSnapshot {
         await loadCacheIfNeeded()
 
         let activePaths = Set(projects.map(\.path))
@@ -21,31 +25,31 @@ actor DashboardStatsService {
         catalogsByPath = nextCatalogs
         sessionsByKey = sessionsByKey.filter { activePaths.contains($0.value.projectPath) }
         await persist()
-        return buildSnapshot()
+        return buildSnapshot(range: range)
     }
 
-    func currentSnapshot() async -> DashboardSnapshot {
+    func currentSnapshot(range: DashboardTimeRange = .allTime) async -> DashboardSnapshot {
         await loadCacheIfNeeded()
-        return buildSnapshot()
+        return buildSnapshot(range: range)
     }
 
     func planRefresh(
         for project: DashboardProjectDescriptor,
         sessions: [DashboardRemoteSessionDescriptor],
-        forceSessionIDs: Set<String> = []
+        forceSessionIDs: Set<String> = [],
+        range: DashboardTimeRange = .allTime
     ) async -> DashboardRefreshPlan {
         await loadCacheIfNeeded()
 
         var catalog = catalogsByPath[project.path] ?? DashboardProjectCatalog(descriptor: project)
         catalog.descriptor = project
-        catalog.knownSessionCount = sessions.count
+        let cachedSessionCount = sessionsByKey.values.reduce(into: 0) { count, entry in
+            guard entry.projectPath == project.path else { return }
+            count += 1
+        }
+        catalog.knownSessionCount = max(sessions.count, cachedSessionCount)
         catalog.lastSessionScanAt = .now
         catalogsByPath[project.path] = catalog
-
-        let remoteIDs = Set(sessions.map(\.id))
-        sessionsByKey = sessionsByKey.filter { _, entry in
-            entry.projectPath != project.path || remoteIDs.contains(entry.sessionID)
-        }
 
         let changedSessions = sessions.filter { session in
             if forceSessionIDs.contains(session.id) {
@@ -57,10 +61,10 @@ actor DashboardStatsService {
         }
 
         await persist()
-        return DashboardRefreshPlan(changedSessions: changedSessions, snapshot: buildSnapshot())
+        return DashboardRefreshPlan(changedSessions: changedSessions, snapshot: buildSnapshot(range: range))
     }
 
-    func ingest(_ ingestions: [DashboardSessionIngress]) async -> DashboardSnapshot {
+    func ingest(_ ingestions: [DashboardSessionIngress], range: DashboardTimeRange = .allTime) async -> DashboardSnapshot {
         await loadCacheIfNeeded()
 
         for ingress in ingestions {
@@ -69,7 +73,7 @@ actor DashboardStatsService {
         }
 
         await persist()
-        return buildSnapshot()
+        return buildSnapshot(range: range)
     }
 
     private func loadCacheIfNeeded() async {
@@ -198,12 +202,16 @@ actor DashboardStatsService {
         )
     }
 
-    private func buildSnapshot() -> DashboardSnapshot {
+    private func buildSnapshot(range: DashboardTimeRange) -> DashboardSnapshot {
         let catalogs = catalogsByPath.values.sorted { lhs, rhs in
             lhs.descriptor.name.localizedCaseInsensitiveCompare(rhs.descriptor.name) == .orderedAscending
         }
         let activePaths = Set(catalogs.map(\.descriptor.path))
-        let entries = sessionsByKey.values.filter { activePaths.contains($0.projectPath) }
+        let entries = sessionsByKey.values.filter { entry in
+            guard activePaths.contains(entry.projectPath) else { return false }
+            let activityDate = entry.stats.lastActivityAt ?? entry.updatedAt
+            return range.includes(activityDate)
+        }
 
         var totalMessages = 0
         var userMessages = 0

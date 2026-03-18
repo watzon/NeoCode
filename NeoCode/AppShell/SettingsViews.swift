@@ -914,6 +914,7 @@ private struct HexColorField: View {
                 .overlay(Circle().stroke(NeoCodeTheme.line, lineWidth: 1))
 
             TextField("#000000", text: normalizedBinding)
+                .neoWritingToolsDisabled()
                 .textFieldStyle(.plain)
                 .font(.neoMono)
                 .foregroundStyle(NeoCodeTheme.textPrimary)

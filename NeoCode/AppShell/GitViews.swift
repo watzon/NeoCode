@@ -142,6 +142,7 @@ struct GitCommitSheet: View {
                     )
 
                 TextEditor(text: $commitMessage)
+                    .neoWritingToolsDisabled()
                     .font(.neoBody)
                     .foregroundStyle(NeoCodeTheme.textPrimary)
                     .scrollContentBackground(.hidden)

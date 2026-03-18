@@ -123,6 +123,7 @@ struct ComposerView: View {
         }
         .alert("Create Branch", isPresented: $isCreatingBranch) {
             TextField("Branch name", text: $newBranchName)
+                .neoWritingToolsDisabled()
             Button("Cancel", role: .cancel) {
                 newBranchName = ""
             }
@@ -856,6 +857,10 @@ struct GrowingTextView: NSViewRepresentable {
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
+        textView.usesRolloverButtonForSelection = false
+        if #available(macOS 15.0, *) {
+            textView.writingToolsBehavior = .none
+        }
         textView.applyTheme()
         textView.delegate = context.coordinator
         textView.textContainerInset = NSSize(width: 0, height: 4)
@@ -905,6 +910,10 @@ struct GrowingTextView: NSViewRepresentable {
         }
         textView.placeholder = placeholder
         textView.applyTheme()
+        textView.usesRolloverButtonForSelection = false
+        if #available(macOS 15.0, *) {
+            textView.writingToolsBehavior = .none
+        }
         textView.onImportAttachments = onImportAttachments
         textView.onConfirmAuxiliarySelection = onConfirmAuxiliarySelection
         textView.onMoveAuxiliarySelection = onMoveAuxiliarySelection

@@ -105,6 +105,7 @@ struct SessionHeaderView: View {
         }
         .alert("Rename Thread", isPresented: $isRenaming) {
             TextField("Thread name", text: $renameTitle)
+                .neoWritingToolsDisabled()
             Button("Cancel", role: .cancel) {
                 renameTitle = session.title
             }

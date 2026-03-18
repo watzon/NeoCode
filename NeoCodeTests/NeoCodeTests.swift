@@ -704,6 +704,71 @@ struct NeoCodeCoreTests {
         #expect(resolved.percentUsed == 0)
     }
 
+    @Test func dashboardStatsPreserveCachedSessionsWhenSessionListOmitsOlderOnes() async throws {
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let persistence = PersistedDashboardStatsStore(baseDirectoryURL: tempDirectory)
+        let service = DashboardStatsService(persistence: persistence)
+        let project = DashboardProjectDescriptor(id: UUID(), name: "NeoCode", path: "/tmp/neocode")
+
+        _ = await service.prepare(projects: [project])
+
+        let olderSession = DashboardRemoteSessionDescriptor(
+            id: "ses_old",
+            title: "Older session",
+            createdAt: date("2026-03-01T10:00:00Z"),
+            updatedAt: date("2026-03-01T10:05:00Z")
+        )
+        let newerSession = DashboardRemoteSessionDescriptor(
+            id: "ses_new",
+            title: "Newer session",
+            createdAt: date("2026-03-08T10:00:00Z"),
+            updatedAt: date("2026-03-08T10:05:00Z")
+        )
+
+        _ = await service.ingest([
+            DashboardSessionIngress(project: project, session: olderSession, messages: try dashboardMessages(sessionID: "ses_old", totalTokens: 600_000_000, updatedAt: "2026-03-01T10:05:00Z")),
+            DashboardSessionIngress(project: project, session: newerSession, messages: try dashboardMessages(sessionID: "ses_new", totalTokens: 500_000_000, updatedAt: "2026-03-08T10:05:00Z")),
+        ])
+
+        let snapshotBefore = await service.currentSnapshot()
+        #expect(snapshotBefore.tokens.total == 1_100_000_000)
+        #expect(snapshotBefore.indexedSessionCount == 2)
+
+        let plan = await service.planRefresh(for: project, sessions: [newerSession])
+
+        #expect(plan.snapshot.tokens.total == 1_100_000_000)
+        #expect(plan.snapshot.indexedSessionCount == 2)
+        #expect(plan.snapshot.knownSessionCount == 2)
+        #expect(plan.changedSessions.isEmpty)
+    }
+
+    @Test func dashboardStatsCanBeFilteredByPresetRanges() async throws {
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let persistence = PersistedDashboardStatsStore(baseDirectoryURL: tempDirectory)
+        let service = DashboardStatsService(persistence: persistence)
+        let project = DashboardProjectDescriptor(id: UUID(), name: "NeoCode", path: "/tmp/neocode")
+
+        _ = await service.prepare(projects: [project])
+
+        let recentDate = isoDateString(from: Calendar.current.date(byAdding: .day, value: -3, to: .now) ?? .now)
+        let olderDate = isoDateString(from: Calendar.current.date(byAdding: .day, value: -45, to: .now) ?? .now)
+
+        _ = await service.ingest([
+            DashboardSessionIngress(project: project, session: DashboardRemoteSessionDescriptor(id: "ses_recent", title: "Recent", createdAt: date(recentDate), updatedAt: date(recentDate)), messages: try dashboardMessages(sessionID: "ses_recent", totalTokens: 200, updatedAt: recentDate)),
+            DashboardSessionIngress(project: project, session: DashboardRemoteSessionDescriptor(id: "ses_old", title: "Old", createdAt: date(olderDate), updatedAt: date(olderDate)), messages: try dashboardMessages(sessionID: "ses_old", totalTokens: 800, updatedAt: olderDate)),
+        ])
+
+        let lastThirtyDays = await service.currentSnapshot(range: .thirtyDays)
+        let allTime = await service.currentSnapshot(range: .allTime)
+
+        #expect(lastThirtyDays.tokens.total == 200)
+        #expect(lastThirtyDays.indexedSessionCount == 1)
+        #expect(allTime.tokens.total == 1_000)
+        #expect(allTime.indexedSessionCount == 2)
+    }
+
     @Test func groupsCompactionMarkerAndSummaryIntoCompactionSection() {
         let now = Date(timeIntervalSince1970: 1_710_616_186)
         let groups = buildDisplayMessageGroups(from: [
@@ -4237,6 +4302,49 @@ struct NeoCodeMainActorTests {
 
 private func decode<T: Decodable>(_ json: String) throws -> T {
     try JSONDecoder.opencode.decode(T.self, from: Data(json.utf8))
+}
+
+private func date(_ iso8601: String) -> Date {
+    (try? JSONDecoder.opencode.decode(Date.self, from: Data("\"\(iso8601)\"".utf8))) ?? .distantPast
+}
+
+private func isoDateString(from date: Date) -> String {
+    ISO8601DateFormatter().string(from: date)
+}
+
+private func dashboardMessages(sessionID: String, totalTokens: Int, updatedAt: String) throws -> [OpenCodeMessageEnvelope] {
+    try decode(
+        """
+        [
+          {
+            "info": {
+              "id": "msg_\(sessionID)",
+              "sessionID": "\(sessionID)",
+              "role": "assistant",
+              "providerID": "openai",
+              "modelID": "gpt-5.4",
+              "cost": 0.0,
+              "tokens": {
+                "total": \(totalTokens),
+                "input": \(totalTokens),
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": "\(updatedAt)",
+                "updated": "\(updatedAt)",
+                "completed": "\(updatedAt)"
+              }
+            },
+            "parts": []
+          }
+        ]
+        """
+    )
 }
 
 private func requestBodyData(from request: URLRequest) throws -> Data? {

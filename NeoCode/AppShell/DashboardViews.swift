@@ -27,9 +27,18 @@ struct DashboardScreen: View {
                 VStack(alignment: .leading, spacing: 20) {
                     if let snapshot = store.dashboardSnapshot,
                        snapshot.totalProjects > 0 {
-                        Text("Welcome to NeoCode!")
-                            .font(.system(size: 28, weight: .bold, design: .default))
-                            .foregroundStyle(NeoCodeTheme.textPrimary)
+                        HStack(alignment: .center, spacing: 12) {
+                            Text("Welcome to NeoCode!")
+                                .font(.system(size: 28, weight: .bold, design: .default))
+                                .foregroundStyle(NeoCodeTheme.textPrimary)
+
+                            Spacer(minLength: 12)
+
+                            DashboardRangeSelect(
+                                selectedRange: store.selectedDashboardRange,
+                                onSelect: store.selectDashboardRange
+                            )
+                        }
 
                         HStack(alignment: .top, spacing: 12) {
                             DashboardStatCard(
@@ -44,7 +53,9 @@ struct DashboardScreen: View {
                                 iconColor: NeoCodeTheme.warning,
                                 title: "Tokens",
                                 value: DashboardFormat.count(snapshot.tokens.total),
-                                subtitle: "Total usage"
+                                subtitle: store.selectedDashboardRange == .allTime
+                                    ? "All-time usage"
+                                    : "Usage in last \(store.selectedDashboardRange.shortTitle.lowercased())"
                             )
                             DashboardStatCard(
                                 icon: "bubble.left.and.bubble.right.fill",
@@ -747,6 +758,40 @@ private struct DashboardStatusPill: View {
                     .foregroundStyle(NeoCodeTheme.textSecondary)
             }
         }
+    }
+}
+
+private struct DashboardRangeSelect: View {
+    let selectedRange: DashboardTimeRange
+    let onSelect: (DashboardTimeRange) -> Void
+
+    var body: some View {
+        NeoCodeSelect(
+            title: selectedRange.shortTitle,
+            selectedID: selectedRange.id,
+            items: DashboardTimeRange.allCases,
+            emptyMessage: "No ranges available.",
+            placeholder: "Filter range",
+            isSearchable: false,
+            direction: .down,
+            menuWidth: 180,
+            showsSelectionIndicator: true
+        ) { range in
+            Text(range.title)
+                .font(.neoBody)
+                .foregroundStyle(NeoCodeTheme.textPrimary)
+        } searchableText: { range in
+            [range.title, range.shortTitle]
+        } onSelect: { range in
+            onSelect(range)
+        } triggerLeading: {
+            Image(systemName: "calendar")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(NeoCodeTheme.textSecondary)
+        }
+        .frame(width: 132, alignment: .trailing)
+        .accessibilityLabel("Dashboard range")
+        .accessibilityValue(selectedRange.title)
     }
 }
 

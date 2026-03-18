@@ -92,6 +92,7 @@ struct NeoCodeSelect<Item: Identifiable, RowContent: View, TriggerLeading: View>
             VStack(alignment: .leading, spacing: 10) {
                 if isSearchable {
                     TextField(placeholder, text: $query)
+                        .neoWritingToolsDisabled()
                         .textFieldStyle(.plain)
                         .font(.neoBody)
                         .foregroundStyle(NeoCodeTheme.textPrimary)

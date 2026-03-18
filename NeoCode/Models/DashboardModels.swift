@@ -6,6 +6,60 @@ enum AppContentSelection: Hashable {
     case settings(AppSettingsSection)
 }
 
+enum DashboardTimeRange: String, CaseIterable, Codable, Hashable, Identifiable, Sendable {
+    case sevenDays
+    case thirtyDays
+    case ninetyDays
+    case allTime
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .sevenDays:
+            "Last 7 days"
+        case .thirtyDays:
+            "Last 30 days"
+        case .ninetyDays:
+            "Last 90 days"
+        case .allTime:
+            "All time"
+        }
+    }
+
+    var shortTitle: String {
+        switch self {
+        case .sevenDays:
+            "7 days"
+        case .thirtyDays:
+            "30 days"
+        case .ninetyDays:
+            "90 days"
+        case .allTime:
+            "All time"
+        }
+    }
+
+    nonisolated func includes(_ date: Date, now: Date = .now) -> Bool {
+        guard let cutoffDate else { return true }
+        return date >= cutoffDate && date <= now
+    }
+
+    private nonisolated var cutoffDate: Date? {
+        let calendar = Calendar.current
+        switch self {
+        case .sevenDays:
+            return calendar.date(byAdding: .day, value: -7, to: .now)
+        case .thirtyDays:
+            return calendar.date(byAdding: .day, value: -30, to: .now)
+        case .ninetyDays:
+            return calendar.date(byAdding: .day, value: -90, to: .now)
+        case .allTime:
+            return nil
+        }
+    }
+}
+
 struct DashboardProjectDescriptor: Codable, Hashable, Identifiable, Sendable {
     let id: UUID
     let name: String

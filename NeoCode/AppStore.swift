@@ -167,6 +167,7 @@ final class AppStore {
     var isRespondingToPrompt = false
     var isPromptReady = true
     var promptLoadingText: String?
+    var selectedDashboardRange: DashboardTimeRange = .allTime
     var dashboardSnapshot: DashboardSnapshot?
     var dashboardStatus: DashboardRefreshStatus = .idle
     var lastError: String?
@@ -269,6 +270,7 @@ final class AppStore {
         self.selectedContent = initialWorkspaceSelection.content
         self.appSettings = loadedAppSettings
         self.loadingTranscriptSessionID = nil
+        self.selectedDashboardRange = .allTime
         self.yoloSessionKeys = loadedAppSettings.general.remembersYoloModePerThread
             ? PersistedYoloPreferencesStore().loadYoloSessionKeys()
             : []
@@ -301,6 +303,7 @@ final class AppStore {
         self.selectedContent = initialWorkspaceSelection.content
         self.appSettings = loadedAppSettings
         self.loadingTranscriptSessionID = nil
+        self.selectedDashboardRange = .allTime
         self.yoloSessionKeys = isPersistenceEnabled && loadedAppSettings.general.remembersYoloModePerThread
             ? PersistedYoloPreferencesStore().loadYoloSessionKeys()
             : []
@@ -625,6 +628,16 @@ final class AppStore {
         scheduleGitRefreshLoop(for: selectedProject?.path)
     }
 
+    func selectDashboardRange(_ range: DashboardTimeRange) {
+        guard selectedDashboardRange != range else { return }
+        selectedDashboardRange = range
+
+        Task { [weak self] in
+            guard let self else { return }
+            self.dashboardSnapshot = await self.dashboardStatsService.currentSnapshot(range: range)
+        }
+    }
+
     func openSettings(section: AppSettingsSection = .general) {
         if !isSettingsSelected {
             lastWorkspaceSelection = selectedContent
@@ -880,7 +893,10 @@ final class AppStore {
 
     func startDashboard(using runtime: OpenCodeRuntime) async {
         isDashboardActive = true
-        dashboardSnapshot = await dashboardStatsService.prepare(projects: projects.map(DashboardProjectDescriptor.init(project:)))
+        dashboardSnapshot = await dashboardStatsService.prepare(
+            projects: projects.map(DashboardProjectDescriptor.init(project:)),
+            range: selectedDashboardRange
+        )
 
         guard !projects.isEmpty else {
             dashboardStatus = .idle
@@ -1033,7 +1049,8 @@ final class AppStore {
                 let plan = await dashboardStatsService.planRefresh(
                     for: descriptor,
                     sessions: remoteSessions,
-                    forceSessionIDs: forcedSessions[project.id] ?? []
+                    forceSessionIDs: forcedSessions[project.id] ?? [],
+                    range: selectedDashboardRange
                 )
                 dashboardSnapshot = plan.snapshot
                 refreshWork.append(contentsOf: plan.changedSessions.map { (project, descriptor, $0) })
@@ -1064,7 +1081,7 @@ final class AppStore {
         )
 
         if refreshWork.isEmpty {
-            dashboardSnapshot = await dashboardStatsService.currentSnapshot()
+            dashboardSnapshot = await dashboardStatsService.currentSnapshot(range: selectedDashboardRange)
             dashboardStatus = failedProjects.isEmpty ? .idle : DashboardRefreshStatus(
                 phase: .failed,
                 title: "Some projects were skipped",
@@ -1117,14 +1134,14 @@ final class AppStore {
             }
 
             if !ingestions.isEmpty {
-                dashboardSnapshot = await dashboardStatsService.ingest(ingestions)
+                dashboardSnapshot = await dashboardStatsService.ingest(ingestions, range: selectedDashboardRange)
                 processedSessions += ingestions.count
             }
 
             await Task.yield()
         }
 
-        dashboardSnapshot = await dashboardStatsService.currentSnapshot()
+        dashboardSnapshot = await dashboardStatsService.currentSnapshot(range: selectedDashboardRange)
         dashboardStatus = failedProjects.isEmpty ? .idle : DashboardRefreshStatus(
             phase: .failed,
             title: "Usage cache updated with gaps",

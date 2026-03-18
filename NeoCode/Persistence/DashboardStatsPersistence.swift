@@ -5,6 +5,11 @@ actor PersistedDashboardStatsStore {
     private let cacheDirectoryName = "tech.watzon.NeoCode"
     private let cacheFileName = "dashboard-stats-cache.json"
     private let backupFileName = "dashboard-stats-cache.previous.json"
+    private let baseDirectoryURL: URL?
+
+    init(baseDirectoryURL: URL? = nil) {
+        self.baseDirectoryURL = baseDirectoryURL
+    }
 
     func loadCache() -> DashboardStatsCache? {
         guard let cacheURL,
@@ -39,7 +44,7 @@ actor PersistedDashboardStatsStore {
     }
 
     private var cacheURL: URL? {
-        guard let applicationSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+        guard let applicationSupportURL = baseDirectoryURL ?? fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
             return nil
         }
 
@@ -49,7 +54,7 @@ actor PersistedDashboardStatsStore {
     }
 
     private var backupURL: URL? {
-        guard let applicationSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+        guard let applicationSupportURL = baseDirectoryURL ?? fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
             return nil
         }
 

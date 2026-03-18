@@ -638,6 +638,7 @@ private struct QuestionPromptSurfaceView: View {
                                 set: { customInputByQuestion[index] = $0 }
                             )
                         )
+                        .neoWritingToolsDisabled()
                         .textFieldStyle(.plain)
                         .font(.neoBody)
                         .foregroundStyle(NeoCodeTheme.textPrimary)
