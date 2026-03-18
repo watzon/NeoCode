@@ -5,6 +5,9 @@ enum NeoCodeAppLanguage: String, Codable, CaseIterable, Hashable, Identifiable {
     case system
     case english
     case spanish
+    case portuguese
+    case french
+    case italian
 
     var id: String { rawValue }
 
@@ -20,6 +23,12 @@ enum NeoCodeAppLanguage: String, Codable, CaseIterable, Hashable, Identifiable {
             return localized("English", locale: locale)
         case .spanish:
             return localized("Spanish", locale: locale)
+        case .portuguese:
+            return localized("Portuguese", locale: locale)
+        case .french:
+            return localized("French", locale: locale)
+        case .italian:
+            return localized("Italian", locale: locale)
         }
     }
 
@@ -31,6 +40,12 @@ enum NeoCodeAppLanguage: String, Codable, CaseIterable, Hashable, Identifiable {
             return Locale(identifier: "en")
         case .spanish:
             return Locale(identifier: "es")
+        case .portuguese:
+            return Locale(identifier: "pt")
+        case .french:
+            return Locale(identifier: "fr")
+        case .italian:
+            return Locale(identifier: "it")
         }
     }
 }

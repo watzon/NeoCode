@@ -681,10 +681,10 @@ struct ConversationView: View {
     }
 
     private func backToBottomButton(using proxy: ScrollViewProxy) -> some View {
-        Button {
-            maintainPinnedPosition(using: proxy, animated: true)
-        } label: {
-            Label("Back to bottom", systemImage: "arrow.down")
+                Button {
+                    maintainPinnedPosition(using: proxy, animated: true)
+                } label: {
+                    Label(localized("Back to bottom", locale: locale), systemImage: "arrow.down")
                 .font(.neoMonoSmall)
                 .foregroundStyle(NeoCodeTheme.textPrimary)
                 .padding(.horizontal, 14)
@@ -722,14 +722,14 @@ struct ConversationView: View {
                 ProgressView()
                     .controlSize(.small)
 
-                Text("Loading older messages...")
+                Text(localized("Loading older messages...", locale: locale))
                     .font(.neoMonoSmall)
                     .foregroundStyle(NeoCodeTheme.textSecondary)
             } else {
                 Button {
                     loadOlderMessages(using: proxy)
                 } label: {
-                    Text("Load older messages")
+                    Text(localized("Load older messages", locale: locale))
                         .font(.neoMonoSmall)
                         .foregroundStyle(NeoCodeTheme.textPrimary)
                         .padding(.horizontal, 14)
@@ -825,7 +825,13 @@ struct ConversationView: View {
     private var remainingOlderMessagesLabel: String {
         let remaining = max(transcriptCount - loadedMessageCount, 0)
         guard remaining > 0 else { return "" }
-        return "\(remaining) earlier \(remaining == 1 ? "message" : "messages") hidden"
+
+        let format = localized(
+            remaining == 1 ? "%@ earlier message hidden" : "%@ earlier messages hidden",
+            locale: locale
+        )
+
+        return String(format: format, String(remaining))
     }
 
     private var promptSurface: SessionPromptSurface {
@@ -1009,6 +1015,7 @@ struct ConversationView: View {
 }
 
 private struct RevertHistorySheet: View {
+    @Environment(\.locale) private var locale
     let preview: SessionRevertPreview
     let isPerformingRevert: Bool
     let onCancel: () -> Void
@@ -1022,7 +1029,7 @@ private struct RevertHistorySheet: View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Revert to this point")
+                    Text(localized("Revert to this point", locale: locale))
                         .font(.system(size: 22, weight: .semibold))
                         .foregroundStyle(NeoCodeTheme.textPrimary)
 
@@ -1046,7 +1053,7 @@ private struct RevertHistorySheet: View {
             }
 
             VStack(alignment: .leading, spacing: 10) {
-                Text("File changes that will be reverted")
+                Text(localized("File changes that will be reverted", locale: locale))
                     .font(.neoBody)
                     .foregroundStyle(NeoCodeTheme.textPrimary)
 
@@ -1089,13 +1096,13 @@ private struct RevertHistorySheet: View {
                 .frame(height: changeListHeight)
             }
 
-            Text("This matches the TUI behavior: the transcript rewinds, the prompt comes back into the composer, and file edits after that point are rolled back.")
+            Text(localized("This matches the TUI behavior: the transcript rewinds, the prompt comes back into the composer, and file edits after that point are rolled back.", locale: locale))
                 .font(.neoMonoSmall)
                 .foregroundStyle(NeoCodeTheme.textMuted)
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 10) {
-                Button("Cancel", action: onCancel)
+                Button(localized("Cancel", locale: locale), action: onCancel)
                     .buttonStyle(.plain)
                     .font(.neoAction)
                     .foregroundStyle(NeoCodeTheme.textSecondary)
@@ -1104,7 +1111,7 @@ private struct RevertHistorySheet: View {
                 Spacer(minLength: 0)
 
                 Button(action: onConfirm) {
-                    Text(isPerformingRevert ? "Reverting..." : "Revert")
+                    Text(localized(isPerformingRevert ? "Reverting..." : "Revert", locale: locale))
                         .font(.neoAction)
                         .foregroundStyle(NeoCodeTheme.canvas)
                         .padding(.horizontal, 18)
@@ -1134,15 +1141,20 @@ private struct RevertHistorySheet: View {
     private var summaryText: String {
         let laterPrompts = max(preview.affectedPromptCount - 1, 0)
         if laterPrompts == 0 {
-            return "This removes this prompt from the transcript and restores it to the composer."
+            return localized("This removes this prompt from the transcript and restores it to the composer.", locale: locale)
         }
 
-        return "This removes this prompt and \(laterPrompts) later \(laterPrompts == 1 ? "prompt" : "prompts") from the transcript and restores it to the composer."
+        return String(
+            format: localized("This removes this prompt and %@ later %@ from the transcript and restores it to the composer.", locale: locale),
+            String(laterPrompts),
+            localized(laterPrompts == 1 ? "prompt" : "prompts", locale: locale)
+        )
     }
 }
 
 private struct NewSessionEmptyStateView: View {
     @Environment(AppStore.self) private var store
+    @Environment(\.locale) private var locale
 
     var body: some View {
         VStack(spacing: 24) {
@@ -1156,11 +1168,11 @@ private struct NewSessionEmptyStateView: View {
             .frame(width: 120, height: 112)
 
             VStack(spacing: 10) {
-                Text("Build something cool")
+                Text(localized("Build something cool", locale: locale))
                     .font(.system(size: 28, weight: .semibold, design: .default))
                     .foregroundStyle(NeoCodeTheme.textPrimary)
 
-                Text("Start by describing a task, asking a question, or pasting in code. Your first message will kick off the session.")
+                Text(localized("Start by describing a task, asking a question, or pasting in code. Your first message will kick off the session.", locale: locale))
                     .font(.neoBody)
                     .foregroundStyle(NeoCodeTheme.textSecondary)
                     .multilineTextAlignment(.center)

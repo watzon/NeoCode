@@ -186,6 +186,7 @@ struct AssistantTurnView: View {
 private struct AssistantOutputBlockView: View {
     let message: ChatMessage
     @State private var didCopy = false
+    @Environment(\.locale) private var locale
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -195,14 +196,14 @@ private struct AssistantOutputBlockView: View {
                 HStack(spacing: 8) {
                     MessageHoverActionButton(
                         systemImage: didCopy ? "checkmark" : "doc.on.doc",
-                        helpText: didCopy ? "Copied" : "Copy message"
+                        helpText: localized(didCopy ? "Copied" : "Copy message", locale: locale)
                     ) {
                         copyMessageText()
                     }
 
                     MessageHoverActionButton(
                         systemImage: "arrow.triangle.branch",
-                        helpText: "Fork message",
+                        helpText: localized("Fork message", locale: locale),
                         isDisabled: true
                     ) {}
                 }
@@ -347,6 +348,7 @@ struct CompactionSummarySectionView: View {
     private let contentWidth = ConversationLayout.assistantContentWidth
 
     @State private var isExpanded: Bool
+    @Environment(\.locale) private var locale
 
     init(messages: [ChatMessage]) {
         self.messages = messages
@@ -357,14 +359,14 @@ struct CompactionSummarySectionView: View {
         VStack(alignment: .leading, spacing: isExpanded && !summaryMessages.isEmpty ? 12 : 0) {
             header
 
-            if isExpanded {
-                if summaryMessages.isEmpty {
-                    Text("Generating compacted session summary...")
-                        .font(.neoMonoSmall)
-                        .foregroundStyle(NeoCodeTheme.textSecondary)
-                        .padding(.leading, 21)
-                } else {
-                    AssistantTurnView(messages: summaryMessages, showsMetadataHeader: false)
+                if isExpanded {
+                    if summaryMessages.isEmpty {
+                        Text(localized("Generating compacted session summary...", locale: locale))
+                            .font(.neoMonoSmall)
+                            .foregroundStyle(NeoCodeTheme.textSecondary)
+                            .padding(.leading, 21)
+                    } else {
+                        AssistantTurnView(messages: summaryMessages, showsMetadataHeader: false)
                         .frame(maxWidth: contentWidth, alignment: .leading)
                         .padding(.leading, 21)
                 }
@@ -393,7 +395,7 @@ struct CompactionSummarySectionView: View {
                 .foregroundStyle(NeoCodeTheme.textMuted)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("Compaction summary")
+                Text(localized("Compaction summary", locale: locale))
                     .font(.neoMonoSmall)
                     .foregroundStyle(NeoCodeTheme.textPrimary)
 
@@ -418,24 +420,24 @@ struct CompactionSummarySectionView: View {
 
     private var subtitle: String {
         if summaryMessages.isEmpty {
-            return "Summarizing the session into a smaller handoff context."
+            return localized("Summarizing the session into a smaller handoff context.", locale: locale)
         }
 
         return isExpanded
-            ? "Tap to collapse the compacted handoff."
-            : "Tap to inspect the compacted handoff that future turns build on."
+            ? localized("Tap to collapse the compacted handoff.", locale: locale)
+            : localized("Tap to inspect the compacted handoff that future turns build on.", locale: locale)
+    }
+
+    private var statusIsCompleted: Bool {
+        !summaryMessages.isEmpty && !summaryMessages.contains(where: \.isInProgress)
     }
 
     private var statusText: String {
-        if summaryMessages.isEmpty || summaryMessages.contains(where: \.isInProgress) {
-            return "running"
-        }
-
-        return "completed"
+        localized(statusIsCompleted ? "completed" : "running", locale: locale)
     }
 
     private var statusColor: Color {
-        statusText == "completed" ? NeoCodeTheme.success : NeoCodeTheme.accent
+        statusIsCompleted ? NeoCodeTheme.success : NeoCodeTheme.accent
     }
 
     private var cardBackground: some View {
@@ -450,6 +452,7 @@ struct CompactionSummarySectionView: View {
 
 struct MessageRowView: View {
     @Environment(AppStore.self) private var store
+    @Environment(\.locale) private var locale
     @State private var isHovering = false
     @State private var isHoveringActions = false
     @State private var didCopy = false
@@ -509,20 +512,20 @@ struct MessageRowView: View {
                 .overlay(alignment: .bottomTrailing) {
                     if isHovering || isHoveringActions || didCopy {
                         HStack(spacing: 6) {
-                            MessageHoverActionButton(
-                                systemImage: "arrow.uturn.backward",
-                                helpText: "Revert to this message",
-                                isDisabled: !canRevertMessage
-                            ) {
-                                onRevert()
-                            }
+                        MessageHoverActionButton(
+                            systemImage: "arrow.uturn.backward",
+                            helpText: localized("Revert to this message", locale: locale),
+                            isDisabled: !canRevertMessage
+                        ) {
+                            onRevert()
+                        }
 
-                            MessageHoverActionButton(
-                                systemImage: didCopy ? "checkmark" : "doc.on.doc",
-                                helpText: "Copy message"
-                            ) {
-                                copyMessageText()
-                            }
+                        MessageHoverActionButton(
+                            systemImage: didCopy ? "checkmark" : "doc.on.doc",
+                            helpText: localized("Copy message", locale: locale)
+                        ) {
+                            copyMessageText()
+                        }
                         }
                         .padding(.horizontal, 10)
                         .padding(.vertical, 8)

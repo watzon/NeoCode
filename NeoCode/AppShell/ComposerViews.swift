@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct ComposerView: View {
     @Environment(AppStore.self) private var store
+    @Environment(\.locale) private var locale
     @State private var isImportingFiles = false
     @State private var isCreatingBranch = false
     @State private var newBranchName = ""
@@ -47,12 +48,12 @@ struct ComposerView: View {
 
                 if store.selectedProject != nil {
                     if store.gitStatus.isRepository {
-                        NeoCodeSelect(
-                            title: store.selectedBranch,
-                            selectedID: store.selectedBranch,
-                            items: store.availableBranches.map { ComposerDropdownOption(id: $0, title: $0) },
-                            emptyMessage: "No branches found.",
-                            placeholder: "Search branches",
+                            NeoCodeSelect(
+                                title: store.selectedBranch,
+                                selectedID: store.selectedBranch,
+                                items: store.availableBranches.map { ComposerDropdownOption(id: $0, title: $0) },
+                                emptyMessage: localized("No branches found.", locale: locale),
+                                placeholder: localized("Search branches", locale: locale),
                             isSearchable: false,
                             direction: .up,
                             menuWidth: 240,
@@ -74,7 +75,7 @@ struct ComposerView: View {
                                     VStack(spacing: 8) {
                                         Divider()
 
-                                        Button("Create Branch...") {
+                                         Button(localized("Create Branch...", locale: locale)) {
                                             newBranchName = ""
                                             isCreatingBranch = true
                                         }
@@ -91,7 +92,7 @@ struct ComposerView: View {
                                 await store.initializeGitRepository()
                             }
                         }) {
-                            Text("Create Git Repository")
+                            Text(localized("Create Git Repository", locale: locale))
                                 .font(.neoMonoSmall)
                                 .foregroundStyle(NeoCodeTheme.textPrimary)
                                 .padding(.horizontal, 12)
@@ -121,19 +122,19 @@ struct ComposerView: View {
                 }
             }
         }
-        .alert("Create Branch", isPresented: $isCreatingBranch) {
-            TextField("Branch name", text: $newBranchName)
+        .alert(localized("Create Branch", locale: locale), isPresented: $isCreatingBranch) {
+            TextField(localized("Branch name", locale: locale), text: $newBranchName)
                 .neoWritingToolsDisabled()
-            Button("Cancel", role: .cancel) {
+            Button(localized("Cancel", locale: locale), role: .cancel) {
                 newBranchName = ""
             }
-            Button("Create") {
+            Button(localized("Create", locale: locale)) {
                 Task {
                     await store.createBranch(named: newBranchName)
                 }
             }
         } message: {
-            Text("Create a new branch for this session.")
+            Text(localized("Create a new branch for this session.", locale: locale))
         }
         .onChange(of: text) { _, newValue in
             if newValue.isEmpty {
@@ -156,11 +157,11 @@ struct ComposerView: View {
                 }
             }
 
-            GrowingTextView(
-                text: $text,
-                measuredHeight: $textViewHeight,
-                selectionRequest: $selectionRequest,
-                placeholder: "Build me a $1M SaaS. Make no mistakes.",
+                GrowingTextView(
+                    text: $text,
+                    measuredHeight: $textViewHeight,
+                    selectionRequest: $selectionRequest,
+                    placeholder: localized("Build me a $1M SaaS. Make no mistakes.", locale: locale),
                 projectPath: store.selectedProject?.path,
                 sendKeyBehavior: store.appSettings.general.sendKeyBehavior,
                 onPrimaryAction: handlePrimaryAction,
@@ -197,20 +198,20 @@ struct ComposerView: View {
                                 .font(.system(size: 14, weight: .medium))
                                 .frame(width: 16, height: 16)
 
-                            Text("Attach Files...")
+                            Text(localized("Attach Files...", locale: locale))
                                 .font(.neoAction)
                                 .lineLimit(1)
                         }
                     }
                 }
-                .accessibilityLabel("More actions")
+                .accessibilityLabel(localized("More actions", locale: locale))
 
                 NeoCodeSelect(
-                    title: store.selectedModel?.title ?? "Select model",
+                    title: store.selectedModel?.title ?? localized("Select model", locale: locale),
                     selectedID: store.selectedModelID,
                     items: store.sortedAvailableModels,
-                    emptyMessage: "No models found.",
-                    placeholder: "Search models",
+                    emptyMessage: localized("No models found.", locale: locale),
+                    placeholder: localized("Search models", locale: locale),
                     isSearchable: true,
                     direction: .up,
                     menuWidth: 320,
@@ -242,7 +243,7 @@ struct ComposerView: View {
                                 .frame(width: 24, height: 24)
                         }
                         .buttonStyle(.plain)
-                        .neoTooltip(isFavorited ? "Remove from favorites" : "Add to favorites")
+                        .neoTooltip(isFavorited ? localized("Remove from favorites", locale: locale) : localized("Add to favorites", locale: locale))
                     }
                 } searchableText: { model in
                     [model.title, model.providerID, model.modelID]
@@ -252,11 +253,11 @@ struct ComposerView: View {
                 }
 
                 NeoCodeSelect(
-                    title: store.selectedAgent.isEmpty ? "Agent" : store.displayAgentName(store.selectedAgent),
+                    title: store.selectedAgent.isEmpty ? localized("Agent", locale: locale) : store.displayAgentName(store.selectedAgent),
                     selectedID: store.selectedAgent.isEmpty ? nil : store.selectedAgent,
                     items: store.availableAgents.map { ComposerDropdownOption(id: $0, title: store.displayAgentName($0)) },
-                    emptyMessage: "No agents available.",
-                    placeholder: "Search agents",
+                    emptyMessage: localized("No agents available.", locale: locale),
+                    placeholder: localized("Search agents", locale: locale),
                     isSearchable: false,
                     direction: .up,
                     menuWidth: 220
@@ -271,12 +272,12 @@ struct ComposerView: View {
                 }
 
                 if !store.availableThinkingLevels.isEmpty {
-                    NeoCodeSelect(
-                        title: store.selectedThinkingLevel ?? "Reasoning",
-                        selectedID: store.selectedThinkingLevel,
-                        items: store.availableThinkingLevels.map { ComposerDropdownOption(id: $0, title: $0) },
-                        emptyMessage: "No variants available.",
-                        placeholder: "Search reasoning",
+                NeoCodeSelect(
+                    title: store.selectedThinkingLevel ?? localized("Reasoning", locale: locale),
+                    selectedID: store.selectedThinkingLevel,
+                    items: store.availableThinkingLevels.map { ComposerDropdownOption(id: $0, title: $0) },
+                    emptyMessage: localized("No variants available.", locale: locale),
+                    placeholder: localized("Search reasoning", locale: locale),
                         isSearchable: false,
                         direction: .up,
                         menuWidth: 220
@@ -376,16 +377,16 @@ struct ComposerView: View {
 
     private var primaryActionHelp: String {
         if isStopMode {
-            return "Stop current response"
+            return localized("Stop current response", locale: locale)
         }
         if store.selectedSession?.status.isActive == true {
-            return "Queue message"
+            return localized("Queue message", locale: locale)
         }
         switch store.appSettings.general.sendKeyBehavior {
         case .returnKey:
-            return "Send message (Return)"
+            return localized("Send message (Return)", locale: locale)
         case .commandReturn:
-            return "Send message (Command-Return)"
+            return localized("Send message (Command-Return)", locale: locale)
         }
     }
 
@@ -494,12 +495,13 @@ private struct QueuedMessageCard: View {
     let onEdit: () -> Void
     let onRemove: () -> Void
     let onDeliveryModeChange: (ComposerQueuedMessage.DeliveryMode) -> Void
+    @Environment(\.locale) private var locale
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center, spacing: 10) {
                 Label {
-                    Text(totalCount > 1 ? "Queued \(position) of \(totalCount)" : "Queued")
+                    Text(queuedLabel)
                         .font(.neoMonoSmall)
                         .foregroundStyle(NeoCodeTheme.textSecondary)
                 } icon: {
@@ -511,7 +513,7 @@ private struct QueuedMessageCard: View {
                 Spacer(minLength: 0)
 
                 if allowsSteer {
-                    Button(message.deliveryMode == .steer ? "Steer on" : "Steer") {
+                    Button(localized(message.deliveryMode == .steer ? "Steer on" : "Steer", locale: locale)) {
                         let nextMode: ComposerQueuedMessage.DeliveryMode = message.deliveryMode == .steer ? .sendWhenDone : .steer
                         onDeliveryModeChange(nextMode)
                     }
@@ -530,12 +532,12 @@ private struct QueuedMessageCard: View {
                     )
                 }
 
-                Button("Edit", action: onEdit)
+                Button(localized("Edit", locale: locale), action: onEdit)
                     .buttonStyle(.plain)
                     .font(.neoMonoSmall)
                     .foregroundStyle(NeoCodeTheme.textPrimary)
 
-                Button("Remove", action: onRemove)
+                Button(localized("Remove", locale: locale), action: onRemove)
                     .buttonStyle(.plain)
                     .font(.neoMonoSmall)
                     .foregroundStyle(NeoCodeTheme.warning)
@@ -560,7 +562,10 @@ private struct QueuedMessageCard: View {
                 }
             }
 
-            Text(message.deliveryMode == .steer ? "Will steer the agent at the next possible moment." : "Waiting for the current response to finish before sending.")
+            Text(message.deliveryMode == .steer
+                ? localized("Will steer the agent at the next possible moment.", locale: locale)
+                : localized("Waiting for the current response to finish before sending.", locale: locale)
+            )
                 .font(.neoMonoSmall)
                 .foregroundStyle(NeoCodeTheme.textMuted)
         }
@@ -575,6 +580,18 @@ private struct QueuedMessageCard: View {
                 )
         )
         .shadow(color: NeoCodeTheme.canvas.opacity(0.14), radius: 12, x: 0, y: 8)
+    }
+
+    private var queuedLabel: String {
+        if totalCount > 1 {
+            return String(
+                format: localized("Queued %@ of %@", locale: locale),
+                String(position),
+                String(totalCount)
+            )
+        }
+
+        return localized("Queued", locale: locale)
     }
 }
 
@@ -608,7 +625,7 @@ private enum ComposerActivityState: Equatable {
         }
     }
 
-    var accessibilityValue: String {
+    var accessibilityValueKey: String {
         switch self {
         case .thinking:
             return "Agent is working"
@@ -617,7 +634,7 @@ private enum ComposerActivityState: Equatable {
         }
     }
 
-    var helpText: String {
+    var helpTextKey: String {
         switch self {
         case .thinking:
             return "The agent is still working."
@@ -653,6 +670,7 @@ struct ComposerTextSelectionRequest: Equatable {
 
 private struct ComposerActivityIndicator: View {
     @Environment(AppStore.self) private var store
+    @Environment(\.locale) private var locale
     @State private var chatBeatTrigger = 0
     @State private var chatBeatStrength: CGFloat = 0
     @State private var wakeLevel: CGFloat = 0
@@ -677,10 +695,10 @@ private struct ComposerActivityIndicator: View {
             )
         }
             .frame(width: 40, height: 36)
-            .neoTooltip(state.helpText)
+            .neoTooltip(localized(state.helpTextKey, locale: locale))
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Agent activity")
-            .accessibilityValue(state.accessibilityValue)
+            .accessibilityLabel(localized("Agent activity", locale: locale))
+            .accessibilityValue(localized(state.accessibilityValueKey, locale: locale))
             .onAppear {
                 triggerChatBeat(amplitude: 0.14, wakeBoost: 0.12)
             }
@@ -1360,6 +1378,7 @@ private struct ComposerImageAttachmentChip: View {
     let attachment: ComposerAttachment
     let onRemove: () -> Void
     @State private var isHovering = false
+    @Environment(\.locale) private var locale
 
     private let previewWidth: CGFloat = 80
     private let previewHeight: CGFloat = 64
@@ -1392,7 +1411,7 @@ private struct ComposerImageAttachmentChip: View {
                                 VStack(spacing: 6) {
                                     Image(systemName: "trash")
                                         .font(.system(size: 18, weight: .semibold))
-                                    Text("Remove")
+                                Text(localized("Remove", locale: locale))
                                         .font(.system(size: 11, weight: .semibold))
                                 }
                                 .foregroundStyle(Color.white)
@@ -1400,8 +1419,8 @@ private struct ComposerImageAttachmentChip: View {
                     }
                     .buttonStyle(.plain)
                     .frame(width: previewWidth, height: previewHeight)
-                    .neoTooltip("Remove attachment")
-                    .accessibilityLabel("Remove attachment")
+                    .neoTooltip(localized("Remove attachment", locale: locale))
+                    .accessibilityLabel(localized("Remove attachment", locale: locale))
                     .transition(.opacity)
                 }
             }
@@ -1528,6 +1547,7 @@ struct InlineStatusView: View {
 
 struct EmptyConversationView: View {
     @Environment(AppStore.self) private var store
+    @Environment(\.locale) private var locale
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -1542,13 +1562,13 @@ struct EmptyConversationView: View {
                 .frame(width: 106, height: 100)
 
                 VStack(spacing: 10) {
-                    Text(store.projects.isEmpty ? "Add your first project" : "Start a thread")
+                    Text(store.projects.isEmpty ? localized("Add your first project", locale: locale) : localized("Start a thread", locale: locale))
                         .font(.system(size: 22, weight: .semibold, design: .default))
                         .foregroundStyle(NeoCodeTheme.textPrimary)
 
                     Text(store.projects.isEmpty
-                         ? "Use the project button in the Threads sidebar to add a folder. NeoCode will only show threads for projects you explicitly add."
-                         : "Create a new thread or select one from the sidebar to begin chatting with the OpenCode runtime.")
+                         ? localized("Use the project button in the Threads sidebar to add a folder. NeoCode will only show threads for projects you explicitly add.", locale: locale)
+                         : localized("Create a new thread or select one from the sidebar to begin chatting with the OpenCode runtime.", locale: locale))
                         .font(.neoBody)
                         .foregroundStyle(NeoCodeTheme.textSecondary)
                         .multilineTextAlignment(.center)

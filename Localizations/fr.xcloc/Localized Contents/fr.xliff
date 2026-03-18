@@ -1,0 +1,1362 @@
+<?xml version='1.0' encoding='utf-8'?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:1.2" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="1.2" xsi:schemaLocation="urn:oasis:names:tc:xliff:document:1.2 http://docs.oasis-open.org/xliff/v1.2/os/xliff-core-1.2-strict.xsd">
+  <file original="NeoCode/Localization/Localizable.xcstrings" source-language="en" target-language="fr" datatype="plaintext">
+    <header>
+      <tool tool-id="com.apple.dt.xcode" tool-name="Xcode" tool-version="26.1.1" build-num="17B100" />
+    </header>
+    <body>
+      <trans-unit id="" xml:space="preserve">
+        <source />
+        <target state="translated"></target>
+        <note />
+      </trans-unit>
+      <trans-unit id="#000000" xml:space="preserve">
+        <source>#000000</source>
+        <target state="translated">#000000</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="%@ messages · %@ tokens" xml:space="preserve">
+        <source>%1$@ messages · %2$@ tokens</source>
+        <target state="translated">%1$@ messages · %2$@ jetons</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="%@ of %@ cached" xml:space="preserve">
+        <source>%1$@ of %2$@ cached</source>
+        <target state="translated">%1$@ sur %2$@ mis en cache</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="%@ remaining - %@ used" xml:space="preserve">
+        <source>%1$@ remaining - %2$@ used</source>
+        <target state="translated">%1$@ restants - %2$@ utilisés</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="%@ remaining - %@ used - projected after compaction" xml:space="preserve">
+        <source>%1$@ remaining - %2$@ used - projected after compaction</source>
+        <target state="translated">%1$@ restants - %2$@ utilisés - projetés après compactage</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="%@ sessions" xml:space="preserve">
+        <source>%@ sessions</source>
+        <target state="translated">%@ sessions</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="%@ tokens · %@" xml:space="preserve">
+        <source>%1$@ tokens · %2$@</source>
+        <target state="translated">%1$@ jetons · %2$@</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="%@ user · %@ assistant" xml:space="preserve">
+        <source>%1$@ user · %2$@ assistant</source>
+        <target state="translated">%1$@ utilisateur · %2$@ assistant</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="%@/%@" xml:space="preserve">
+        <source>%1$@/%2$@</source>
+        <target state="translated">%1$@/%2$@</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="%lld" xml:space="preserve">
+        <source>%lld</source>
+        <target state="translated">%lld</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="%lld percent context remaining" xml:space="preserve">
+        <source>%lld percent context remaining</source>
+        <target state="translated">%lld % de contexte restants</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="%lld%% context remaining" xml:space="preserve">
+        <source>%lld%% context remaining</source>
+        <target state="translated">%lld%% de contexte restant</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="+%lld" xml:space="preserve">
+        <source>+%lld</source>
+        <target state="translated">+%lld</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="-%lld" xml:space="preserve">
+        <source>-%lld</source>
+        <target state="translated">-%lld</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="/%@" xml:space="preserve">
+        <source>/%@</source>
+        <target state="translated">/%@</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="7 days" xml:space="preserve">
+        <source>7 days</source>
+        <target state="translated">7 jours</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="30 days" xml:space="preserve">
+        <source>30 days</source>
+        <target state="translated">30 jours</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="90 days" xml:space="preserve">
+        <source>90 days</source>
+        <target state="translated">90 jours</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="A cached view of model mix, token totals, tool usage, and project activity across your tracked OpenCode workspaces." xml:space="preserve">
+        <source>A cached view of model mix, token totals, tool usage, and project activity across your tracked OpenCode workspaces.</source>
+        <target state="translated">Une vue mise en cache du mélange de modèles, des totaux de jetons, de l'utilisation des outils et de l'activité des projets OpenCode suivis.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Accent" xml:space="preserve">
+        <source>Accent</source>
+        <target state="translated">Accent</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Add" xml:space="preserve">
+        <source>Add</source>
+        <note />
+      <target state="translated">Ajouter</target></trans-unit>
+      <trans-unit id="Add project" xml:space="preserve">
+        <source>Add project</source>
+        <note />
+      <target state="translated">Ajouter un projet</target></trans-unit>
+      <trans-unit id="Add your first project" xml:space="preserve">
+        <source>Add your first project</source>
+        <note />
+      <target state="translated">Ajoutez votre premier projet</target></trans-unit>
+      <trans-unit id="Adjust cursor behavior and base sizing. Font families now live with each theme profile above." xml:space="preserve">
+        <source>Adjust cursor behavior and base sizing. Font families now live with each theme profile above.</source>
+        <target state="translated">Ajuste le comportement du curseur et la taille de base. Les familles de polices sont désormais définies dans chaque profil de thème ci-dessus.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Adjusts separation between surfaces, borders, and low-emphasis text." xml:space="preserve">
+        <source>Adjusts separation between surfaces, borders, and low-emphasis text.</source>
+        <target state="translated">Ajuste la séparation entre les surfaces, les bordures et les textes à faible emphase.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Affected patterns" xml:space="preserve">
+        <source>Affected patterns</source>
+        <target state="translated">Modèles affectés</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Agent" xml:space="preserve">
+        <source>Agent</source>
+        <target state="translated">Agent</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Agent activity" xml:space="preserve">
+        <source>Agent activity</source>
+        <target state="translated">Activité de l'agent</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="All time" xml:space="preserve">
+        <source>All time</source>
+        <note />
+      <target state="translated">Tout le temps</target></trans-unit>
+      <trans-unit id="Allow always" xml:space="preserve">
+        <source>Allow always</source>
+        <target state="translated">Toujours autoriser</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Allow once" xml:space="preserve">
+        <source>Allow once</source>
+        <target state="translated">Autoriser une fois</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Allowed forever if approved" xml:space="preserve">
+        <source>Allowed forever if approved</source>
+        <target state="translated">Autorisé indéfiniment si approuvé</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Appearance" xml:space="preserve">
+        <source>Appearance</source>
+        <note />
+      <target state="translated">Apparence</target></trans-unit>
+      <trans-unit id="Apply available update" xml:space="preserve">
+        <source>Apply available update</source>
+        <note />
+      <target state="translated">Appliquer la mise à jour disponible</target></trans-unit>
+      <trans-unit id="Ask Sparkle to validate the newest available release right now." xml:space="preserve">
+        <source>Ask Sparkle to validate the newest available release right now.</source>
+        <target state="translated">Demandez à Sparkle de valider immédiatement la dernière version disponible.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Ask macOS to keep the system awake while NeoCode is actively processing a response." xml:space="preserve">
+        <source>Ask macOS to keep the system awake while NeoCode is actively processing a response.</source>
+        <target state="translated">Demandez à macOS de rester éveillé pendant que NeoCode traite une réponse.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Attach Files..." xml:space="preserve">
+        <source>Attach Files...</source>
+        <target state="translated">Joindre des fichiers...</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Auto detect" xml:space="preserve">
+        <source>Auto detect</source>
+        <note />
+      <target state="translated">Détection automatique</target></trans-unit>
+      <trans-unit id="Automatic checks" xml:space="preserve">
+        <source>Automatic checks</source>
+        <note />
+      <target state="translated">Vérifications automatiques</target></trans-unit>
+      <trans-unit id="Available version" xml:space="preserve">
+        <source>Available version</source>
+        <target state="translated">Version disponible</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Back" xml:space="preserve">
+        <source>Back</source>
+        <note />
+      <target state="translated">Retour</target></trans-unit>
+      <trans-unit id="Back to bottom" xml:space="preserve">
+        <source>Back to bottom</source>
+        <target state="translated">Retour en bas</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Back to workspace" xml:space="preserve">
+        <source>Back to workspace</source>
+        <note />
+      <target state="translated">Retour à l'espace de travail</target></trans-unit>
+      <trans-unit id="Background" xml:space="preserve">
+        <source>Background</source>
+        <target state="translated">Arrière-plan</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Base surface color used to build canvas, panels, and cards." xml:space="preserve">
+        <source>Base surface color used to build canvas, panels, and cards.</source>
+        <target state="translated">Couleur de surface de base utilisée pour construire la toile, les panneaux et les cartes.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Branch" xml:space="preserve">
+        <source>Branch</source>
+        <note />
+      <target state="translated">Branche</target></trans-unit>
+      <trans-unit id="Branch name" xml:space="preserve">
+        <source>Branch name</source>
+        <target state="translated">Nom de la branche</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Build something cool" xml:space="preserve">
+        <source>Build something cool</source>
+        <target state="translated">Créez quelque chose de sympa</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Cache" xml:space="preserve">
+        <source>Cache</source>
+        <target state="translated">Cache</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Cancel" xml:space="preserve">
+        <source>Cancel</source>
+        <note />
+      <target state="translated">Annuler</target></trans-unit>
+      <trans-unit id="Change the selected agent by name." xml:space="preserve">
+        <source>Change the selected agent by name.</source>
+        <target state="translated">Changez l'agent sélectionné par nom.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Change the selected git branch." xml:space="preserve">
+        <source>Change the selected git branch.</source>
+        <target state="translated">Changez la branche Git sélectionnée.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Change the selected model by name, provider, or model id." xml:space="preserve">
+        <source>Change the selected model by name, provider, or model id.</source>
+        <target state="translated">Changez le modèle sélectionné par nom, fournisseur ou identifiant du modèle.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Changes" xml:space="preserve">
+        <source>Changes</source>
+        <note />
+      <target state="translated">Modifications</target></trans-unit>
+      <trans-unit id="Changes the base size used across labels, headers, and controls." xml:space="preserve">
+        <source>Changes the base size used across labels, headers, and controls.</source>
+        <target state="translated">Modifie la taille de base utilisée pour les étiquettes, les en-têtes et les contrôles.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Changes transcript, diff, and code-preview sizing throughout the app." xml:space="preserve">
+        <source>Changes transcript, diff, and code-preview sizing throughout the app.</source>
+        <target state="translated">Modifie les tailles de la transcription, des diffs et des aperçus de code dans l'application.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Check manually" xml:space="preserve">
+        <source>Check manually</source>
+        <target state="translated">Vérifier manuellement</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Choose how NeoCode opens and which app should handle projects before a workspace-specific override takes over." xml:space="preserve">
+        <source>Choose how NeoCode opens and which app should handle projects before a workspace-specific override takes over.</source>
+        <target state="translated">Choisissez comment NeoCode s'ouvre et quelle application doit gérer les projets avant qu'une préférence par espace de travail ne prenne le relais.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Choose whether NeoCode follows the system language or always uses a specific app language." xml:space="preserve">
+        <source>Choose whether NeoCode follows the system language or always uses a specific app language.</source>
+        <note />
+      <target state="translated">Choisissez si NeoCode suit la langue du système ou utilise toujours une langue d'application spécifique.</target></trans-unit>
+      <trans-unit id="Choose whether Return sends immediately or only Command-Return sends while Return inserts a newline." xml:space="preserve">
+        <source>Choose whether Return sends immediately or only Command-Return sends while Return inserts a newline.</source>
+        <target state="translated">Choisissez si Return envoie immédiatement ou si seul Command-Return envoie pendant que Return insère un saut de ligne.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Code font" xml:space="preserve">
+        <source>Code font</source>
+        <note />
+      <target state="translated">Police de code</target></trans-unit>
+      <trans-unit id="Code font size" xml:space="preserve">
+        <source>Code font size</source>
+        <note />
+      <target state="translated">Taille de police de code</target></trans-unit>
+      <trans-unit id="Collapse project" xml:space="preserve">
+        <source>Collapse project</source>
+        <target state="translated">Réduire le projet</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Command-Return" xml:space="preserve">
+        <source>Command-Return</source>
+        <target state="translated">Commande-Retour</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Commit" xml:space="preserve">
+        <source>Commit</source>
+        <note />
+      <target state="translated">Commit</target></trans-unit>
+      <trans-unit id="Commit and create PR" xml:space="preserve">
+        <source>Commit and create PR</source>
+        <note />
+      <target state="translated">Commit et créer une PR</target></trans-unit>
+      <trans-unit id="Commit and push" xml:space="preserve">
+        <source>Commit and push</source>
+        <note />
+      <target state="translated">Commit et push</target></trans-unit>
+      <trans-unit id="Commit message" xml:space="preserve">
+        <source>Commit message</source>
+        <note />
+      <target state="translated">Message de commit</target></trans-unit>
+      <trans-unit id="Commit your changes" xml:space="preserve">
+        <source>Commit your changes</source>
+        <note />
+      <target state="translated">Commit vos modifications</target></trans-unit>
+      <trans-unit id="Compact" xml:space="preserve">
+        <source>Compact</source>
+        <note />
+      <target state="translated">Compacter</target></trans-unit>
+      <trans-unit id="Compact Session" xml:space="preserve">
+        <source>Compact Session</source>
+        <target state="translated">Session compacte</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Compaction summary" xml:space="preserve">
+        <source>Compaction summary</source>
+        <target state="translated">Résumé du compactage</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Composer" xml:space="preserve">
+        <source>Composer</source>
+        <note />
+      <target state="translated">Compositeur</target></trans-unit>
+      <trans-unit id="Confirm" xml:space="preserve">
+        <source>Confirm</source>
+        <target state="translated">Confirmer</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Context limit" xml:space="preserve">
+        <source>Context limit</source>
+        <target state="translated">Limite de contexte</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Context limit unavailable" xml:space="preserve">
+        <source>Context limit unavailable</source>
+        <target state="translated">Limite de contexte indisponible</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Context remaining" xml:space="preserve">
+        <source>Context remaining</source>
+        <target state="translated">Contexte restant</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Context used" xml:space="preserve">
+        <source>Context used</source>
+        <target state="translated">Contexte utilisé</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Continue" xml:space="preserve">
+        <source>Continue</source>
+        <target state="translated">Continuer</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Control whether NeoCode should remember safety-related per-thread behavior between launches." xml:space="preserve">
+        <source>Control whether NeoCode should remember safety-related per-thread behavior between launches.</source>
+        <target state="translated">Contrôlez si NeoCode doit mémoriser les comportements liés à la sécurité par conversation entre les lancements.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Copy theme" xml:space="preserve">
+        <source>Copy theme</source>
+        <note />
+      <target state="translated">Copier le thème</target></trans-unit>
+      <trans-unit id="Cost" xml:space="preserve">
+        <source>Cost</source>
+        <target state="translated">Coût</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Could not import theme JSON." xml:space="preserve">
+        <source>Could not import theme JSON.</source>
+        <note />
+      <target state="translated">Impossible d'importer le JSON du thème.</target></trans-unit>
+      <trans-unit id="Could not serialize the theme as JSON." xml:space="preserve">
+        <source>Could not serialize the theme as JSON.</source>
+        <note />
+      <target state="translated">Impossible de sérialiser le thème en JSON.</target></trans-unit>
+      <trans-unit id="Create" xml:space="preserve">
+        <source>Create</source>
+        <target state="translated">Créer</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Create Branch" xml:space="preserve">
+        <source>Create Branch</source>
+        <target state="translated">Créer une branche</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Create Branch..." xml:space="preserve">
+        <source>Create Branch...</source>
+        <target state="translated">Créer une branche...</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Create Git Repository" xml:space="preserve">
+        <source>Create Git Repository</source>
+        <target state="translated">Créer un dépôt Git</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Create PR" xml:space="preserve">
+        <source>Create PR</source>
+        <target state="translated">Créer une PR</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Create a new branch for this session." xml:space="preserve">
+        <source>Create a new branch for this session.</source>
+        <target state="translated">Créez une nouvelle branche pour cette session.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Create a new session. Add text after it to seed the new draft." xml:space="preserve">
+        <source>Create a new session. Add text after it to seed the new draft.</source>
+        <target state="translated">Créez une nouvelle session. Ajoutez du texte après pour amorcer le nouveau brouillon.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Create a new thread or select one from the sidebar to begin chatting with the OpenCode runtime." xml:space="preserve">
+        <source>Create a new thread or select one from the sidebar to begin chatting with the OpenCode runtime.</source>
+        <target state="translated">Créez une nouvelle conversation ou sélectionnez-en une dans la barre latérale pour commencer à discuter avec le runtime OpenCode.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Current version" xml:space="preserve">
+        <source>Current version</source>
+        <note />
+      <target state="translated">Version actuelle</target></trans-unit>
+      <trans-unit id="Custom" xml:space="preserve">
+        <source>Custom</source>
+        <target state="translated">Personnalisé</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Dark" xml:space="preserve">
+        <source>Dark</source>
+        <note />
+      <target state="translated">Sombre</target></trans-unit>
+      <trans-unit id="Dark theme" xml:space="preserve">
+        <source>Dark theme</source>
+        <note />
+      <target state="translated">Thème sombre</target></trans-unit>
+      <trans-unit id="Dashboard" xml:space="preserve">
+        <source>Dashboard</source>
+        <note />
+      <target state="translated">Tableau de bord</target></trans-unit>
+      <trans-unit id="Dashboard range" xml:space="preserve">
+        <source>Dashboard range</source>
+        <target state="translated">Plage du tableau de bord</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Delete" xml:space="preserve">
+        <source>Delete</source>
+        <note />
+      <target state="translated">Supprimer</target></trans-unit>
+      <trans-unit id="Deny" xml:space="preserve">
+        <source>Deny</source>
+        <target state="translated">Refuser</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Dismiss" xml:space="preserve">
+        <source>Dismiss</source>
+        <target state="translated">Ignorer</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Download the new build now or finish installing the copy Sparkle has already staged." xml:space="preserve">
+        <source>Download the new build now or finish installing the copy Sparkle has already staged.</source>
+        <target state="translated">Téléchargez la nouvelle build maintenant ou terminez l'installation de la copie déjà préparée par Sparkle.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Edit" xml:space="preserve">
+        <source>Edit</source>
+        <target state="translated">Modifier</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="English" xml:space="preserve">
+        <source>English</source>
+        <target state="translated">Anglais</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Enter a commit message" xml:space="preserve">
+        <source>Enter a commit message</source>
+        <note />
+      <target state="translated">Entrez un message de commit</target></trans-unit>
+      <trans-unit id="Expand project" xml:space="preserve">
+        <source>Expand project</source>
+        <note />
+      <target state="translated">Développer le projet</target></trans-unit>
+      <trans-unit id="File changes that will be reverted" xml:space="preserve">
+        <source>File changes that will be reverted</source>
+        <target state="translated">Modifications de fichiers qui seront annulées</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Files" xml:space="preserve">
+        <source>Files</source>
+        <target state="translated">Fichiers</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Filter range" xml:space="preserve">
+        <source>Filter range</source>
+        <target state="translated">Plage de filtre</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Foreground" xml:space="preserve">
+        <source>Foreground</source>
+        <note />
+      <target state="translated">Premier plan</target></trans-unit>
+      <trans-unit id="French" xml:space="preserve">
+        <source>French</source>
+        <target state="translated">Français</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="General" xml:space="preserve">
+        <source>General</source>
+        <note />
+      <target state="translated">Général</target></trans-unit>
+      <trans-unit id="Generating compacted session summary..." xml:space="preserve">
+        <source>Generating compacted session summary...</source>
+        <target state="translated">Génération du résumé de session compactée...</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Give this thread a new name." xml:space="preserve">
+        <source>Give this thread a new name.</source>
+        <target state="translated">Donnez un nouveau nom à cette conversation.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Import" xml:space="preserve">
+        <source>Import</source>
+        <target state="translated">Importer</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Include unstaged" xml:space="preserve">
+        <source>Include unstaged</source>
+        <note />
+      <target state="translated">Inclure non préparés</target></trans-unit>
+      <trans-unit id="Input" xml:space="preserve">
+        <source>Input</source>
+        <target state="translated">Entrée</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Interface" xml:space="preserve">
+        <source>Interface</source>
+        <target state="translated">Interface</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Italian" xml:space="preserve">
+        <source>Italian</source>
+        <target state="translated">Italien</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Keep long-running work alive and optionally notify you when NeoCode finishes or needs your input." xml:space="preserve">
+        <source>Keep long-running work alive and optionally notify you when NeoCode finishes or needs your input.</source>
+        <target state="translated">Maintenez les tâches longues en cours et, si nécessaire, notifiez-vous lorsque NeoCode termine ou a besoin de votre intervention.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Keep unfinished prompt text tied to each thread so you can move around the app without losing context." xml:space="preserve">
+        <source>Keep unfinished prompt text tied to each thread so you can move around the app without losing context.</source>
+        <target state="translated">Conservez le texte de prompt inachevé pour chaque conversation afin de naviguer dans l'app sans perdre le contexte.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Language" xml:space="preserve">
+        <source>Language</source>
+        <note />
+      <target state="translated">Langue</target></trans-unit>
+      <trans-unit id="Last 7 days" xml:space="preserve">
+        <source>Last 7 days</source>
+        <note />
+      <target state="translated">7 derniers jours</target></trans-unit>
+      <trans-unit id="Last 30 days" xml:space="preserve">
+        <source>Last 30 days</source>
+        <note />
+      <target state="translated">30 derniers jours</target></trans-unit>
+      <trans-unit id="Last 90 days" xml:space="preserve">
+        <source>Last 90 days</source>
+        <note />
+      <target state="translated">90 derniers jours</target></trans-unit>
+      <trans-unit id="Last activity" xml:space="preserve">
+        <source>Last activity</source>
+        <note />
+      <target state="translated">Dernière activité</target></trans-unit>
+      <trans-unit id="Last activity %@" xml:space="preserve">
+        <source>Last activity %@</source>
+        <target state="translated">Dernière activité %@</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Last checked" xml:space="preserve">
+        <source>Last checked</source>
+        <note />
+      <target state="translated">Dernière vérification</target></trans-unit>
+      <trans-unit id="Last request" xml:space="preserve">
+        <source>Last request</source>
+        <target state="translated">Dernière requête</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Last workspace" xml:space="preserve">
+        <source>Last workspace</source>
+        <note />
+      <target state="translated">Dernier espace de travail</target></trans-unit>
+      <trans-unit id="Let Sparkle keep an eye on the release feed and raise the blue titlebar control when a newer signed build appears." xml:space="preserve">
+        <source>Let Sparkle keep an eye on the release feed and raise the blue titlebar control when a newer signed build appears.</source>
+        <target state="translated">Laissez Sparkle surveiller le flux de releases et relever le contrôle bleu de la barre de titre lorsqu'une build signée plus récente apparaît.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Light" xml:space="preserve">
+        <source>Light</source>
+        <note />
+      <target state="translated">Clair</target></trans-unit>
+      <trans-unit id="Light theme" xml:space="preserve">
+        <source>Light theme</source>
+        <note />
+      <target state="translated">Thème clair</target></trans-unit>
+      <trans-unit id="Load older messages" xml:space="preserve">
+        <source>Load older messages</source>
+        <target state="translated">Charger les messages plus anciens</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Loading older messages..." xml:space="preserve">
+        <source>Loading older messages...</source>
+        <target state="translated">Chargement des messages plus anciens...</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Loading prompt..." xml:space="preserve">
+        <source>Loading prompt...</source>
+        <target state="translated">Chargement du prompt...</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Low-glare palette for the main NeoCode shell." xml:space="preserve">
+        <source>Low-glare palette for the main NeoCode shell.</source>
+        <target state="translated">Palette à faible éblouissement pour le shell principal de NeoCode.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Messages" xml:space="preserve">
+        <source>Messages</source>
+        <target state="translated">Messages</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Model" xml:space="preserve">
+        <source>Model</source>
+        <note />
+      <target state="translated">Modèle</target></trans-unit>
+      <trans-unit id="Model usage distribution across categories" xml:space="preserve">
+        <source>Model usage distribution across categories</source>
+        <target state="translated">Répartition de l'utilisation des modèles par catégorie</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="More actions" xml:space="preserve">
+        <source>More actions</source>
+        <target state="translated">Plus d'actions</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Most Used Models" xml:space="preserve">
+        <source>Most Used Models</source>
+        <target state="translated">Modèles les plus utilisés</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Most frequently used tools" xml:space="preserve">
+        <source>Most frequently used tools</source>
+        <target state="translated">Outils les plus utilisés</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="NeoCode checks signed GitHub releases in the background and surfaces new versions in the titlebar instead of interrupting your flow with a modal window." xml:space="preserve">
+        <source>NeoCode checks signed GitHub releases in the background and surfaces new versions in the titlebar instead of interrupting your flow with a modal window.</source>
+        <target state="translated">NeoCode vérifie en arrière-plan les releases signées GitHub et affiche les nouvelles versions dans la barre de titre au lieu d'interrompre votre flux avec une fenêtre modale.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="NeoCode is scanning your tracked projects and building a reusable usage cache. As soon as the first summaries land, they will appear here." xml:space="preserve">
+        <source>NeoCode is scanning your tracked projects and building a reusable usage cache. As soon as the first summaries land, they will appear here.</source>
+        <target state="translated">NeoCode analyse vos projets suivis et construit un cache d'utilisation réutilisable. Dès l'arrivée des premiers résumés, ils apparaîtront ici.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="NeoCode keeps a historical usage cache so the dashboard can load instantly on future launches and only refresh the sessions that changed." xml:space="preserve">
+        <source>NeoCode keeps a historical usage cache so the dashboard can load instantly on future launches and only refresh the sessions that changed.</source>
+        <target state="translated">NeoCode conserve un cache d'utilisation historique pour que le tableau de bord se charge instantanément lors des prochains lancements et ne recharge que les sessions modifiées.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Never" xml:space="preserve">
+        <source>Never</source>
+        <note />
+      <target state="translated">Jamais</target></trans-unit>
+      <trans-unit id="Next steps" xml:space="preserve">
+        <source>Next steps</source>
+        <note />
+      <target state="translated">Prochaines étapes</target></trans-unit>
+      <trans-unit id="No activity" xml:space="preserve">
+        <source>No activity</source>
+        <note />
+      <target state="translated">Aucune activité</target></trans-unit>
+      <trans-unit id="No agents available." xml:space="preserve">
+        <source>No agents available.</source>
+        <target state="translated">Aucun agent disponible.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="No apps found." xml:space="preserve">
+        <source>No apps found.</source>
+        <note />
+      <target state="translated">Aucune application trouvée.</target></trans-unit>
+      <trans-unit id="No assistant usage has been cached yet." xml:space="preserve">
+        <source>No assistant usage has been cached yet.</source>
+        <target state="translated">Aucune utilisation de l'assistant n'a encore été mise en cache.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="No branches found." xml:space="preserve">
+        <source>No branches found.</source>
+        <target state="translated">Aucune branche trouvée.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="No fonts found." xml:space="preserve">
+        <source>No fonts found.</source>
+        <target state="translated">Aucune police trouvée.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="No languages found." xml:space="preserve">
+        <source>No languages found.</source>
+        <note />
+      <target state="translated">Aucune langue trouvée.</target></trans-unit>
+      <trans-unit id="No matching files." xml:space="preserve">
+        <source>No matching files.</source>
+        <target state="translated">Aucun fichier correspondant.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="No matching slash commands." xml:space="preserve">
+        <source>No matching slash commands.</source>
+        <target state="translated">Aucune commande slash correspondante.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="No models found." xml:space="preserve">
+        <source>No models found.</source>
+        <target state="translated">Aucun modèle trouvé.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="No monospaced fonts found." xml:space="preserve">
+        <source>No monospaced fonts found.</source>
+        <note />
+      <target state="translated">Aucune police monospace trouvée.</target></trans-unit>
+      <trans-unit id="No projects yet" xml:space="preserve">
+        <source>No projects yet</source>
+        <note />
+      <target state="translated">Aucun projet encore</target></trans-unit>
+      <trans-unit id="No ranges available." xml:space="preserve">
+        <source>No ranges available.</source>
+        <note />
+      <target state="translated">Aucune plage disponible.</target></trans-unit>
+      <trans-unit id="No staged files are ready to commit." xml:space="preserve">
+        <source>No staged files are ready to commit.</source>
+        <note />
+      <target state="translated">Aucun fichier préparé n'est prêt à être commité.</target></trans-unit>
+      <trans-unit id="No tool activity has been cached yet." xml:space="preserve">
+        <source>No tool activity has been cached yet.</source>
+        <note />
+      <target state="translated">Aucune activité d'outil n'a encore été mise en cache.</target></trans-unit>
+      <trans-unit id="No tracked projects are ready yet." xml:space="preserve">
+        <source>No tracked projects are ready yet.</source>
+        <note />
+      <target state="translated">Aucun projet suivi n'est encore prêt.</target></trans-unit>
+      <trans-unit id="No variants available." xml:space="preserve">
+        <source>No variants available.</source>
+        <target state="translated">Aucune variante disponible.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Notify when a response finishes" xml:space="preserve">
+        <source>Notify when a response finishes</source>
+        <note />
+      <target state="translated">Notifier quand une réponse se termine</target></trans-unit>
+      <trans-unit id="Notify when input is required" xml:space="preserve">
+        <source>Notify when input is required</source>
+        <note />
+      <target state="translated">Notifier quand une entrée est requise</target></trans-unit>
+      <trans-unit id="Off" xml:space="preserve">
+        <source>Off</source>
+        <target state="translated">Désactivé</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="On" xml:space="preserve">
+        <source>On</source>
+        <target state="translated">Activé</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="On launch" xml:space="preserve">
+        <source>On launch</source>
+        <note />
+      <target state="translated">Au lancement</target></trans-unit>
+      <trans-unit id="Open Project" xml:space="preserve">
+        <source>Open Project</source>
+        <target state="translated">Ouvrir le projet</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Open Workspace" xml:space="preserve">
+        <source>Open Workspace</source>
+        <target state="translated">Ouvrir l'espace de travail</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Open project with" xml:space="preserve">
+        <source>Open project with</source>
+        <note />
+      <target state="translated">Ouvrir le projet avec</target></trans-unit>
+      <trans-unit id="Open the current project in the preferred workspace tool." xml:space="preserve">
+        <source>Open the current project in the preferred workspace tool.</source>
+        <target state="translated">Ouvrez le projet actuel dans l'outil d'espace de travail préféré.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Output" xml:space="preserve">
+        <source>Output</source>
+        <target state="translated">Sortie</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Per-project activity summary" xml:space="preserve">
+        <source>Per-project activity summary</source>
+        <target state="translated">Résumé d'activité par projet</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Permission required" xml:space="preserve">
+        <source>Permission required</source>
+        <target state="translated">Autorisation requise</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Persist YOLO mode for each thread so permission auto-approval comes back the next time you open that workspace." xml:space="preserve">
+        <source>Persist YOLO mode for each thread so permission auto-approval comes back the next time you open that workspace.</source>
+        <target state="translated">Conservez le mode YOLO par conversation afin que l'approbation automatique des permissions revienne la prochaine fois que vous ouvrirez cet espace de travail.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Pick a presentation mode, then tune the light and dark palettes independently." xml:space="preserve">
+        <source>Pick a presentation mode, then tune the light and dark palettes independently.</source>
+        <target state="translated">Choisissez un mode de présentation, puis ajustez indépendamment les palettes claire et sombre.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Portuguese" xml:space="preserve">
+        <source>Portuguese</source>
+        <target state="translated">Portugais</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Power &amp; notifications" xml:space="preserve">
+        <source>Power &amp; notifications</source>
+        <target state="translated">Alimentation et notifications</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Prefer arrow-to-hand pointer transitions over the default app cursor." xml:space="preserve">
+        <source>Prefer arrow-to-hand pointer transitions over the default app cursor.</source>
+        <target state="translated">Préférez les transitions curseur flèche-vers-main plutôt que le curseur par défaut de l'application.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Preparing the dashboard" xml:space="preserve">
+        <source>Preparing the dashboard</source>
+        <note />
+      <target state="translated">Préparation du tableau de bord</target></trans-unit>
+      <trans-unit id="Prevent Mac sleep while responses are running" xml:space="preserve">
+        <source>Prevent Mac sleep while responses are running</source>
+        <note />
+      <target state="translated">Empêcher la mise en veille du Mac pendant l'exécution des réponses</target></trans-unit>
+      <trans-unit id="Primary text tone for readable content across the shell." xml:space="preserve">
+        <source>Primary text tone for readable content across the shell.</source>
+        <target state="translated">Ton du texte principal pour un contenu lisible dans tout le shell.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Primary tint used for controls, highlights, and actions." xml:space="preserve">
+        <source>Primary tint used for controls, highlights, and actions.</source>
+        <target state="translated">Teinte principale utilisée pour les contrôles, les surlignages et les actions.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Projects" xml:space="preserve">
+        <source>Projects</source>
+        <note />
+      <target state="translated">Projets</target></trans-unit>
+      <trans-unit id="Prompt" xml:space="preserve">
+        <source>Prompt</source>
+        <note />
+      <target state="translated">Prompt</target></trans-unit>
+      <trans-unit id="Provider" xml:space="preserve">
+        <source>Provider</source>
+        <target state="translated">Fournisseur</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Push" xml:space="preserve">
+        <source>Push</source>
+        <target state="translated">Push</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Question" xml:space="preserve">
+        <source>Question</source>
+        <target state="translated">Question</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Questions" xml:space="preserve">
+        <source>Questions</source>
+        <target state="translated">Questions</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Queued" xml:space="preserve">
+        <source>Queued</source>
+        <target state="translated">En attente</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Queued %lld of %lld" xml:space="preserve">
+        <source>Queued %1$lld of %2$lld</source>
+        <target state="translated">En attente %1$lld sur %2$lld</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Ranked by assistant message count" xml:space="preserve">
+        <source>Ranked by assistant message count</source>
+        <target state="translated">Classés par nombre de messages de l'assistant</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Reasoning" xml:space="preserve">
+        <source>Reasoning</source>
+        <note />
+      <target state="translated">Raisonnement</target></trans-unit>
+      <trans-unit id="Refresh Threads" xml:space="preserve">
+        <source>Refresh Threads</source>
+        <target state="translated">Actualiser les conversations</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Remember YOLO mode per thread" xml:space="preserve">
+        <source>Remember YOLO mode per thread</source>
+        <target state="translated">Mémoriser le mode YOLO par conversation</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Remove" xml:space="preserve">
+        <source>Remove</source>
+        <target state="translated">Supprimer</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Remove attachment" xml:space="preserve">
+        <source>Remove attachment</source>
+        <target state="translated">Supprimer la pièce jointe</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Rename" xml:space="preserve">
+        <source>Rename</source>
+        <note />
+      <target state="translated">Renommer</target></trans-unit>
+      <trans-unit id="Rename Thread" xml:space="preserve">
+        <source>Rename Thread</source>
+        <note />
+      <target state="translated">Renommer la conversation</target></trans-unit>
+      <trans-unit id="Restore drafts when reopening threads" xml:space="preserve">
+        <source>Restore drafts when reopening threads</source>
+        <note />
+      <target state="translated">Restaurer les brouillons lors de la réouverture des conversations</target></trans-unit>
+      <trans-unit id="Return" xml:space="preserve">
+        <source>Return</source>
+        <target state="translated">Retour</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Reveal in Finder" xml:space="preserve">
+        <source>Reveal in Finder</source>
+        <target state="translated">Afficher dans le Finder</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Revert" xml:space="preserve">
+        <source>Revert</source>
+        <target state="translated">Revenir</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Revert to this point" xml:space="preserve">
+        <source>Revert to this point</source>
+        <target state="translated">Revenir à ce point</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Reverting..." xml:space="preserve">
+        <source>Reverting...</source>
+        <target state="translated">Restauration en cours...</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Review answers" xml:space="preserve">
+        <source>Review answers</source>
+        <target state="translated">Revoir les réponses</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Save" xml:space="preserve">
+        <source>Save</source>
+        <note />
+      <target state="translated">Enregistrer</target></trans-unit>
+      <trans-unit id="Search UI fonts" xml:space="preserve">
+        <source>Search UI fonts</source>
+        <note />
+      <target state="translated">Rechercher des polices d'interface</target></trans-unit>
+      <trans-unit id="Search agents" xml:space="preserve">
+        <source>Search agents</source>
+        <target state="translated">Rechercher des agents</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Search apps" xml:space="preserve">
+        <source>Search apps</source>
+        <note />
+      <target state="translated">Rechercher des applications</target></trans-unit>
+      <trans-unit id="Search branches" xml:space="preserve">
+        <source>Search branches</source>
+        <target state="translated">Rechercher des branches</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Search code fonts" xml:space="preserve">
+        <source>Search code fonts</source>
+        <target state="translated">Rechercher des polices de code</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Search languages" xml:space="preserve">
+        <source>Search languages</source>
+        <note />
+      <target state="translated">Rechercher des langues</target></trans-unit>
+      <trans-unit id="Search models" xml:space="preserve">
+        <source>Search models</source>
+        <target state="translated">Rechercher des modèles</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Search reasoning" xml:space="preserve">
+        <source>Search reasoning</source>
+        <target state="translated">Rechercher le raisonnement</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Select all that apply" xml:space="preserve">
+        <source>Select all that apply</source>
+        <target state="translated">Sélectionnez tout ce qui s'applique</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Select model" xml:space="preserve">
+        <source>Select model</source>
+        <target state="translated">Sélectionner un modèle</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Send messages with" xml:space="preserve">
+        <source>Send messages with</source>
+        <note />
+      <target state="translated">Envoyer des messages avec</target></trans-unit>
+      <trans-unit id="Send once done" xml:space="preserve">
+        <source>Send once done</source>
+        <target state="translated">Envoyer une fois terminé</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Session Stats" xml:space="preserve">
+        <source>Session Stats</source>
+        <target state="translated">Statistiques de session</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Session autonomy" xml:space="preserve">
+        <source>Session autonomy</source>
+        <note />
+      <target state="translated">Autonomie de session</target></trans-unit>
+      <trans-unit id="Session stats" xml:space="preserve">
+        <source>Session stats</source>
+        <target state="translated">Statistiques de session</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Session stats unavailable" xml:space="preserve">
+        <source>Session stats unavailable</source>
+        <target state="translated">Statistiques de session indisponibles</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Set Reasoning" xml:space="preserve">
+        <source>Set Reasoning</source>
+        <target state="translated">Définir le raisonnement</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Set the current reasoning level, like low, medium, or high." xml:space="preserve">
+        <source>Set the current reasoning level, like low, medium, or high.</source>
+        <target state="translated">Définissez le niveau de raisonnement actuel, comme faible, moyen ou élevé.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Settings" xml:space="preserve">
+        <source>Settings</source>
+        <note />
+      <target state="translated">Paramètres</target></trans-unit>
+      <trans-unit id="Show a macOS notification after a response completes while the app is unfocused." xml:space="preserve">
+        <source>Show a macOS notification after a response completes while the app is unfocused.</source>
+        <target state="translated">Afficher une notification macOS après qu'une réponse se termine pendant que l'application est en arrière-plan.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Show a macOS notification when a permission request or question is waiting for you while NeoCode is unfocused." xml:space="preserve">
+        <source>Show a macOS notification when a permission request or question is waiting for you while NeoCode is unfocused.</source>
+        <target state="translated">Afficher une notification macOS lorsqu'une demande d'autorisation ou une question vous attend pendant que NeoCode est en arrière-plan.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Slash Commands" xml:space="preserve">
+        <source>Slash Commands</source>
+        <target state="translated">Commandes Slash</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Spanish" xml:space="preserve">
+        <source>Spanish</source>
+        <note />
+      <target state="translated">Espagnol</target></trans-unit>
+      <trans-unit id="Sparkle delivery" xml:space="preserve">
+        <source>Sparkle delivery</source>
+        <note />
+      <target state="translated">Livraison Sparkle</target></trans-unit>
+      <trans-unit id="Start a thread" xml:space="preserve">
+        <source>Start a thread</source>
+        <target state="translated">Démarrer une conversation</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Start by describing a task, asking a question, or pasting in code. Your first message will kick off the session." xml:space="preserve">
+        <source>Start by describing a task, asking a question, or pasting in code. Your first message will kick off the session.</source>
+        <target state="translated">Commencez par décrire une tâche, poser une question ou coller du code. Votre premier message lancera la session.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Start on the dashboard or restore the last workspace you were actively using." xml:space="preserve">
+        <source>Start on the dashboard or restore the last workspace you were actively using.</source>
+        <target state="translated">Commencez sur le tableau de bord ou restaurez le dernier espace de travail que vous utilisiez activement.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Startup &amp; workspace" xml:space="preserve">
+        <source>Startup &amp; workspace</source>
+        <note />
+      <target state="translated">Démarrage et espace de travail</target></trans-unit>
+      <trans-unit id="Startup, composer, autonomy, and notifications." xml:space="preserve">
+        <source>Startup, composer, autonomy, and notifications.</source>
+        <target state="translated">Démarrage, compositeur, autonomie et notifications.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Stats will appear after the session records assistant usage." xml:space="preserve">
+        <source>Stats will appear after the session records assistant usage.</source>
+        <target state="translated">Les statistiques apparaîtront après que la session ait enregistré l'utilisation de l'assistant.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Status" xml:space="preserve">
+        <source>Status</source>
+        <target state="translated">Statut</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Status: %@" xml:space="preserve">
+        <source>Status: %@</source>
+        <target state="translated">Statut : %@</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Steer" xml:space="preserve">
+        <source>Steer</source>
+        <target state="translated">Diriger</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Steer on" xml:space="preserve">
+        <source>Steer on</source>
+        <target state="translated">Diriger activé</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Summarize the current session to reduce context size." xml:space="preserve">
+        <source>Summarize the current session to reduce context size.</source>
+        <target state="translated">Résumez la session en cours pour réduire la taille du contexte.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Syncing threads" xml:space="preserve">
+        <source>Syncing threads</source>
+        <target state="translated">Synchronisation des conversations</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Syncing threads..." xml:space="preserve">
+        <source>Syncing threads...</source>
+        <target state="translated">Synchronisation des conversations...</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="System" xml:space="preserve">
+        <source>System</source>
+        <note />
+      <target state="translated">Système</target></trans-unit>
+      <trans-unit id="The build currently running on this Mac." xml:space="preserve">
+        <source>The build currently running on this Mac.</source>
+        <target state="translated">La build actuellement exécutée sur ce Mac.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="The most recent time this Mac finished talking to the release feed." xml:space="preserve">
+        <source>The most recent time this Mac finished talking to the release feed.</source>
+        <target state="translated">La dernière fois que ce Mac a communiqué avec le flux de releases.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="The newest signed release Sparkle has found for this channel." xml:space="preserve">
+        <source>The newest signed release Sparkle has found for this channel.</source>
+        <target state="translated">La dernière release signée trouvée par Sparkle pour ce canal.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Theme" xml:space="preserve">
+        <source>Theme</source>
+        <note />
+      <target state="translated">Thème</target></trans-unit>
+      <trans-unit id="Theme, fonts, and interface styling." xml:space="preserve">
+        <source>Theme, fonts, and interface styling.</source>
+        <target state="translated">Thème, polices et style d'interface.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="This matches the TUI behavior: the transcript rewinds, the prompt comes back into the composer, and file edits after that point are rolled back." xml:space="preserve">
+        <source>This matches the TUI behavior: the transcript rewinds, the prompt comes back into the composer, and file edits after that point are rolled back.</source>
+        <target state="translated">Cela reflète le comportement du TUI : la transcription revient en arrière, le prompt revient dans le compositeur et les modifications de fichiers après ce point sont annulées.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Thread name" xml:space="preserve">
+        <source>Thread name</source>
+        <note />
+      <target state="translated">Nom de la conversation</target></trans-unit>
+      <trans-unit id="Threads" xml:space="preserve">
+        <source>Threads</source>
+        <note />
+      <target state="translated">Conversations</target></trans-unit>
+      <trans-unit id="Toggle YOLO" xml:space="preserve">
+        <source>Toggle YOLO</source>
+        <target state="translated">Basculer YOLO</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Token Breakdown" xml:space="preserve">
+        <source>Token Breakdown</source>
+        <target state="translated">Répartition des jetons</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Tokens" xml:space="preserve">
+        <source>Tokens</source>
+        <target state="translated">Jetons</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Tool Activity" xml:space="preserve">
+        <source>Tool Activity</source>
+        <note />
+      <target state="translated">Activité des outils</target></trans-unit>
+      <trans-unit id="Total tokens" xml:space="preserve">
+        <source>Total tokens</source>
+        <target state="translated">Total des jetons</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Tune how prompts send and whether NeoCode should keep per-thread drafts waiting for you when you come back." xml:space="preserve">
+        <source>Tune how prompts send and whether NeoCode should keep per-thread drafts waiting for you when you come back.</source>
+        <target state="translated">Ajustez la façon dont les prompts sont envoyés et si NeoCode doit conserver les brouillons par conversation lorsque vous revenez.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Type your own answer" xml:space="preserve">
+        <source>Type your own answer</source>
+        <target state="translated">Tapez votre propre réponse</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="UI font" xml:space="preserve">
+        <source>UI font</source>
+        <note />
+      <target state="translated">Police d'interface</target></trans-unit>
+      <trans-unit id="UI font size" xml:space="preserve">
+        <source>UI font size</source>
+        <note />
+      <target state="translated">Taille de police d'interface</target></trans-unit>
+      <trans-unit id="Unavailable" xml:space="preserve">
+        <source>Unavailable</source>
+        <target state="translated">Indisponible</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Updated %@" xml:space="preserve">
+        <source>Updated %@</source>
+        <target state="translated">Mis à jour %@</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Updates" xml:space="preserve">
+        <source>Updates</source>
+        <note />
+      <target state="translated">Mises à jour</target></trans-unit>
+      <trans-unit id="Usage" xml:space="preserve">
+        <source>Usage</source>
+        <note />
+      <target state="translated">Utilisation</target></trans-unit>
+      <trans-unit id="Usage in last %@" xml:space="preserve">
+        <source>Usage in last %@</source>
+        <target state="translated">Utilisation au cours des %@ derniers</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Use custom" xml:space="preserve">
+        <source>Use custom</source>
+        <note />
+      <target state="translated">Utiliser personnalisé</target></trans-unit>
+      <trans-unit id="Use pointer cursors" xml:space="preserve">
+        <source>Use pointer cursors</source>
+        <note />
+      <target state="translated">Utiliser les curseurs pointeur</target></trans-unit>
+      <trans-unit id="Use the folder button in the Threads sidebar to add a workspace. NeoCode will build your dashboard from the sessions it discovers there." xml:space="preserve">
+        <source>Use the folder button in the Threads sidebar to add a workspace. NeoCode will build your dashboard from the sessions it discovers there.</source>
+        <target state="translated">Utilisez le bouton dossier dans la barre latérale Conversations pour ajouter un espace de travail. NeoCode construira votre tableau de bord à partir des sessions qu'il y découvre.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Use the project button in the Threads sidebar to add a folder. NeoCode will only show threads for projects you explicitly add." xml:space="preserve">
+        <source>Use the project button in the Threads sidebar to add a folder. NeoCode will only show threads for projects you explicitly add.</source>
+        <target state="translated">Utilisez le bouton projet dans la barre latérale Conversations pour ajouter un dossier. NeoCode n'affichera que les conversations des projets que vous ajoutez explicitement.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Used for labels, navigation, settings, and conversation chrome in this theme." xml:space="preserve">
+        <source>Used for labels, navigation, settings, and conversation chrome in this theme.</source>
+        <target state="translated">Utilisé pour les étiquettes, la navigation, les paramètres et le chrome des conversations dans ce thème.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Used for transcript code, diffs, file references, and inline code in this theme." xml:space="preserve">
+        <source>Used for transcript code, diffs, file references, and inline code in this theme.</source>
+        <target state="translated">Utilisé pour le code de transcription, les diffs, les références aux fichiers et le code inline dans ce thème.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Used when a project does not already have its own preferred editor or destination." xml:space="preserve">
+        <source>Used when a project does not already have its own preferred editor or destination.</source>
+        <target state="translated">Utilisé lorsqu'un projet n'a pas encore son éditeur ou destination préféré.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Waiting for the current response to finish before sending." xml:space="preserve">
+        <source>Waiting for the current response to finish before sending.</source>
+        <note />
+      <target state="translated">En attente de la fin de la réponse actuelle avant d'envoyer.</target></trans-unit>
+      <trans-unit id="Warm daylight palette for your brighter workspace." xml:space="preserve">
+        <source>Warm daylight palette for your brighter workspace.</source>
+        <target state="translated">Palette de lumière du jour chaude pour votre espace de travail plus lumineux.</target>
+        <note />
+      </trans-unit>
+      <trans-unit id="Welcome to NeoCode!" xml:space="preserve">
+        <source>Welcome to NeoCode!</source>
+        <note />
+      <target state="translated">Bienvenue sur NeoCode!</target></trans-unit>
+      <trans-unit id="Will steer the agent at the next possible moment." xml:space="preserve">
+        <source>Will steer the agent at the next possible moment.</source>
+        <note />
+      <target state="translated">Pilotera l'agent dès que possible.</target></trans-unit>
+      <trans-unit id="YOLO" xml:space="preserve">
+        <source>YOLO</source>
+        <note />
+      <target state="translated">YOLO</target></trans-unit>
+      <trans-unit id="YOLO mode" xml:space="preserve">
+        <source>YOLO mode</source>
+        <note />
+      <target state="translated">Mode YOLO</target></trans-unit>
+      <trans-unit id="px" xml:space="preserve">
+        <source>px</source>
+        <target state="translated">px</target>
+        <note />
+      </trans-unit>
+    </body>
+  </file>
+  <file original="NeoCode/Localization/NeoCode-InfoPlist.xcstrings" source-language="en" target-language="fr" datatype="plaintext">
+    <header>
+      <tool tool-id="com.apple.dt.xcode" tool-name="Xcode" tool-version="26.1.1" build-num="17B100" />
+    </header>
+    <body>
+      <trans-unit id="CFBundleDisplayName" xml:space="preserve">
+        <source>NeoCode</source>
+        <target state="translated">NeoCode</target>
+        <note>Bundle display name</note>
+      </trans-unit>
+      <trans-unit id="CFBundleName" xml:space="preserve">
+        <source>NeoCode</source>
+        <target state="translated">NeoCode</target>
+        <note>Bundle name</note>
+      </trans-unit>
+      <trans-unit id="NSHumanReadableCopyright" xml:space="preserve">
+        <source />
+        <target state="translated"></target>
+        <note>Copyright (human-readable)</note>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>

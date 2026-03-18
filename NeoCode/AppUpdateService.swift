@@ -131,68 +131,70 @@ final class AppUpdateService: NSObject, SPUUpdaterDelegate {
         }
     }
 
-    var statusTitle: String {
+    func statusTitle(locale: Locale) -> String {
         switch phase {
         case .unavailable:
-            return "Unavailable"
+            return localized("Unavailable", locale: locale)
         case .idle:
-            return automaticallyChecksForUpdates ? "Watching for releases" : "Automatic checks paused"
+            return automaticallyChecksForUpdates
+                ? localized("Watching for releases", locale: locale)
+                : localized("Automatic checks paused", locale: locale)
         case .checking:
-            return "Checking now"
+            return localized("Checking now", locale: locale)
         case .available:
-            return "Update available"
+            return localized("Update available", locale: locale)
         case .downloading:
-            return "Downloading"
+            return localized("Downloading", locale: locale)
         case .extracting:
-            return "Preparing update"
+            return localized("Preparing update", locale: locale)
         case .readyToInstall:
-            return "Ready to install"
+            return localized("Ready to install", locale: locale)
         case .installing:
-            return "Installing"
+            return localized("Installing", locale: locale)
         case .upToDate:
-            return "Up to date"
+            return localized("Up to date", locale: locale)
         case .error:
-            return "Update error"
+            return localized("Update error", locale: locale)
         }
     }
 
-    var statusDetail: String {
+    func statusDetail(locale: Locale) -> String {
         switch phase {
         case .unavailable(let message):
             return message
         case .idle:
             return automaticallyChecksForUpdates
-                ? "NeoCode will keep checking GitHub releases in the background and surface new builds in the titlebar instead of interrupting you with a modal."
-                : "Automatic background checks are off. You can still ask Sparkle to check manually at any time."
+                ? localized("NeoCode will keep checking GitHub releases in the background and surface new builds in the titlebar instead of interrupting you with a modal.", locale: locale)
+                : localized("Automatic background checks are off. You can still ask Sparkle to check manually at any time.", locale: locale)
         case .checking:
-            return "Sparkle is contacting the release feed and validating the latest signed build."
+            return localized("Sparkle is contacting the release feed and validating the latest signed build.", locale: locale)
         case .available(let release):
-            return "Version \(release.versionDescription) is ready to download. Use the blue titlebar control or the action below when you want to start it."
+            return String(format: localized("Version %@ is ready to download. Use the blue titlebar control or the action below when you want to start it.", locale: locale), release.versionDescription)
         case .downloading(let progress):
-            return "NeoCode is downloading version \(progress.release.versionDescription). The titlebar control mirrors the live percentage so you can keep working."
+            return String(format: localized("NeoCode is downloading version %@. The titlebar control mirrors the live percentage so you can keep working.", locale: locale), progress.release.versionDescription)
         case .extracting(let progress):
-            return "Sparkle finished downloading version \(progress.release.versionDescription) and is unpacking it for installation."
+            return String(format: localized("Sparkle finished downloading version %@ and is unpacking it for installation.", locale: locale), progress.release.versionDescription)
         case .readyToInstall(let release):
-            return "Version \(release.versionDescription) is staged and ready. Install it when you are ready to relaunch NeoCode."
+            return String(format: localized("Version %@ is staged and ready. Install it when you are ready to relaunch NeoCode.", locale: locale), release.versionDescription)
         case .installing(let release):
-            return "Sparkle is installing version \(release.versionDescription). NeoCode may relaunch automatically when the process completes."
+            return String(format: localized("Sparkle is installing version %@. NeoCode may relaunch automatically when the process completes.", locale: locale), release.versionDescription)
         case .upToDate:
-            return "You are already running the newest compatible signed release available from the appcast feed."
+            return localized("You are already running the newest compatible signed release available from the appcast feed.", locale: locale)
         case .error(let message):
             return message
         }
     }
 
-    var manualCheckButtonTitle: String {
-        canCheckForUpdates ? "Check now" : "Checking…"
+    func manualCheckButtonTitle(locale: Locale) -> String {
+        canCheckForUpdates ? localized("Check now", locale: locale) : localized("Checking…", locale: locale)
     }
 
-    var primaryActionTitle: String? {
+    func primaryActionTitle(locale: Locale) -> String? {
         switch phase {
         case .available(let release):
-            return "Download \(release.displayVersion)"
+            return String(format: localized("Download %@", locale: locale), release.displayVersion)
         case .readyToInstall(let release):
-            return "Install \(release.displayVersion)"
+            return String(format: localized("Install %@", locale: locale), release.displayVersion)
         default:
             return nil
         }

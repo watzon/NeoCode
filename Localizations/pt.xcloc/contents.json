@@ -1,0 +1,12 @@
+{
+  "developmentRegion" : "en",
+  "project" : "NeoCode.xcodeproj",
+  "targetLocale" : "pt",
+  "toolInfo" : {
+    "toolBuildNumber" : "17B100",
+    "toolID" : "com.apple.dt.xcode",
+    "toolName" : "Xcode",
+    "toolVersion" : "26.1.1"
+  },
+  "version" : "1.0"
+}

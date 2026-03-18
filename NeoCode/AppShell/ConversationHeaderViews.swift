@@ -279,6 +279,7 @@ private struct WorkspaceToolSplitButton: View {
 }
 
 private struct GitActionsSplitButton: View {
+    @Environment(\.locale) private var locale
     let gitStatus: GitRepositoryStatus
     let commitPreview: GitCommitPreview?
     let operationState: AppStore.GitOperationState?
@@ -296,7 +297,7 @@ private struct GitActionsSplitButton: View {
             icon: { EmptyView() },
             label: {
                 HStack(spacing: 6) {
-                    Text(operationState.map { "\($0.title)..." } ?? gitStatus.primaryAction.title)
+                    Text(operationState.map { "\(localized($0.title, locale: locale))..." } ?? localized(gitStatus.primaryAction.title, locale: locale))
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
 
@@ -323,7 +324,7 @@ private struct GitActionsSplitButton: View {
                             .font(.system(size: 14, weight: .medium))
                             .frame(width: 16, height: 16)
 
-                        Text("Commit")
+                        Text(localized("Commit", locale: locale))
                             .font(.neoAction)
                             .lineLimit(1)
                     }
@@ -335,7 +336,7 @@ private struct GitActionsSplitButton: View {
                             .font(.system(size: 14, weight: .medium))
                             .frame(width: 16, height: 16)
 
-                        Text("Push")
+                        Text(localized("Push", locale: locale))
                             .font(.neoAction)
                             .lineLimit(1)
                     }
@@ -344,7 +345,7 @@ private struct GitActionsSplitButton: View {
                             .font(.system(size: 14, weight: .medium))
                             .frame(width: 16, height: 16)
 
-                        Text("Create PR")
+                        Text(localized("Create PR", locale: locale))
                             .font(.neoAction)
                             .lineLimit(1)
                     }
@@ -380,6 +381,7 @@ private struct CommitStatInlineView: View {
 }
 
 private struct SessionStatsMenuButton: View {
+    @Environment(\.locale) private var locale
     let stats: SessionStatsSnapshot?
     let isMenuOpen: Bool
     let onToggleMenu: () -> Void
@@ -424,7 +426,7 @@ private struct SessionStatsMenuButton: View {
         }
         .buttonStyle(.plain)
         .neoTooltip(helpText)
-        .accessibilityLabel("Session stats")
+        .accessibilityLabel(localized("Session stats", locale: locale))
         .accessibilityValue(accessibilityValue)
         .background {
             AnchoredFloatingPanelPresenter(isPresented: isMenuOpen, direction: .down, onDismiss: onDismissMenu) {
@@ -461,23 +463,24 @@ private struct SessionStatsMenuButton: View {
     }
 
     private var helpText: String {
-        guard let stats else { return "Session stats unavailable" }
+        guard let stats else { return localized("Session stats unavailable", locale: locale) }
         if let remaining = stats.percentRemaining {
-            return "\(remaining)% context remaining"
+            return String(format: localized("%lld%% context remaining", locale: locale), remaining)
         }
-        return "Session stats"
+        return localized("Session stats", locale: locale)
     }
 
     private var accessibilityValue: String {
-        guard let stats else { return "Unavailable" }
+        guard let stats else { return localized("Unavailable", locale: locale) }
         if let remaining = stats.percentRemaining {
-            return "\(remaining) percent context remaining"
+            return String(format: localized("%lld percent context remaining", locale: locale), remaining)
         }
-        return "Context limit unavailable"
+        return localized("Context limit unavailable", locale: locale)
     }
 }
 
 private struct SessionStatsDropdown: View {
+    @Environment(\.locale) private var locale
     let stats: SessionStatsSnapshot?
 
     var body: some View {
@@ -485,7 +488,7 @@ private struct SessionStatsDropdown: View {
             VStack(alignment: .leading, spacing: 12) {
                 if let stats {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Session Stats")
+                        Text(localized("Session Stats", locale: locale))
                             .font(.neoAction)
                             .foregroundStyle(NeoCodeTheme.textPrimary)
 
@@ -494,26 +497,26 @@ private struct SessionStatsDropdown: View {
                             .foregroundStyle(NeoCodeTheme.textSecondary)
                     }
 
-                    statRow("Context used", value: count(stats.contextUsedTokens))
-                    statRow("Context limit", value: optionalCount(stats.contextWindow))
-                    statRow("Context remaining", value: optionalCount(stats.remainingContextTokens))
-                    statRow("Usage", value: optionalPercent(stats.percentUsed))
-                    statRow(stats.isProjectedAfterCompaction ? "Last request" : "Total tokens", value: count(stats.totalContextTokens))
-                    statRow("Input", value: count(stats.inputTokens))
-                    statRow("Output", value: count(stats.outputTokens))
-                    statRow("Reasoning", value: count(stats.reasoningTokens))
-                    statRow("Cache", value: "\(count(stats.cacheReadTokens)) / \(count(stats.cacheWriteTokens))")
-                    statRow("Cost", value: currency(stats.totalCost))
-                    statRow("Provider", value: stats.providerID ?? "-")
-                    statRow("Model", value: stats.modelDisplayName)
-                    statRow("Last activity", value: time(stats.lastActivityAt))
+                    statRow(localized("Context used", locale: locale), value: count(stats.contextUsedTokens))
+                    statRow(localized("Context limit", locale: locale), value: optionalCount(stats.contextWindow))
+                    statRow(localized("Context remaining", locale: locale), value: optionalCount(stats.remainingContextTokens))
+                    statRow(localized("Usage", locale: locale), value: optionalPercent(stats.percentUsed))
+                    statRow(localized(stats.isProjectedAfterCompaction ? "Last request" : "Total tokens", locale: locale), value: count(stats.totalContextTokens))
+                    statRow(localized("Input", locale: locale), value: count(stats.inputTokens))
+                    statRow(localized("Output", locale: locale), value: count(stats.outputTokens))
+                    statRow(localized("Reasoning", locale: locale), value: count(stats.reasoningTokens))
+                    statRow(localized("Cache", locale: locale), value: "\(count(stats.cacheReadTokens)) / \(count(stats.cacheWriteTokens))")
+                    statRow(localized("Cost", locale: locale), value: currency(stats.totalCost))
+                    statRow(localized("Provider", locale: locale), value: stats.providerID ?? "-")
+                    statRow(localized("Model", locale: locale), value: stats.modelDisplayName)
+                    statRow(localized("Last activity", locale: locale), value: time(stats.lastActivityAt))
                 } else {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Session Stats")
+                        Text(localized("Session Stats", locale: locale))
                             .font(.neoAction)
                             .foregroundStyle(NeoCodeTheme.textPrimary)
 
-                        Text("Stats will appear after the session records assistant usage.")
+                        Text(localized("Stats will appear after the session records assistant usage.", locale: locale))
                             .font(.neoBody)
                             .foregroundStyle(NeoCodeTheme.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -543,9 +546,11 @@ private struct SessionStatsDropdown: View {
     private func contextSummary(for stats: SessionStatsSnapshot) -> String {
         let remaining = optionalCount(stats.remainingContextTokens)
         let usage = optionalPercent(stats.percentUsed)
-        let summary = "\(remaining) remaining - \(usage) used"
-        guard stats.isProjectedAfterCompaction else { return summary }
-        return "\(summary) - projected after compaction"
+        if stats.isProjectedAfterCompaction {
+            return String(format: localized("%@ remaining - %@ used - projected after compaction", locale: locale), remaining, usage)
+        }
+
+        return String(format: localized("%@ remaining - %@ used", locale: locale), remaining, usage)
     }
 
     private func count(_ value: Int) -> String {
@@ -563,12 +568,12 @@ private struct SessionStatsDropdown: View {
     }
 
     private func currency(_ value: Double) -> String {
-        value.formatted(.currency(code: "USD"))
+        value.formatted(.currency(code: "USD").locale(locale))
     }
 
     private func time(_ value: Date?) -> String {
         guard let value else { return "-" }
-        return value.formatted(date: .omitted, time: .shortened)
+        return value.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(locale))
     }
 }
 

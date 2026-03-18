@@ -97,11 +97,12 @@ struct ComposerSlashCommandsPopover: View {
     let scrollTargetID: String?
     let onHoverIndex: (Int) -> Void
     let onSelect: (ComposerSlashCommand) -> Void
+    @Environment(\.locale) private var locale
 
     var body: some View {
         ComposerSuggestionPopover(
-            title: "Slash Commands",
-            emptyMessage: "No matching slash commands.",
+            title: localized("Slash Commands", locale: locale),
+            emptyMessage: localized("No matching slash commands.", locale: locale),
             items: commands,
             selectedIndex: selectedIndex,
             scrollTargetID: scrollTargetID,
@@ -119,11 +120,12 @@ struct ComposerFileMentionsPopover: View {
     let scrollTargetID: String?
     let onHoverIndex: (Int) -> Void
     let onSelect: (ProjectFileSearchResult) -> Void
+    @Environment(\.locale) private var locale
 
     var body: some View {
         ComposerSuggestionPopover(
-            title: "Files",
-            emptyMessage: "No matching files.",
+            title: localized("Files", locale: locale),
+            emptyMessage: localized("No matching files.", locale: locale),
             items: files,
             selectedIndex: selectedIndex,
             scrollTargetID: scrollTargetID,

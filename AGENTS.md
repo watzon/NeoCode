@@ -51,6 +51,48 @@
 - Run one Swift Testing case: `xcodebuild test -project "NeoCode.xcodeproj" -scheme "NeoCode" -destination 'platform=macOS' -only-testing:NeoCodeTests/NeoCodeTests/<test-name>`
 - Run one UI test: `xcodebuild test -project "NeoCode.xcodeproj" -scheme "NeoCode" -destination 'platform=macOS' -only-testing:NeoCodeUITests/NeoCodeUITests/<test-name>`
 
+## Localization And Translations
+
+The app uses Xcode String Catalogs (`.xcstrings`) for localization with XLIFF export/import for translation workflow:
+
+### Supported Languages
+- English (en) - Source language
+- Spanish (es)
+- Portuguese (pt)
+- French (fr)
+- Italian (it)
+
+### Translation Workflow
+
+**Export localizations to XLIFF:**
+```bash
+./export_localizations.sh
+```
+This generates `.xcloc` bundles in `Localizations/` directory with `.xliff` files for each language.
+
+**Translate XLIFF files:**
+- Edit `.xliff` files directly in `Localizations/<lang>.xcloc/Localized Contents/`
+- Or open `.xcloc` bundles in Xcode's XLIFF editor
+- Fill in `<target>` elements and change `state="new"` to `state="translated"`
+
+**Import translations back:**
+```bash
+./import_localizations.sh
+```
+
+### Key Files
+- `NeoCode/Localization/Localizable.xcstrings` - Main string catalog (source of truth)
+- `NeoCode/AppLocalization.swift` - Language enum and localization helpers
+- `TRANSLATIONS.md` - Detailed translation workflow documentation
+
+### Adding A New Language
+1. Add case to `NeoCodeAppLanguage` enum in `NeoCode/AppLocalization.swift`
+2. Add language name key to `Localizable.xcstrings`
+3. Run `./export_localizations.sh` with new language
+4. Translate the XLIFF file
+5. Run `./import_localizations.sh`
+6. Update `TRANSLATIONS.md` with new language status
+
 ## Linting And Verification Expectations
 
 - There is no dedicated lint command in the repo.

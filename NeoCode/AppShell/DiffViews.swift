@@ -489,14 +489,14 @@ private enum DiffChangeRowBuilder {
 private func diffEmptyStateText(for change: DiffFile.ChangeKind) -> String {
     switch change {
     case .added:
-        return "New file created."
+        return localized("New file created.", locale: .autoupdatingCurrent)
     case .deleted:
-        return "File removed."
+        return localized("File removed.", locale: .autoupdatingCurrent)
     case .renamed:
-        return "File renamed with no inline hunk details."
+        return localized("File renamed with no inline hunk details.", locale: .autoupdatingCurrent)
     case .copied:
-        return "File copied with no inline hunk details."
+        return localized("File copied with no inline hunk details.", locale: .autoupdatingCurrent)
     case .modified, .unknown:
-        return "No added or removed lines."
+        return localized("No added or removed lines.", locale: .autoupdatingCurrent)
     }
 }

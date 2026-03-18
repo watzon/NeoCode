@@ -179,7 +179,7 @@ private struct GeneralSettingsView: View {
                             }
                             .pickerStyle(.segmented)
                             .labelsHidden()
-                            .frame(width: 240)
+                            .fixedSize()
                         }
                     )
 

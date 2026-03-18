@@ -323,13 +323,13 @@ struct ProjectTreeNode: View {
                 Button {
                     Task { await store.refreshSessions(in: project.id, using: runtime) }
                 } label: {
-                    Label("Refresh Threads", systemImage: "arrow.clockwise")
+                    Label(localized("Refresh Threads", locale: locale), systemImage: "arrow.clockwise")
                 }
 
                 Divider()
 
-                Button("Open Project", action: openProject)
-                Button("Reveal in Finder", action: revealProject)
+                Button(localized("Open Project", locale: locale), action: openProject)
+                Button(localized("Reveal in Finder", locale: locale), action: revealProject)
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 12, weight: .medium))
@@ -358,11 +358,12 @@ struct ProjectTreeNode: View {
 
     private var sessionExpansionLabel: String {
         if showsAllSessions {
-            return "Show less"
+            return localized("Show less", locale: locale)
         }
 
-        let hiddenSessionLabel = project.hiddenSessionCount == 1 ? "1 more" : "\(project.hiddenSessionCount) more"
-        return "Show \(hiddenSessionLabel)"
+        let countText = String(project.hiddenSessionCount)
+        let format = localized("Show %@ more", locale: locale)
+        return String(format: format, countText)
     }
 
     private var shouldShowSessionSyncIndicator: Bool {
@@ -398,6 +399,7 @@ struct ProjectTreeNode: View {
 struct SessionTreeRow: View {
     @Environment(AppStore.self) private var store
     @Environment(OpenCodeRuntime.self) private var runtime
+    @Environment(\.locale) private var locale
     @State private var isHovering = false
     @State private var isRenaming = false
     @State private var renameTitle = ""
@@ -442,20 +444,20 @@ struct SessionTreeRow: View {
                 }
             )
         }
-        .alert("Rename Thread", isPresented: $isRenaming) {
-            TextField("Thread name", text: $renameTitle)
+        .alert(localized("Rename Thread", locale: locale), isPresented: $isRenaming) {
+            TextField(localized("Thread name", locale: locale), text: $renameTitle)
                 .neoWritingToolsDisabled()
-            Button("Cancel", role: .cancel) {
+            Button(localized("Cancel", locale: locale), role: .cancel) {
                 renameTitle = session.title
             }
-            Button("Save") {
+            Button(localized("Save", locale: locale)) {
                 let newTitle = renameTitle
                 Task {
                     await store.renameSession(session.id, to: newTitle, using: runtime)
                 }
             }
         } message: {
-            Text("Give this thread a new name.")
+            Text(localized("Give this thread a new name.", locale: locale))
         }
     }
 
@@ -527,7 +529,7 @@ struct SessionTreeRow: View {
         let seconds = max(0, Int(Date().timeIntervalSince(session.lastUpdatedAt)))
 
         if seconds < 60 {
-            return "now"
+            return localized("now", locale: locale)
         }
 
         let minute = 60
@@ -549,20 +551,20 @@ struct SessionTreeRow: View {
 
     private var statusLabel: String? {
         if store.showsFinishedIndicator(for: session.id) {
-            return "finished"
+            return localized("finished", locale: locale)
         }
 
         switch session.status {
         case .idle:
             return nil
         case .running:
-            return "working"
+            return localized("working", locale: locale)
         case .awaitingInput:
-            return "needs input"
+            return localized("needs input", locale: locale)
         case .retrying:
-            return "retrying"
+            return localized("retrying", locale: locale)
         case .error:
-            return "failed"
+            return localized("failed", locale: locale)
         }
     }
 
@@ -589,6 +591,7 @@ struct SidebarSessionStatusBadge: View {
 
     let label: String
     let tone: Tone
+    @Environment(\.locale) private var locale
 
     var body: some View {
         HStack(spacing: 5) {
@@ -610,7 +613,7 @@ struct SidebarSessionStatusBadge: View {
                     .overlay(Capsule().stroke(NeoCodeTheme.line, lineWidth: 1))
             )
             .fixedSize()
-            .accessibilityLabel("Status: \(label)")
+            .accessibilityLabel(String(format: localized("Status: %@", locale: locale), label))
     }
 
     private var foreground: Color {
@@ -637,12 +640,14 @@ struct SidebarSessionStatusBadge: View {
 }
 
 private struct ProjectSessionSyncRow: View {
+    @Environment(\.locale) private var locale
+
     var body: some View {
         HStack(spacing: 8) {
             ProgressView()
                 .controlSize(.small)
 
-            Text("Syncing threads...")
+            Text(localized("Syncing threads...", locale: locale))
                 .font(.neoMonoSmall)
                 .foregroundStyle(NeoCodeTheme.textMuted)
 
@@ -651,7 +656,7 @@ private struct ProjectSessionSyncRow: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Syncing threads")
+        .accessibilityLabel(localized("Syncing threads", locale: locale))
     }
 }
 

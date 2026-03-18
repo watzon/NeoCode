@@ -37,8 +37,8 @@ struct UpdatesSettingsView: View {
                     SettingsDivider()
 
                     SettingsControlRow(
-                        title: "Status",
-                        detail: updateService.statusDetail,
+                        title: localized("Status", locale: locale),
+                        detail: updateService.statusDetail(locale: locale),
                         accessory: {
                             UpdateStatusChip(phase: updateService.phase)
                         }
@@ -76,7 +76,7 @@ struct UpdatesSettingsView: View {
                         title: localized("Check manually", locale: locale),
                         detail: localized("Ask Sparkle to validate the newest available release right now.", locale: locale),
                         accessory: {
-                            Button(updateService.manualCheckButtonTitle) {
+                            Button(updateService.manualCheckButtonTitle(locale: locale)) {
                                 updateService.checkForUpdates()
                             }
                             .buttonStyle(.plain)
@@ -85,7 +85,7 @@ struct UpdatesSettingsView: View {
                         }
                     )
 
-                    if let primaryActionTitle = updateService.primaryActionTitle {
+                    if let primaryActionTitle = updateService.primaryActionTitle(locale: locale) {
                         SettingsDivider()
 
                         SettingsControlRow(
@@ -118,12 +118,13 @@ struct UpdatesSettingsView: View {
             return localized("Never", locale: locale)
         }
 
-        return lastCheckedAt.formatted(date: .abbreviated, time: .shortened)
+        return lastCheckedAt.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(locale))
     }
 }
 
 struct WindowTitlebarUpdateButton: View {
     @Environment(AppUpdateService.self) private var updateService
+    @Environment(\.locale) private var locale
     @State private var isHovering = false
     @State private var isPulsing = false
 
@@ -208,7 +209,7 @@ struct WindowTitlebarUpdateButton: View {
         switch updateService.phase {
         case .available(let release):
             return .init(
-                label: "Update available: \(release.displayVersion)",
+                label: String(format: localized("Update available: %@", locale: locale), release.displayVersion),
                 state: .available,
                 progress: nil,
                 isInteractive: updateService.canPerformPrimaryAction,
@@ -216,7 +217,7 @@ struct WindowTitlebarUpdateButton: View {
             )
         case .downloading(let progress):
             return .init(
-                label: "Downloading: \(percentageString(for: progress.fractionCompleted))",
+                label: String(format: localized("Downloading: %@", locale: locale), percentageString(for: progress.fractionCompleted)),
                 state: .progress,
                 progress: progress.fractionCompleted ?? 0,
                 isInteractive: false,
@@ -224,7 +225,7 @@ struct WindowTitlebarUpdateButton: View {
             )
         case .extracting(let progress):
             return .init(
-                label: "Preparing: \(percentageString(for: progress.fractionCompleted))",
+                label: String(format: localized("Preparing: %@", locale: locale), percentageString(for: progress.fractionCompleted)),
                 state: .progress,
                 progress: progress.fractionCompleted ?? 0,
                 isInteractive: false,
@@ -232,7 +233,7 @@ struct WindowTitlebarUpdateButton: View {
             )
         case .readyToInstall(let release):
             return .init(
-                label: "Install update \(release.displayVersion)",
+                label: String(format: localized("Install update %@", locale: locale), release.displayVersion),
                 state: .ready,
                 progress: nil,
                 isInteractive: updateService.canPerformPrimaryAction,
@@ -240,7 +241,7 @@ struct WindowTitlebarUpdateButton: View {
             )
         case .installing(let release):
             return .init(
-                label: "Installing \(release.displayVersion)",
+                label: String(format: localized("Installing %@", locale: locale), release.displayVersion),
                 state: .installing,
                 progress: nil,
                 isInteractive: false,
@@ -300,6 +301,7 @@ struct WindowTitlebarUpdateButton: View {
 }
 
 private struct UpdateStatusChip: View {
+    @Environment(\.locale) private var locale
     let phase: AppUpdateService.Phase
 
     var body: some View {
@@ -321,25 +323,25 @@ private struct UpdateStatusChip: View {
     private var label: String {
         switch phase {
         case .unavailable:
-            return "Unavailable"
+            return localized("Unavailable", locale: locale)
         case .idle:
-            return "Idle"
+            return localized("Idle", locale: locale)
         case .checking:
-            return "Checking"
+            return localized("Checking", locale: locale)
         case .available:
-            return "Available"
+            return localized("Available", locale: locale)
         case .downloading:
-            return "Downloading"
+            return localized("Downloading", locale: locale)
         case .extracting:
-            return "Preparing"
+            return localized("Preparing", locale: locale)
         case .readyToInstall:
-            return "Ready"
+            return localized("Ready", locale: locale)
         case .installing:
-            return "Installing"
+            return localized("Installing", locale: locale)
         case .upToDate:
-            return "Current"
+            return localized("Current", locale: locale)
         case .error:
-            return "Error"
+            return localized("Error", locale: locale)
         }
     }
 

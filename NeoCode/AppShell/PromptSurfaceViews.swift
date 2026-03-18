@@ -68,13 +68,14 @@ struct SessionPromptAreaView: View {
 }
 
 private struct PromptLoadingSurfaceView: View {
+    @Environment(\.locale) private var locale
     let text: String?
 
     private let contentWidth: CGFloat = 760
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Prompt")
+            Text(localized("Prompt", locale: locale))
                 .font(.neoMonoSmall)
                 .foregroundStyle(NeoCodeTheme.textMuted)
 
@@ -99,13 +100,14 @@ private struct PromptLoadingSurfaceView: View {
 
     private var displayText: String {
         let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return (trimmed?.isEmpty == false ? trimmed : nil) ?? "Loading prompt..."
+        return (trimmed?.isEmpty == false ? trimmed : nil) ?? localized("Loading prompt...", locale: locale)
     }
 }
 
 private struct PermissionPromptSurfaceView: View {
     @Environment(AppStore.self) private var store
     @Environment(OpenCodeRuntime.self) private var runtime
+    @Environment(\.locale) private var locale
 
     let request: OpenCodePermissionRequest
 
@@ -124,7 +126,7 @@ private struct PermissionPromptSurfaceView: View {
                     )
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Permission required")
+                    Text(localized("Permission required", locale: locale))
                         .font(.neoMonoSmall)
                         .foregroundStyle(NeoCodeTheme.textMuted)
 
@@ -150,7 +152,7 @@ private struct PermissionPromptSurfaceView: View {
 
             if !request.patterns.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(request.always.isEmpty ? "Affected patterns" : "Allowed forever if approved")
+                    Text(localized(request.always.isEmpty ? "Affected patterns" : "Allowed forever if approved", locale: locale))
                         .font(.neoMonoSmall)
                         .foregroundStyle(NeoCodeTheme.warning)
 
@@ -187,7 +189,7 @@ private struct PermissionPromptSurfaceView: View {
             }
 
             HStack(spacing: 10) {
-                Button("Deny") {
+                Button(localized("Deny", locale: locale)) {
                     Task {
                         await store.replyToPermission(
                             requestID: request.id,
@@ -214,7 +216,7 @@ private struct PermissionPromptSurfaceView: View {
 
                 Spacer(minLength: 12)
 
-                Button("Allow always") {
+                Button(localized("Allow always", locale: locale)) {
                     Task {
                         await store.replyToPermission(
                             requestID: request.id,
@@ -239,7 +241,7 @@ private struct PermissionPromptSurfaceView: View {
                 )
                 .disabled(store.isRespondingToPrompt)
 
-                Button("Allow once") {
+                Button(localized("Allow once", locale: locale)) {
                     Task {
                         await store.replyToPermission(
                             requestID: request.id,
@@ -287,29 +289,29 @@ private struct PermissionPromptSurfaceView: View {
     private var permissionTitle: String {
         switch request.permission {
         case "edit":
-            return "Allow file edits"
+            return localized("Allow file edits", locale: locale)
         case "read":
-            return "Allow file reads"
+            return localized("Allow file reads", locale: locale)
         case "bash":
-            return "Allow shell command"
+            return localized("Allow shell command", locale: locale)
         case "glob":
-            return "Allow file globbing"
+            return localized("Allow file globbing", locale: locale)
         case "grep":
-            return "Allow content search"
+            return localized("Allow content search", locale: locale)
         case "list":
-            return "Allow directory listing"
+            return localized("Allow directory listing", locale: locale)
         case "task":
-            return "Allow subagent task"
+            return localized("Allow subagent task", locale: locale)
         case "webfetch":
-            return "Allow web fetch"
+            return localized("Allow web fetch", locale: locale)
         case "websearch":
-            return "Allow web search"
+            return localized("Allow web search", locale: locale)
         case "external_directory":
-            return "Allow external directory access"
+            return localized("Allow external directory access", locale: locale)
         case "doom_loop":
-            return "Allow continued execution"
+            return localized("Allow continued execution", locale: locale)
         default:
-            return "Allow `\(request.permission)`"
+            return String(format: localized("Allow `%@`", locale: locale), request.permission)
         }
     }
 
@@ -329,7 +331,7 @@ private struct PermissionPromptSurfaceView: View {
         case "websearch", "grep", "glob":
             return metadataString(for: "query") ?? metadataString(for: "pattern") ?? request.patterns.first
         case "doom_loop":
-            return "The agent wants to continue after repeated failed attempts."
+            return localized("The agent wants to continue after repeated failed attempts.", locale: locale)
         default:
             return request.patterns.first
         }
@@ -349,6 +351,7 @@ private struct PermissionPromptSurfaceView: View {
 private struct QuestionPromptSurfaceView: View {
     @Environment(AppStore.self) private var store
     @Environment(OpenCodeRuntime.self) private var runtime
+    @Environment(\.locale) private var locale
 
     let request: OpenCodeQuestionRequest
 
@@ -373,7 +376,7 @@ private struct QuestionPromptSurfaceView: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(isSingleQuestion ? "Question" : "Questions")
+                        Text(localized(isSingleQuestion ? "Question" : "Questions", locale: locale))
                             .font(.neoMonoSmall)
                             .foregroundStyle(NeoCodeTheme.textMuted)
 
@@ -409,7 +412,7 @@ private struct QuestionPromptSurfaceView: View {
             }
 
             HStack(spacing: 10) {
-                Button("Dismiss") {
+                Button(localized("Dismiss", locale: locale)) {
                     Task {
                         await store.rejectQuestion(requestID: request.id, sessionID: request.sessionID, using: runtime)
                     }
@@ -496,7 +499,7 @@ private struct QuestionPromptSurfaceView: View {
             return singleQuestion.question
         }
 
-        return "Answer the questions below to let the agent continue."
+        return localized("Answer the questions below to let the agent continue.", locale: locale)
     }
 
     private var isSingleQuestion: Bool {
@@ -532,11 +535,11 @@ private struct QuestionPromptSurfaceView: View {
     }
 
     private var submitLabel: String {
-        request.questions.count == 1 ? "Send answer" : "Submit answers"
+        localized(request.questions.count == 1 ? "Send answer" : "Submit answers", locale: locale)
     }
 
     private var nextButtonLabel: String {
-        nextQuestionIndex == confirmQuestionIndex ? "Review answers" : "Next question"
+        localized(nextQuestionIndex == confirmQuestionIndex ? "Review answers" : "Next question", locale: locale)
     }
 
     private var submissionAnswers: [OpenCodeQuestionAnswer] {
@@ -574,7 +577,7 @@ private struct QuestionPromptSurfaceView: View {
             }
 
             QuestionStepTab(
-                title: "Confirm",
+                title: localized("Confirm", locale: locale),
                 isActive: isConfirmStep,
                 isAnswered: allQuestionsAnswered,
                 isDisabled: store.isRespondingToPrompt
@@ -593,7 +596,7 @@ private struct QuestionPromptSurfaceView: View {
                         .foregroundStyle(NeoCodeTheme.accent)
 
                     if question.allowsMultipleSelections {
-                        Text("Select all that apply")
+                        Text(localized("Select all that apply", locale: locale))
                             .font(.neoMonoSmall)
                             .foregroundStyle(NeoCodeTheme.textMuted)
                     }
@@ -618,7 +621,7 @@ private struct QuestionPromptSurfaceView: View {
 
                 if question.allowsCustomAnswer {
                     QuestionOptionButton(
-                        label: "Type your own answer",
+                        label: localized("Type your own answer", locale: locale),
                         description: customOptionDescription(for: index, question: question),
                         isSelected: hasCustomSelection(for: index, question: question),
                         isDisabled: store.isRespondingToPrompt
@@ -632,7 +635,7 @@ private struct QuestionPromptSurfaceView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 8) {
                         TextField(
-                            "Type your own answer",
+                            localized("Type your own answer", locale: locale),
                             text: Binding(
                                 get: { customInputByQuestion[index] ?? "" },
                                 set: { customInputByQuestion[index] = $0 }
@@ -654,7 +657,7 @@ private struct QuestionPromptSurfaceView: View {
                         )
                         .disabled(store.isRespondingToPrompt)
 
-                        Button(question.allowsMultipleSelections ? "Add" : "Use custom") {
+                        Button(localized(question.allowsMultipleSelections ? "Add" : "Use custom", locale: locale)) {
                             applyCustomAnswer(for: index, question: question)
                         }
                         .buttonStyle(.plain)
@@ -746,7 +749,7 @@ private struct QuestionPromptSurfaceView: View {
 
     private var questionReview: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Review answers")
+            Text(localized("Review answers", locale: locale))
                 .font(.neoMonoSmall)
                 .foregroundStyle(NeoCodeTheme.accent)
 
@@ -883,12 +886,12 @@ private struct QuestionPromptSurfaceView: View {
             return customAnswers.joined(separator: ", ")
         }
 
-        return question.allowsMultipleSelections ? "Add a custom response" : "Write a custom response"
+        return localized(question.allowsMultipleSelections ? "Add a custom response" : "Write a custom response", locale: locale)
     }
 
     private func reviewAnswerText(for index: Int) -> String {
         let answers = answersByQuestion[index] ?? []
-        return answers.isEmpty ? "Not answered yet" : answers.joined(separator: ", ")
+        return answers.isEmpty ? localized("Not answered yet", locale: locale) : answers.joined(separator: ", ")
     }
 
     private func reviewAnswerColor(for index: Int) -> Color {
