@@ -141,6 +141,7 @@ enum OpenCodeEventDecoder {
         let sessionID: String?
     }
 
+    @MainActor
     static func decode(frame: OpenCodeSSEFrame, decoder: JSONDecoder = .opencode) throws -> OpenCodeEvent {
         if frame.event == "server.connected" {
             return .connected

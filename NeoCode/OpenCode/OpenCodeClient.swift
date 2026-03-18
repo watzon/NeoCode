@@ -243,9 +243,11 @@ final class OpenCodeClient: OpenCodeServicing {
                     var parser = OpenCodeSSEParser()
                     var lineBuffer = Data()
 
-                    func emit(_ frame: OpenCodeSSEFrame, final: Bool = false) {
+                    func emit(_ frame: OpenCodeSSEFrame, final: Bool = false) async {
                         do {
-                            let event = try OpenCodeEventDecoder.decode(frame: frame, decoder: decoder)
+                            let event = try await MainActor.run {
+                                try OpenCodeEventDecoder.decode(frame: frame, decoder: decoder)
+                            }
                             if case .ignored = event {
                             } else {
                                 logger.debug(
@@ -262,10 +264,10 @@ final class OpenCodeClient: OpenCodeServicing {
                         }
                     }
 
-                    func processLine(_ data: Data) {
+                    func processLine(_ data: Data) async {
                         let line = String(decoding: data, as: UTF8.self)
                         if let frame = parser.ingest(line: line) {
-                            emit(frame)
+                            await emit(frame)
                         }
                     }
 
@@ -275,7 +277,7 @@ final class OpenCodeClient: OpenCodeServicing {
                             if line.last == 0x0D {
                                 line.removeLast()
                             }
-                            processLine(line)
+                            await processLine(line)
                             lineBuffer.removeAll(keepingCapacity: true)
                         } else {
                             lineBuffer.append(byte)
@@ -283,11 +285,11 @@ final class OpenCodeClient: OpenCodeServicing {
                     }
 
                     if !lineBuffer.isEmpty {
-                        processLine(lineBuffer)
+                        await processLine(lineBuffer)
                     }
 
                     if let frame = parser.flush() {
-                        emit(frame, final: true)
+                        await emit(frame, final: true)
                     }
 
                     logger.warning("SSE stream ended")
@@ -485,7 +487,7 @@ private struct EmptyRequest: Encodable {}
 struct EmptyResponse: Decodable, Equatable {}
 
 extension JSONDecoder {
-    static var opencode: JSONDecoder {
+    nonisolated static var opencode: JSONDecoder {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in
             let container = try decoder.singleValueContainer()

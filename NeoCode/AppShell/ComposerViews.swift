@@ -1484,7 +1484,7 @@ struct HeaderStatusView: View {
         switch runtime.state(for: store.selectedProject?.path) {
         case .idle:
             NeoCodeTheme.textMuted
-        case .starting:
+        case .starting, .stopping:
             NeoCodeTheme.accent
         case .running:
             NeoCodeTheme.success

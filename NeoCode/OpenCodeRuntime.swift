@@ -9,10 +9,12 @@ final class OpenCodeRuntime {
     private static let resolutionLogger = Logger(subsystem: "tech.watzon.NeoCode", category: "RuntimeResolution")
     private static let maxStartupOutputBufferCharacters = 64_000
     private static let maxLastOutputCharacters = 8_000
+    private static var didSweepPersistedProcesses = false
 
     enum State: Equatable {
         case idle
         case starting(projectPath: String)
+        case stopping(projectPath: String)
         case running(Connection)
         case failed(projectPath: String, message: String)
     }
@@ -41,14 +43,20 @@ final class OpenCodeRuntime {
         var lastOutput = ""
         var startTask: Task<Connection, Error>?
         var startupPhase: StartupPhase = .idle
+        var launchID = UUID()
     }
 
     var userFacingError: String?
 
     private let client = OpenCodeHTTPClient()
+    private let processStore = PersistedRuntimeProcessStore()
     private var entries: [String: RuntimeEntry] = [:]
     private var statesByProjectPath: [String: State] = [:]
     private var connectionsByProjectPath: [String: Connection] = [:]
+
+    init() {
+        sweepPersistedProcessesIfNeeded()
+    }
 
     func ensureRunning(for projectPath: String?) async {
         guard let projectPath else { return }
@@ -114,6 +122,8 @@ final class OpenCodeRuntime {
             return "Runtime idle"
         case .starting:
             return "Starting runtime"
+        case .stopping:
+            return "Stopping runtime"
         case .running(let connection):
             return "OpenCode \(connection.version)"
         case .failed:
@@ -126,6 +136,8 @@ final class OpenCodeRuntime {
         case .idle:
             return "Select a project"
         case .starting(let projectPath):
+            return URL(fileURLWithPath: projectPath).lastPathComponent
+        case .stopping(let projectPath):
             return URL(fileURLWithPath: projectPath).lastPathComponent
         case .running(let connection):
             return URL(fileURLWithPath: connection.projectPath).lastPathComponent
@@ -145,9 +157,17 @@ final class OpenCodeRuntime {
     }
 
     private func start(for projectPath: String, entry: RuntimeEntry) async throws -> Connection {
-        defer { entry.startTask = nil }
+        let launchID = UUID()
+        entry.launchID = launchID
+        defer {
+            if entry.launchID == launchID {
+                entry.startTask = nil
+            }
+        }
 
-        terminateProcess(entry: entry, projectPath: projectPath, clearStartTask: false)
+        guard terminateProcess(entry: entry, projectPath: projectPath, clearStartTask: false) else {
+            throw OpenCodeRuntimeError.processTerminationTimedOut
+        }
         entry.requestedStop = false
         entry.startupPhase = .resolvingConfiguration
         setState(.starting(projectPath: projectPath), for: projectPath)
@@ -161,12 +181,13 @@ final class OpenCodeRuntime {
 
             process.terminationHandler = { [runtime = self] process in
                 Task { @MainActor in
-                    runtime.handleTermination(of: process, projectPath: projectPath, entry: entry)
+                    runtime.handleTermination(of: process, projectPath: projectPath, entry: entry, launchID: launchID)
                 }
             }
 
             try process.run()
             ManagedProcessRegistry.shared.register(process)
+            processStore.record(projectPath: projectPath, pid: process.processIdentifier)
 
             entry.startupPhase = .waitingForListeningAddress
             let baseURL = try await waitForBoundURL(entry: entry, timeout: 15)
@@ -196,13 +217,13 @@ final class OpenCodeRuntime {
             logger.info(
                 "Runtime startup cancelled project=\(projectPath, privacy: .public) phase=\(entry.startupPhase.rawValue, privacy: .public) requestedStop=\(entry.requestedStop, privacy: .public) processRunning=\(entry.process?.isRunning == true, privacy: .public) lastOutput=\(Self.startupLogOutput(entry.lastOutput), privacy: .public)"
             )
-            stop(entry: entry, projectPath: projectPath)
+            _ = terminateProcess(entry: entry, projectPath: projectPath, clearStartTask: false, expectedLaunchID: launchID)
             throw CancellationError()
         } catch {
             logger.error(
                 "Runtime failed to start project=\(projectPath, privacy: .public) phase=\(entry.startupPhase.rawValue, privacy: .public) requestedStop=\(entry.requestedStop, privacy: .public) processRunning=\(entry.process?.isRunning == true, privacy: .public) error=\(error.localizedDescription, privacy: .public) lastOutput=\(Self.startupLogOutput(entry.lastOutput), privacy: .public)"
             )
-            stop(entry: entry, projectPath: projectPath)
+            _ = terminateProcess(entry: entry, projectPath: projectPath, clearStartTask: false, expectedLaunchID: launchID)
             userFacingError = error.localizedDescription
             setState(.failed(projectPath: projectPath, message: error.localizedDescription), for: projectPath)
             throw error
@@ -210,29 +231,54 @@ final class OpenCodeRuntime {
     }
 
     private func stop(entry: RuntimeEntry, projectPath: String) {
-        terminateProcess(entry: entry, projectPath: projectPath, clearStartTask: true)
+        _ = terminateProcess(entry: entry, projectPath: projectPath, clearStartTask: true)
     }
 
-    private func terminateProcess(entry: RuntimeEntry, projectPath: String, clearStartTask: Bool) {
-        entry.requestedStop = true
+    @discardableResult
+    private func terminateProcess(
+        entry: RuntimeEntry,
+        projectPath: String,
+        clearStartTask: Bool,
+        expectedLaunchID: UUID? = nil
+    ) -> Bool {
+        guard expectedLaunchID == nil || entry.launchID == expectedLaunchID else {
+            return true
+        }
+
         if clearStartTask {
             entry.startTask?.cancel()
-            entry.startTask = nil
+            if expectedLaunchID == nil || entry.launchID == expectedLaunchID {
+                entry.startTask = nil
+            }
         }
-        entry.process?.terminationHandler = nil
+
         entry.outputPipe?.fileHandleForReading.readabilityHandler = nil
+        entry.requestedStop = true
+        connectionsByProjectPath.removeValue(forKey: projectPath)
 
         if let process = entry.process {
-            ManagedProcessRegistry.shared.terminate(process)
+            setState(.stopping(projectPath: projectPath), for: projectPath)
+            let result = ManagedProcessRegistry.shared.terminateTrackedProcess(process)
+            guard result.didTerminate || !ManagedProcessRegistry.isProcessAlive(result.rootPID) else {
+                let message = "OpenCode runtime did not exit cleanly."
+                logger.error(
+                    "Runtime failed to terminate project=\(projectPath, privacy: .public) pid=\(result.rootPID, privacy: .public)"
+                )
+                userFacingError = message
+                setState(.failed(projectPath: projectPath, message: message), for: projectPath)
+                return false
+            }
+
+            resetEntryAfterExit(entry: entry, projectPath: projectPath, process: process, launchID: entry.launchID)
+            entry.requestedStop = false
+            setState(.idle, for: projectPath)
+            return true
         }
 
-        entry.process = nil
-        entry.outputPipe = nil
-        entry.outputBuffer = ""
-        entry.lastOutput = ""
-        entry.startupPhase = .idle
-        connectionsByProjectPath.removeValue(forKey: projectPath)
+        resetEntryAfterExit(entry: entry, projectPath: projectPath, process: nil, launchID: entry.launchID)
+        entry.requestedStop = false
         setState(.idle, for: projectPath)
+        return true
     }
 
     private func setState(_ state: State, for projectPath: String) {
@@ -280,16 +326,19 @@ final class OpenCodeRuntime {
         return process
     }
 
-    private func handleTermination(of process: Process, projectPath: String, entry: RuntimeEntry) {
-        guard entry.process === process else { return }
-        ManagedProcessRegistry.shared.unregister(process)
-        entry.process = nil
-        entry.outputPipe?.fileHandleForReading.readabilityHandler = nil
-        entry.outputPipe = nil
-        entry.outputBuffer = ""
-        entry.startupPhase = .idle
+    private func handleTermination(of process: Process, projectPath: String, entry: RuntimeEntry, launchID: UUID) {
+        defer {
+            ManagedProcessRegistry.shared.unregister(process)
+            processStore.remove(projectPath: projectPath, pid: process.processIdentifier)
+        }
 
-        if entry.requestedStop {
+        guard entry.launchID == launchID, entry.process === process else { return }
+
+        let wasRequestedStop = entry.requestedStop
+        let lastOutput = entry.lastOutput
+        resetEntryAfterExit(entry: entry, projectPath: projectPath, process: process, launchID: launchID)
+
+        if wasRequestedStop {
             entry.requestedStop = false
             setState(.idle, for: projectPath)
             return
@@ -302,10 +351,27 @@ final class OpenCodeRuntime {
             message = "Process exited with status \(process.terminationStatus)"
         }
 
-        let detail = entry.lastOutput.isEmpty ? message : entry.lastOutput
+        let detail = lastOutput.isEmpty ? message : lastOutput
         setState(.failed(projectPath: projectPath, message: detail), for: projectPath)
         userFacingError = detail
         logger.error("Runtime terminated unexpectedly for project \(projectPath, privacy: .public): \(detail, privacy: .public)")
+    }
+
+    private func resetEntryAfterExit(entry: RuntimeEntry, projectPath: String, process: Process?, launchID: UUID) {
+        guard entry.launchID == launchID else { return }
+
+        if let process {
+            process.terminationHandler = nil
+            processStore.remove(projectPath: projectPath, pid: process.processIdentifier)
+        }
+
+        entry.process = nil
+        entry.outputPipe?.fileHandleForReading.readabilityHandler = nil
+        entry.outputPipe = nil
+        entry.outputBuffer = ""
+        entry.lastOutput = ""
+        entry.startupPhase = .idle
+        connectionsByProjectPath.removeValue(forKey: projectPath)
     }
 
     private func waitForBoundURL(entry: RuntimeEntry, timeout: TimeInterval) async throws -> URL {
@@ -391,6 +457,22 @@ final class OpenCodeRuntime {
         }
 
         return nil
+    }
+
+    private func sweepPersistedProcessesIfNeeded() {
+        guard Self.shouldSweepPersistedProcessesOnLaunch, !Self.didSweepPersistedProcesses else { return }
+        Self.didSweepPersistedProcesses = true
+
+        let result = processStore.sweepTrackedProcesses()
+        guard result.totalCount > 0 else { return }
+
+        logger.info(
+            "Swept persisted runtimes total=\(result.totalCount, privacy: .public) terminated=\(result.terminatedCount, privacy: .public) surviving=\(result.survivingCount, privacy: .public)"
+        )
+    }
+
+    private static var shouldSweepPersistedProcessesOnLaunch: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil
     }
 
     private static func resolveOpenCodeExecutableURL() throws -> URL {
@@ -570,6 +652,7 @@ private enum OpenCodeRuntimeError: LocalizedError {
     case healthCheckTimedOut
     case startupOutputTimedOut
     case processExitedBeforeStartup(String)
+    case processTerminationTimedOut
 
     var errorDescription: String? {
         switch self {
@@ -585,6 +668,125 @@ private enum OpenCodeRuntimeError: LocalizedError {
             return "OpenCode did not report a listening address before the startup timeout."
         case .processExitedBeforeStartup(let message):
             return message
+        case .processTerminationTimedOut:
+            return "The previous OpenCode runtime did not exit cleanly, so NeoCode refused to start a duplicate background process."
         }
+    }
+}
+
+struct PersistedRuntimeProcessRecord: Codable, Equatable {
+    let projectPath: String
+    let pid: pid_t
+    let recordedAt: Date
+}
+
+struct PersistedRuntimeProcessSweepResult {
+    let totalCount: Int
+    let terminatedCount: Int
+    let survivingCount: Int
+}
+
+struct PersistedRuntimeProcessStore {
+    private static let cacheDirectoryName = "tech.watzon.NeoCode"
+    private static let cacheFileName = "runtime-processes.json"
+
+    private let fileManager = FileManager.default
+    private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
+    private let explicitCacheURL: URL?
+
+    init(cacheURL: URL? = nil) {
+        self.explicitCacheURL = cacheURL
+    }
+
+    func record(projectPath: String, pid: pid_t) {
+        guard pid > 0 else { return }
+
+        var records = loadRecords()
+        records.removeAll { $0.projectPath == projectPath || $0.pid == pid }
+        records.append(PersistedRuntimeProcessRecord(projectPath: projectPath, pid: pid, recordedAt: Date()))
+        saveRecords(records)
+    }
+
+    func remove(projectPath: String, pid: pid_t? = nil) {
+        let filtered = loadRecords().filter { record in
+            if record.projectPath != projectPath {
+                return true
+            }
+
+            if let pid {
+                return record.pid != pid
+            }
+
+            return false
+        }
+
+        saveRecords(filtered)
+    }
+
+    func sweepTrackedProcesses() -> PersistedRuntimeProcessSweepResult {
+        let records = loadRecords()
+        guard !records.isEmpty else {
+            return PersistedRuntimeProcessSweepResult(totalCount: 0, terminatedCount: 0, survivingCount: 0)
+        }
+
+        var survivors: [PersistedRuntimeProcessRecord] = []
+        var terminatedCount = 0
+
+        for record in records {
+            if !ManagedProcessRegistry.isProcessAlive(record.pid) {
+                terminatedCount += 1
+                continue
+            }
+
+            if ManagedProcessRegistry.terminateProcessIdentifier(record.pid) {
+                terminatedCount += 1
+            } else {
+                survivors.append(record)
+            }
+        }
+
+        saveRecords(survivors)
+        return PersistedRuntimeProcessSweepResult(
+            totalCount: records.count,
+            terminatedCount: terminatedCount,
+            survivingCount: survivors.count
+        )
+    }
+
+    private func loadRecords() -> [PersistedRuntimeProcessRecord] {
+        guard let url = cacheURL,
+              let data = try? Data(contentsOf: url),
+              let records = try? decoder.decode([PersistedRuntimeProcessRecord].self, from: data)
+        else {
+            return []
+        }
+
+        return records
+    }
+
+    private func saveRecords(_ records: [PersistedRuntimeProcessRecord]) {
+        guard let url = cacheURL else { return }
+
+        do {
+            try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let data = try encoder.encode(records)
+            try data.write(to: url, options: .atomic)
+        } catch {
+        }
+    }
+
+    private var cacheURL: URL? {
+        if let explicitCacheURL {
+            return explicitCacheURL
+        }
+
+        guard let applicationSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+
+        return applicationSupportURL
+            .appendingPathComponent(Self.cacheDirectoryName, isDirectory: true)
+            .appendingPathComponent(Self.cacheFileName, isDirectory: false)
     }
 }

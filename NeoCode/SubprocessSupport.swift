@@ -7,25 +7,24 @@ struct SubprocessResult: Sendable {
     let terminationReason: Process.TerminationReason
 }
 
+struct ManagedProcessTerminationResult: Sendable {
+    let rootPID: pid_t
+    let didTerminate: Bool
+}
+
 nonisolated final class ManagedProcessRegistry {
     static let shared = ManagedProcessRegistry()
 
     private let lock = NSLock()
     private var processes: [ObjectIdentifier: Process] = [:]
-    private var processGroups: [ObjectIdentifier: pid_t] = [:]
 
     private nonisolated init() {}
 
     nonisolated func register(_ process: Process) {
         let identifier = ObjectIdentifier(process)
-        let processIdentifier = process.processIdentifier
-        let processGroup = Self.processGroupIdentifier(of: processIdentifier) ?? processIdentifier
 
         lock.withLock {
             processes[identifier] = process
-            if processGroup > 0 {
-                processGroups[identifier] = processGroup
-            }
         }
     }
 
@@ -33,37 +32,42 @@ nonisolated final class ManagedProcessRegistry {
         lock.withLock {
             let identifier = ObjectIdentifier(process)
             _ = processes.removeValue(forKey: identifier)
-            _ = processGroups.removeValue(forKey: identifier)
         }
     }
 
     nonisolated func terminate(_ process: Process) {
-        let (rootPID, processGroupID) = lock.withLock { () -> (pid_t, pid_t) in
-            let identifier = ObjectIdentifier(process)
-            let groupID = processGroups[identifier] ?? process.processIdentifier
-            _ = processes.removeValue(forKey: identifier)
-            _ = processGroups.removeValue(forKey: identifier)
-            return (process.processIdentifier, groupID)
-        }
-
-        Self.terminateProcessTree(rootPID: rootPID, processGroupID: processGroupID)
+        _ = terminateTrackedProcess(process)
     }
 
     nonisolated func terminateAll() {
         let runningProcesses = lock.withLock {
-            let snapshot = processes.values.map { process in
-                let identifier = ObjectIdentifier(process)
-                let groupID = processGroups[identifier] ?? process.processIdentifier
-                return (process.processIdentifier, groupID)
-            }
-            processes.removeAll()
-            processGroups.removeAll()
-            return snapshot
+            Array(processes.values)
         }
 
-        for (rootPID, processGroupID) in runningProcesses {
-            Self.terminateProcessTree(rootPID: rootPID, processGroupID: processGroupID)
+        for process in runningProcesses {
+            _ = terminateTrackedProcess(process)
         }
+    }
+
+    @discardableResult
+    nonisolated func terminateTrackedProcess(_ process: Process) -> ManagedProcessTerminationResult {
+        let identifier = ObjectIdentifier(process)
+        let rootPID = lock.withLock {
+            processes[identifier]?.processIdentifier ?? process.processIdentifier
+        }
+
+        let didTerminate = Self.terminateProcessTree(rootPID: rootPID)
+        if didTerminate || !Self.isProcessAlive(rootPID) {
+            unregister(process)
+            return ManagedProcessTerminationResult(rootPID: rootPID, didTerminate: true)
+        }
+
+        return ManagedProcessTerminationResult(rootPID: rootPID, didTerminate: false)
+    }
+
+    @discardableResult
+    nonisolated static func terminateProcessIdentifier(_ pid: pid_t) -> Bool {
+        terminateProcessTree(rootPID: pid)
     }
 
     nonisolated static func isProcessAlive(_ pid: pid_t) -> Bool {
@@ -75,36 +79,22 @@ nonisolated final class ManagedProcessRegistry {
         return errno == EPERM
     }
 
-    private nonisolated static func terminateProcessTree(rootPID: pid_t, processGroupID: pid_t) {
-        guard rootPID > 0 || processGroupID > 0 else { return }
+    private nonisolated static func terminateProcessTree(rootPID: pid_t) -> Bool {
+        guard rootPID > 0 else { return true }
 
-        let descendants = rootPID > 0 ? descendantProcessIdentifiers(of: rootPID) : []
-        let orderedPIDs = descendants + (rootPID > 0 ? [rootPID] : [])
+        let descendants = descendantProcessIdentifiers(of: rootPID)
+        let orderedPIDs = descendants + [rootPID]
 
-        send(signal: SIGTERM, toProcessGroup: processGroupID)
         send(signal: SIGTERM, to: orderedPIDs)
-        waitForExit(of: orderedPIDs, processGroupID: processGroupID, timeout: 0.75)
-
-        let remainingPIDs = orderedPIDs.filter(isProcessAlive)
-        guard !remainingPIDs.isEmpty || isProcessGroupAlive(processGroupID) else { return }
-
-        send(signal: SIGKILL, toProcessGroup: processGroupID)
-        send(signal: SIGKILL, to: remainingPIDs)
-    }
-
-    private nonisolated static func processGroupIdentifier(of pid: pid_t) -> pid_t? {
-        guard pid > 0 else { return nil }
-        let groupID = getpgid(pid)
-        return groupID > 0 ? groupID : nil
-    }
-
-    private nonisolated static func isProcessGroupAlive(_ processGroupID: pid_t) -> Bool {
-        guard processGroupID > 0 else { return false }
-        if kill(-processGroupID, 0) == 0 {
+        if waitForExit(of: orderedPIDs, timeout: 0.75) {
             return true
         }
 
-        return errno == EPERM
+        let remainingPIDs = orderedPIDs.filter(isProcessAlive)
+        guard !remainingPIDs.isEmpty else { return true }
+
+        send(signal: SIGKILL, to: remainingPIDs)
+        return waitForExit(of: remainingPIDs, timeout: 1.5)
     }
 
     private nonisolated static func send(signal: Int32, to processIdentifiers: [pid_t]) {
@@ -113,21 +103,17 @@ nonisolated final class ManagedProcessRegistry {
         }
     }
 
-    private nonisolated static func send(signal: Int32, toProcessGroup processGroupID: pid_t) {
-        guard processGroupID > 0 else { return }
-        _ = Darwin.kill(-processGroupID, signal)
-    }
-
-    private nonisolated static func waitForExit(of processIdentifiers: [pid_t], processGroupID: pid_t, timeout: TimeInterval) {
+    private nonisolated static func waitForExit(of processIdentifiers: [pid_t], timeout: TimeInterval) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            if processIdentifiers.allSatisfy({ !isProcessAlive($0) })
-                && !isProcessGroupAlive(processGroupID) {
-                return
+            if processIdentifiers.allSatisfy({ !isProcessAlive($0) }) {
+                return true
             }
 
             Thread.sleep(forTimeInterval: 0.05)
         }
+
+        return processIdentifiers.allSatisfy { !isProcessAlive($0) }
     }
 
     private nonisolated static func descendantProcessIdentifiers(of parentPID: pid_t) -> [pid_t] {

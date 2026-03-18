@@ -51,7 +51,7 @@ struct ProjectSettings: Codable, Hashable {
 }
 
 struct SessionSummary: Codable, Identifiable, Hashable {
-    static let defaultTitle = "New session"
+    nonisolated static let defaultTitle = "New session"
 
     let id: String
     let parentID: String?

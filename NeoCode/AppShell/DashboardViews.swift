@@ -737,7 +737,7 @@ private struct DashboardStatusPill: View {
                 .fill(status.phase == .refreshing ? NeoCodeTheme.accent : NeoCodeTheme.textMuted)
                 .frame(width: 6, height: 6)
 
-            if let progress = status.progress {
+            if status.progress != nil {
                 Text("\(DashboardFormat.count(status.processedSessions))/\(DashboardFormat.count(status.totalSessions))")
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundStyle(NeoCodeTheme.textSecondary)

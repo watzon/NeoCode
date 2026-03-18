@@ -306,7 +306,12 @@ struct DashboardRefreshStatus: Hashable {
     )
 
     nonisolated var isVisible: Bool {
-        phase != .idle
+        switch phase {
+        case .idle:
+            false
+        case .priming, .refreshing, .failed:
+            true
+        }
     }
 
     nonisolated var progress: Double? {

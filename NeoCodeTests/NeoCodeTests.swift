@@ -3,6 +3,7 @@ import SwiftUI
 import Testing
 @testable import NeoCode
 
+@MainActor
 @Suite(.serialized)
 struct NeoCodeCoreTests {
     @Test func decodesSessionsAndBuildsTranscript() throws {
@@ -932,29 +933,45 @@ struct NeoCodeCoreTests {
         #expect(!ManagedProcessRegistry.isProcessAlive(childPID))
     }
 
-    @Test func managedProcessRegistryKillsOrphanedProcessGroup() async throws {
+    @Test func managedProcessRegistryTerminateAllSweepsTrackedProcesses() async throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", "sleep 30"]
+
+        try process.run()
+        ManagedProcessRegistry.shared.register(process)
+
+        ManagedProcessRegistry.shared.terminateAll()
+
+        try await waitForProcessToStop(process)
+        #expect(process.isRunning == false)
+    }
+
+    @MainActor
+    @Test func persistedRuntimeProcessStoreSweepsRecordedProcesses() async throws {
         let tempDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tempDirectory) }
 
-        let childPIDFile = tempDirectory.appendingPathComponent("child.pid")
+        let cacheURL = tempDirectory.appendingPathComponent("runtime-processes.json")
+        let store = PersistedRuntimeProcessStore(cacheURL: cacheURL)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", "sleep 30 & echo $! > \"\(childPIDFile.path)\" && sleep 0.2"]
+        process.arguments = ["-c", "sleep 30"]
 
         try process.run()
-        ManagedProcessRegistry.shared.register(process)
+        let pid = process.processIdentifier
+        store.record(projectPath: tempDirectory.path, pid: pid)
 
-        let rootPID = process.processIdentifier
-        let childPID = try await waitForChildProcessIdentifier(at: childPIDFile)
+        let result = store.sweepTrackedProcesses()
+        let secondPass = store.sweepTrackedProcesses()
 
-        try await waitForProcessToStop(process)
-        ManagedProcessRegistry.shared.terminate(process)
-
-        try await waitForProcessExit(childPID)
-        #expect(!ManagedProcessRegistry.isProcessAlive(rootPID))
-        #expect(!ManagedProcessRegistry.isProcessAlive(childPID))
+        try await waitForProcessExit(pid)
+        #expect(result.totalCount == 1)
+        #expect(result.terminatedCount == 1)
+        #expect(result.survivingCount == 0)
+        #expect(secondPass.totalCount == 0)
     }
 
     @MainActor
@@ -2524,6 +2541,7 @@ struct NeoCodeMainActorTests {
         #expect(parts[0]["filename"] as? String == "diagram.png")
     }
 
+    @MainActor
     @Test func composerAttachmentImportsPastedImagesAsFiles() async throws {
         let imageData = Data([0x89, 0x50, 0x4E, 0x47])
 
@@ -3634,6 +3652,7 @@ struct NeoCodeMainActorTests {
         #expect(persistence.loadSettings() == settings)
     }
 
+    @MainActor
     @Test func generalSettingsDecodeLegacyLaunchFlag() throws {
         let payload = #"{"launchToDashboard":false}"#
         let settings = try JSONDecoder().decode(NeoCodeGeneralSettings.self, from: Data(payload.utf8))
@@ -3662,6 +3681,7 @@ struct NeoCodeMainActorTests {
         )
     }
 
+    @MainActor
     @Test func persistedWorkspaceSelectionStoreRoundTripsSelection() {
         let suiteName = "tech.watzon.NeoCodeTests.workspace-selection.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
