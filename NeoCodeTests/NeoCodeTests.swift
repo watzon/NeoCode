@@ -3624,10 +3624,7 @@ struct NeoCodeMainActorTests {
         #expect(store.selectedSessionID == "ses_1")
     }
 
-    @Test func themeModeMapsToPreferredColorScheme() {
-        #expect(NeoCodeThemeMode.system.preferredColorScheme == nil)
-        #expect(NeoCodeThemeMode.light.preferredColorScheme == .light)
-        #expect(NeoCodeThemeMode.dark.preferredColorScheme == .dark)
+    @Test func themeModeMapsToAppKitAppearance() {
         #expect(NeoCodeThemeMode.system.appKitAppearanceName == nil)
         #expect(NeoCodeThemeMode.light.appKitAppearanceName == .aqua)
         #expect(NeoCodeThemeMode.dark.appKitAppearanceName == .darkAqua)

@@ -35,10 +35,6 @@ enum NeoCodeTheme {
     static var diffHunkBackground: Color { dynamicColor(\.diffHunkBackground) }
     static var diffHunkText: Color { dynamicColor(\.diffHunkText) }
 
-    static func preferredColorScheme(from appearance: NeoCodeAppearanceSettings) -> ColorScheme? {
-        appearance.themeMode.preferredColorScheme
-    }
-
     static var uiBaseFontSize: CGFloat {
         CGFloat(appearanceSettings.uiFontSize)
     }

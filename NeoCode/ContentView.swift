@@ -25,7 +25,6 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .ignoresSafeArea(.container, edges: .top)
-        .preferredColorScheme(NeoCodeTheme.preferredColorScheme(from: store.appSettings.appearance))
         .background(NeoCodeTheme.canvas.ignoresSafeArea())
         .background(WindowChromeConfigurator(updateService: updateService))
         .overlay(alignment: .topTrailing) {

@@ -71,17 +71,6 @@ enum NeoCodeThemeMode: String, Codable, CaseIterable, Hashable, Identifiable {
         }
     }
 
-    var preferredColorScheme: ColorScheme? {
-        switch self {
-        case .system:
-            return nil
-        case .light:
-            return .light
-        case .dark:
-            return .dark
-        }
-    }
-
     var appKitAppearanceName: NSAppearance.Name? {
         switch self {
         case .system:
