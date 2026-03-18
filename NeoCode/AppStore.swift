@@ -77,6 +77,16 @@ final class AppStore {
         let originalAttachments: [ComposerAttachment]
     }
 
+    private struct PendingSendState {
+        let token: UUID
+        let projectID: ProjectSummary.ID
+        let originalSessionID: String
+        let task: Task<Void, Never>
+        var activeSessionID: String?
+        var stagedUI: StagedSendUI?
+        var didAcceptRemoteSend = false
+    }
+
     enum GitOperationState: Equatable {
         case initializingRepository
         case switchingBranch
@@ -238,6 +248,7 @@ final class AppStore {
     private var isDashboardActive = false
     private var queuedMessageDispatchingSessionIDs = Set<String>()
     private var sessionCreationTasksBySessionID: [String: Task<String?, Never>] = [:]
+    private var pendingSendStatesByOriginalSessionID: [String: PendingSendState] = [:]
     private var lastWorkspaceSelection: AppContentSelection = .dashboard
     private var sessionListSyncActivityByProjectID: [ProjectSummary.ID: Int] = [:]
     private var loadingSessionCountsByProjectID: [ProjectSummary.ID: Int] = [:]
@@ -1368,6 +1379,18 @@ final class AppStore {
             projectID: projectID,
             clearComposerOnSend: true
         )
+        registerPendingSendUI(stagedUI, forOriginalSessionID: initialSessionID)
+
+        guard !Task.isCancelled else {
+            handleCancelledSend(
+                originatingSessionID: initialSessionID,
+                fallbackSessionID: initialSessionID,
+                projectID: projectID,
+                restoreComposerOnFailure: true
+            )
+            reevaluateRuntimeRetention(using: runtime)
+            return
+        }
 
         async let resolvedFileReferences = resolveSendFileReferences(for: trimmed, projectID: projectID)
 
@@ -1387,6 +1410,17 @@ final class AppStore {
             return
         }
 
+        guard !Task.isCancelled else {
+            handleCancelledSend(
+                originatingSessionID: initialSessionID,
+                fallbackSessionID: initialSessionID,
+                projectID: projectID,
+                restoreComposerOnFailure: true
+            )
+            reevaluateRuntimeRetention(using: runtime)
+            return
+        }
+
         guard let sessionID = await resolveSessionForSend(projectID: projectID, service: service) else {
             revertFailedSend(
                 stagedUI,
@@ -1399,12 +1433,37 @@ final class AppStore {
             return
         }
 
+        registerPendingSendActiveSessionID(sessionID, forOriginalSessionID: initialSessionID)
+
+        guard !Task.isCancelled else {
+            handleCancelledSend(
+                originatingSessionID: initialSessionID,
+                fallbackSessionID: sessionID,
+                projectID: projectID,
+                restoreComposerOnFailure: true
+            )
+            reevaluateRuntimeRetention(using: runtime)
+            return
+        }
+
         let fileReferences = await resolvedFileReferences
+
+        guard !Task.isCancelled else {
+            handleCancelledSend(
+                originatingSessionID: initialSessionID,
+                fallbackSessionID: sessionID,
+                projectID: projectID,
+                restoreComposerOnFailure: true
+            )
+            reevaluateRuntimeRetention(using: runtime)
+            return
+        }
 
         let accepted = await sendDraft(
             using: service,
             projectID: projectID,
             sessionID: sessionID,
+            originatingSessionID: initialSessionID,
             fileReferences: fileReferences,
             stagedUI: stagedUI,
             text: trimmed,
@@ -1420,11 +1479,41 @@ final class AppStore {
         reevaluateRuntimeRetention(using: runtime)
     }
 
+    func beginSendDraft(using runtime: OpenCodeRuntime) {
+        guard let projectID = selectedProject?.id,
+              let sessionID = selectedSessionID,
+              self.projectID(for: sessionID) == projectID
+        else {
+            Task { [weak self] in
+                await self?.sendDraft(using: runtime)
+            }
+            return
+        }
+
+        let token = UUID()
+        var task: Task<Void, Never>!
+        task = Task { [weak self] in
+            guard let self else { return }
+            await self.sendDraft(using: runtime)
+            self.finishPendingSendTracking(forOriginalSessionID: sessionID, token: token)
+        }
+
+        pendingSendStatesByOriginalSessionID[sessionID] = PendingSendState(
+            token: token,
+            projectID: projectID,
+            originalSessionID: sessionID,
+            task: task,
+            activeSessionID: sessionID,
+            stagedUI: nil
+        )
+    }
+
     @discardableResult
     func sendDraft(
         using service: any OpenCodeServicing,
         projectID: ProjectSummary.ID,
         sessionID: String,
+        originatingSessionID: String? = nil,
         fileReferences: [ComposerPromptFileReference] = [],
         allowQueueIfRunning: Bool = false,
         stagedUI: StagedSendUI? = nil,
@@ -1462,6 +1551,7 @@ final class AppStore {
             using: service,
             projectID: projectID,
             sessionID: sessionID,
+            originatingSessionID: originatingSessionID,
             clearComposerOnSend: clearComposerOnSend,
             restoreComposerOnFailure: restoreComposerOnFailure,
             stagedUI: stagedUI
@@ -1477,6 +1567,7 @@ final class AppStore {
         using service: any OpenCodeServicing,
         projectID: ProjectSummary.ID,
         sessionID: String,
+        originatingSessionID: String? = nil,
         clearComposerOnSend: Bool,
         restoreComposerOnFailure: Bool,
         stagedUI: StagedSendUI? = nil
@@ -1541,6 +1632,9 @@ final class AppStore {
             return false
         }
 
+        if let originatingSessionID {
+            pendingSendStatesByOriginalSessionID[originatingSessionID]?.didAcceptRemoteSend = true
+        }
         isSending = false
         return true
     }
@@ -5093,6 +5187,50 @@ final class AppStore {
     private func cancelPendingSessionCreation(for sessionID: String) {
         sessionCreationTasksBySessionID[sessionID]?.cancel()
         sessionCreationTasksBySessionID.removeValue(forKey: sessionID)
+    }
+
+    private func registerPendingSendUI(_ stagedUI: StagedSendUI, forOriginalSessionID sessionID: String) {
+        guard var state = pendingSendStatesByOriginalSessionID[sessionID] else { return }
+        state.stagedUI = stagedUI
+        pendingSendStatesByOriginalSessionID[sessionID] = state
+    }
+
+    private func registerPendingSendActiveSessionID(_ activeSessionID: String, forOriginalSessionID sessionID: String) {
+        guard var state = pendingSendStatesByOriginalSessionID[sessionID] else { return }
+        state.activeSessionID = activeSessionID
+        pendingSendStatesByOriginalSessionID[sessionID] = state
+    }
+
+    private func handleCancelledSend(
+        originatingSessionID: String,
+        fallbackSessionID: String,
+        projectID: ProjectSummary.ID,
+        restoreComposerOnFailure: Bool
+    ) {
+        let state = pendingSendStatesByOriginalSessionID[originatingSessionID]
+        let resolvedSessionID = state?.activeSessionID ?? fallbackSessionID
+
+        if let stagedUI = state?.stagedUI,
+           state?.didAcceptRemoteSend != true {
+            revertFailedSend(
+                stagedUI,
+                sessionID: resolvedSessionID,
+                projectID: projectID,
+                restoreComposerOnFailure: restoreComposerOnFailure
+            )
+        }
+
+        isSending = false
+    }
+
+    private func finishPendingSendTracking(forOriginalSessionID sessionID: String, token: UUID) {
+        guard let state = pendingSendStatesByOriginalSessionID[sessionID],
+              state.token == token
+        else {
+            return
+        }
+
+        pendingSendStatesByOriginalSessionID.removeValue(forKey: sessionID)
     }
 
     private func stageSendUI(

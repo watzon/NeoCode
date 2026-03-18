@@ -68,11 +68,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = terminationIntent == .updateRelaunch
+        alert.messageText =
+            terminationIntent == .updateRelaunch
             ? "Install update and restart NeoCode?"
             : "Quit NeoCode?"
         alert.informativeText = terminationAlertMessage(for: warning, intent: terminationIntent)
-        alert.addButton(withTitle: terminationIntent == .updateRelaunch ? "Install and Restart" : "Quit")
+        alert.addButton(
+            withTitle: terminationIntent == .updateRelaunch ? "Install and Restart" : "Quit")
         alert.addButton(withTitle: "Cancel")
 
         let response = alert.runModal()
@@ -99,13 +101,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.terminate(nil)
     }
 
-    private func terminationAlertMessage(for warning: AppTerminationWarningContext, intent: TerminationIntent) -> String {
+    private func terminationAlertMessage(
+        for warning: AppTerminationWarningContext, intent: TerminationIntent
+    ) -> String {
         let intro: String
         switch intent {
         case .userQuit:
-            intro = "NeoCode still has active sessions. Quitting now may interrupt responses or leave pending questions unanswered."
+            intro =
+                "NeoCode still has active sessions. Quitting now may interrupt responses or leave pending questions unanswered."
         case .updateRelaunch:
-            intro = "NeoCode needs to close to finish installing the update, but active sessions are still running. Restarting now may interrupt responses or leave pending questions unanswered."
+            intro =
+                "NeoCode needs to close to finish installing the update, but active sessions are still running. Restarting now may interrupt responses or leave pending questions unanswered."
         }
 
         let preview = warning.sessions.prefix(5).map { session in
@@ -161,7 +167,7 @@ private struct AppSceneView: View {
 
     var body: some View {
         ContentView()
-            .frame(minWidth: 980, minHeight: 600)
+            .frame(minWidth: 1165, minHeight: 875)
             .environment(store)
             .environment(runtime)
             .environment(updateService)

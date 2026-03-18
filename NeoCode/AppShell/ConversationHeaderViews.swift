@@ -49,6 +49,7 @@ struct SessionHeaderView: View {
                 if store.gitStatus.isRepository {
                     GitActionsSplitButton(
                         gitStatus: store.gitStatus,
+                        commitPreview: store.gitCommitPreview,
                         operationState: store.currentGitOperationState,
                         isBusy: store.isPerformingGitOperation,
                         isMenuOpen: openMenu == .gitActions,
@@ -188,6 +189,7 @@ struct SessionHeaderView: View {
         }
 
         workspaceTools = workspaceToolService.projectOpenTools()
+        await store.refreshGitCommitPreview(showLoadingIndicator: false, projectPathOverride: projectPath)
     }
 
     private func selectWorkspaceTool(_ tool: WorkspaceTool) {
@@ -235,10 +237,12 @@ private struct WorkspaceToolSplitButton: View {
 
     var body: some View {
         HeaderSplitControl(
-            title: tool.label,
             systemImage: nil,
             icon: {
                 WorkspaceToolIconView(tool: tool)
+            },
+            label: {
+                Text(tool.label)
             },
             primaryAction: {
                 service.openProject(at: projectPath, with: tool)
@@ -273,6 +277,7 @@ private struct WorkspaceToolSplitButton: View {
 
 private struct GitActionsSplitButton: View {
     let gitStatus: GitRepositoryStatus
+    let commitPreview: GitCommitPreview?
     let operationState: AppStore.GitOperationState?
     let isBusy: Bool
     let isMenuOpen: Bool
@@ -284,9 +289,22 @@ private struct GitActionsSplitButton: View {
 
     var body: some View {
         HeaderSplitControl(
-            title: operationState.map { "\($0.title)..." } ?? gitStatus.primaryAction.title,
             systemImage: gitStatus.primaryAction.systemImage,
             icon: { EmptyView() },
+            label: {
+                HStack(spacing: 6) {
+                    Text(operationState.map { "\($0.title)..." } ?? gitStatus.primaryAction.title)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+
+                    if shouldShowCommitStats, let commitPreview {
+                        CommitStatInlineView(
+                            additions: commitPreview.totalAdditions,
+                            deletions: commitPreview.totalDeletions
+                        )
+                    }
+                }
+            },
             primaryAction: onPrimaryAction,
             isPrimaryDisabled: isBusy || !gitStatus.isPrimaryActionEnabled,
             isMenuOpen: isMenuOpen,
@@ -330,6 +348,31 @@ private struct GitActionsSplitButton: View {
                 }
             }
         )
+    }
+
+    private var shouldShowCommitStats: Bool {
+        operationState == nil && gitStatus.primaryAction == .commit && gitStatus.hasChanges
+    }
+}
+
+private struct CommitStatInlineView: View {
+    let additions: Int
+    let deletions: Int
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if additions > 0 {
+                Text("+\(additions)")
+                    .foregroundStyle(Color(red: 0.48, green: 0.94, blue: 0.56))
+            }
+
+            if deletions > 0 {
+                Text("-\(deletions)")
+                    .foregroundStyle(Color(red: 0.96, green: 0.52, blue: 0.43))
+            }
+        }
+        .font(.system(size: 12, weight: .semibold, design: .rounded))
+        .monospacedDigit()
     }
 }
 
@@ -526,10 +569,10 @@ private struct SessionStatsDropdown: View {
     }
 }
 
-private struct HeaderSplitControl<Icon: View, MenuContent: View>: View {
-    let title: String
+private struct HeaderSplitControl<Icon: View, Label: View, MenuContent: View>: View {
     let systemImage: String?
     @ViewBuilder let icon: () -> Icon
+    @ViewBuilder let label: () -> Label
     let primaryAction: () -> Void
     let isPrimaryDisabled: Bool
     let isMenuOpen: Bool
@@ -549,9 +592,10 @@ private struct HeaderSplitControl<Icon: View, MenuContent: View>: View {
 
                     icon()
 
-                    Text(title)
+                    label()
                         .font(.neoAction)
                         .foregroundStyle(primaryForegroundColor)
+                        .lineLimit(1)
                 }
                 .padding(.horizontal, 12)
                 .frame(height: 32)
