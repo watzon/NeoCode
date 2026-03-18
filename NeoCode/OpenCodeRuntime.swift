@@ -293,9 +293,8 @@ final class OpenCodeRuntime {
     private func makeProcess(for configuration: OpenCodeRuntimeConfiguration, entry: RuntimeEntry, projectPath: String) throws -> Process {
         let process = Process()
         let opencodeExecutableURL = try Self.resolveOpenCodeExecutableURL()
-        process.executableURL = try Self.resolveNodeExecutableURL()
+        process.executableURL = opencodeExecutableURL
         process.arguments = [
-            opencodeExecutableURL.resolvingSymlinksInPath().path,
             "serve",
             "--hostname", configuration.host,
             "--port", "0",
@@ -523,43 +522,6 @@ final class OpenCodeRuntime {
         throw OpenCodeRuntimeError.executableNotFound(details)
     }
 
-    private static func resolveNodeExecutableURL() throws -> URL {
-        let fileManager = FileManager.default
-        let environment = ProcessInfo.processInfo.environment
-        let pathEnv = environment["PATH"] ?? "<missing>"
-        let candidates = [
-            "/opt/homebrew/bin/node",
-            "/usr/local/bin/node",
-        ]
-
-        resolutionLogger.info("Resolving node executable")
-        resolutionLogger.debug("PATH env for node: \(pathEnv, privacy: .public)")
-
-        for candidate in candidates {
-            let exists = fileManager.fileExists(atPath: candidate)
-            let executable = fileManager.isExecutableFile(atPath: candidate)
-            resolutionLogger.debug("Node candidate: \(candidate, privacy: .public) exists=\(exists) executable=\(executable)")
-            if executable {
-                return URL(fileURLWithPath: candidate)
-            }
-        }
-
-        if let path = environment["PATH"] {
-            for directory in path.split(separator: ":") {
-                let candidate = String(directory) + "/node"
-                let exists = fileManager.fileExists(atPath: candidate)
-                let executable = fileManager.isExecutableFile(atPath: candidate)
-                resolutionLogger.debug("PATH node candidate: \(candidate, privacy: .public) exists=\(exists) executable=\(executable)")
-                if executable {
-                    return URL(fileURLWithPath: candidate)
-                }
-            }
-        }
-
-        let details = "PATH=\(pathEnv)"
-        throw OpenCodeRuntimeError.nodeExecutableNotFound(details)
-    }
-
     private static func enhancedPATH(from existingPATH: String?) -> String {
         var entries = [
             NSHomeDirectory() + "/.bun/bin",
@@ -647,7 +609,6 @@ private struct OpenCodeHTTPClient {
 
 private enum OpenCodeRuntimeError: LocalizedError {
     case executableNotFound(String)
-    case nodeExecutableNotFound(String)
     case invalidServerResponse
     case healthCheckTimedOut
     case startupOutputTimedOut
@@ -658,8 +619,6 @@ private enum OpenCodeRuntimeError: LocalizedError {
         switch self {
         case .executableNotFound(let details):
             return "Could not find the OpenCode CLI. \(details)"
-        case .nodeExecutableNotFound(let details):
-            return "Could not find Node.js required to launch the OpenCode CLI. \(details)"
         case .invalidServerResponse:
             return "OpenCode returned an invalid response while starting."
         case .healthCheckTimedOut:

@@ -973,7 +973,7 @@ private final class ComposerNSTextView: NSTextView {
     private func setupPlaceholderLabel() {
         guard placeholderLabel == nil else { return }
 
-        let label = NSTextField(labelWithString: placeholder ?? "")
+        let label = ComposerPlaceholderLabel(labelWithString: placeholder ?? "")
         label.isEditable = false
         label.isSelectable = false
         label.backgroundColor = .clear
@@ -1171,6 +1171,12 @@ private final class ComposerNSTextView: NSTextView {
         let contentType = (try? resolvedURL.resourceValues(forKeys: [.contentTypeKey]))?.contentType
             ?? UTType(filenameExtension: resolvedURL.pathExtension)
         return contentType?.preferredMIMEType?.lowercased().hasPrefix("image/") == true
+    }
+}
+
+private final class ComposerPlaceholderLabel: NSTextField {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
     }
 }
 
