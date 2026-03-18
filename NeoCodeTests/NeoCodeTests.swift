@@ -3778,9 +3778,9 @@ struct NeoCodeMainActorTests {
     @MainActor
     @Test func codexPresetCatalogIncludesAllCodexThemes() {
         #expect(NeoCodeThemePresetCatalog.decodeFailureDescription == nil)
-        #expect(NeoCodeThemePresetCatalog.presets.count == 25)
+        #expect(NeoCodeThemePresetCatalog.presets.count == 26)
         #expect(NeoCodeThemePresetCatalog.presets(for: .light).count == 13)
-        #expect(NeoCodeThemePresetCatalog.presets(for: .dark).count == 24)
+        #expect(NeoCodeThemePresetCatalog.presets(for: .dark).count == 25)
     }
 
     @MainActor

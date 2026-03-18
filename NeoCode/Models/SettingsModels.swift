@@ -943,6 +943,25 @@ enum NeoCodeThemePresetCatalog {
         }
       },
       {
+        "id": "maple",
+        "title": "Maple",
+        "badgeText": "Aa",
+        "badgeBackgroundHex": "#15120F",
+        "badgeForegroundHex": "#E8872B",
+        "darkTheme": {
+          "accentHex": "#E8872B",
+          "backgroundHex": "#15120F",
+          "foregroundHex": "#E8E0D6",
+          "contrast": 77,
+          "isSidebarTranslucent": false,
+          "diffAddedHex": "#54B47C",
+          "diffRemovedHex": "#D68642",
+          "skillHex": "#E8872B",
+          "uiFontName": "SF Pro",
+          "codeFontName": "SF Mono"
+        }
+      },
+      {
         "id": "matrix",
         "title": "Matrix",
         "badgeText": "Aa",
