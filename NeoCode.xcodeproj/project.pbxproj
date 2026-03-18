@@ -411,13 +411,8 @@
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = NeoCode;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_SUEnableAutomaticChecks = YES;
-				INFOPLIST_KEY_SUFeedURL = "https://github.com/watzon/NeoCode/releases/latest/download/appcast.xml";
-				INFOPLIST_KEY_SUPublicEDKey = "$(SPARKLE_PUBLIC_ED_KEY)";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Config/NeoCode-Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -426,6 +421,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = tech.watzon.NeoCode;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
+				SPARKLE_PUBLIC_ED_KEY = "yAaH9xyJXs148G93N3krPRZd4+9aGG5UaRWYacA3rUA=";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -448,13 +444,8 @@
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = NeoCode;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_SUEnableAutomaticChecks = YES;
-				INFOPLIST_KEY_SUFeedURL = "https://github.com/watzon/NeoCode/releases/latest/download/appcast.xml";
-				INFOPLIST_KEY_SUPublicEDKey = "$(SPARKLE_PUBLIC_ED_KEY)";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Config/NeoCode-Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -463,6 +454,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = tech.watzon.NeoCode;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
+				SPARKLE_PUBLIC_ED_KEY = "yAaH9xyJXs148G93N3krPRZd4+9aGG5UaRWYacA3rUA=";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;

@@ -39,7 +39,7 @@ NeoCode uses Sparkle EdDSA signing for updates.
 
 ### Key Storage
 
-- Public key: embedded into release builds as `SUPublicEDKey`
+- Public key: checked into the app target as `SPARKLE_PUBLIC_ED_KEY` and embedded into all builds as `SUPublicEDKey`
 - Private key: stored in the macOS Keychain and managed by Sparkle's tooling
 - Default NeoCode Sparkle Keychain account: `tech.watzon.NeoCode`
 
@@ -204,7 +204,7 @@ That means every published GitHub release must include:
 These are part of the expected release contract:
 
 - release builds are produced through `just archive` / `just export-app` / `just release`
-- Sparkle public key injection happens at archive time, not via a checked-in plain plist file
+- the checked-in `SPARKLE_PUBLIC_ED_KEY` build setting must match the active Sparkle Keychain key
 - the same Sparkle signing key must continue to be used unless there is an intentional key rotation
 - notarization must happen before appcast generation so the signed bytes in the appcast match the stapled DMG users will download
 - public releases must use Developer ID signing plus notarization; ad hoc or self-signed binaries are not valid release artifacts

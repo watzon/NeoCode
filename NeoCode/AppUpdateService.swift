@@ -413,7 +413,7 @@ final class AppUpdateService: NSObject, SPUUpdaterDelegate {
         let feedURL = (infoDictionary["SUFeedURL"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if publicKey?.isEmpty != false {
-            return "Sparkle is not configured for this build yet. Create the NeoCode Sparkle key with `just sparkle-keygen`, then archive or export through the release justfile so the public key is embedded automatically."
+            return "Sparkle is missing its embedded public key for this build. Run `just sparkle-public-key` and make sure `SPARKLE_PUBLIC_ED_KEY` matches the active NeoCode Sparkle key."
         }
 
         if feedURL?.isEmpty != false {

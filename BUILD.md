@@ -89,7 +89,9 @@ just archive
 This command:
 
 - requires the Sparkle signing key to be available in Keychain
-- automatically reads the Sparkle public key and injects it into the archive build as `SUPublicEDKey`
+- verifies the Sparkle key is available locally and passes the active public key into the archive build
+
+Normal Xcode and `just build` / `just build-release` builds already embed NeoCode's checked-in `SUPublicEDKey`, so Sparkle stays available outside the release pipeline too.
 
 ### Export the signed app bundle
 
