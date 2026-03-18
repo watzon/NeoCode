@@ -1014,7 +1014,7 @@ private struct ThemePresetPicker: View {
 
     var body: some View {
         Button(action: toggleMenu) {
-            NeoCodeDropdownTriggerLabel(title: triggerTitle, isPresented: isPresented) {
+            FixedWidthDropdownTriggerLabel(title: triggerTitle, isPresented: isPresented, width: 120) {
                 ThemePresetBadgeView(preset: selectedPreset)
             }
         }
@@ -1069,5 +1069,40 @@ private struct ThemePresetBadgeView: View {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(background)
             )
+    }
+}
+
+private struct FixedWidthDropdownTriggerLabel<Leading: View>: View {
+    let title: String
+    let isPresented: Bool
+    let width: CGFloat
+    @ViewBuilder let leading: () -> Leading
+
+    var body: some View {
+        HStack(spacing: 8) {
+            leading()
+
+            Text(title)
+                .font(.neoAction)
+                .foregroundStyle(NeoCodeTheme.textPrimary)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Image(systemName: "chevron.down")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(NeoCodeTheme.textSecondary)
+                .rotationEffect(.degrees(isPresented ? 180 : 0))
+        }
+        .padding(.horizontal, 12)
+        .frame(width: width, height: 32)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(isPresented ? NeoCodeTheme.panelSoft : NeoCodeTheme.panelRaised)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(isPresented ? NeoCodeTheme.lineStrong : NeoCodeTheme.line, lineWidth: 1)
+                )
+        )
+        .animation(.easeOut(duration: 0.16), value: isPresented)
     }
 }
