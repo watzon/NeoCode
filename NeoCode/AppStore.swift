@@ -239,6 +239,7 @@ final class AppStore {
     private var locallyActiveSessionIDs = Set<String>()
     private var observedRunningSessionIDs = Set<String>()
     private var finishedSessionIDs = Set<String>()
+    private var failedSessionIDs = Set<String>()
     private var bufferedTextDeltas: [BufferedTextDeltaKey: BufferedTextDelta] = [:]
     private var bufferedTextDeltaOrder: [BufferedTextDeltaKey] = []
     private var bufferedDeltaFlushTask: Task<Void, Never>?
@@ -326,7 +327,7 @@ final class AppStore {
         set {
             if let newValue {
                 selectedContent = .session(newValue)
-                clearFinishedIndicator(for: newValue)
+                clearStatusIndicators(for: newValue)
             } else {
                 selectedContent = .dashboard
             }
@@ -522,6 +523,10 @@ final class AppStore {
 
     func showsFinishedIndicator(for sessionID: String) -> Bool {
         finishedSessionIDs.contains(sessionID)
+    }
+
+    func showsFailedIndicator(for sessionID: String) -> Bool {
+        failedSessionIDs.contains(sessionID)
     }
 
     func terminationWarningContext() -> AppTerminationWarningContext? {
@@ -1734,6 +1739,8 @@ final class AppStore {
         if let originatingSessionID {
             pendingSendStatesByOriginalSessionID[originatingSessionID]?.didAcceptRemoteSend = true
         }
+        markSidebarActivity(sessionID: sessionID, projectID: projectID)
+        scheduleProjectPersistence()
         isSending = false
         return true
     }
@@ -1894,6 +1901,7 @@ final class AppStore {
         let upstreamMessageID = targetMessage.messageID ?? targetMessage.id
         let originalTranscript = currentTranscript
         let originalUpdatedAt = session.lastUpdatedAt
+        let originalSidebarActivityAt = session.lastSidebarActivityAt
         let truncatedTranscript = Array(originalTranscript.prefix(messageIndex))
         let optimisticID = "optimistic-user-\(UUID().uuidString)"
         let now = Date()
@@ -1916,6 +1924,7 @@ final class AppStore {
                 projectID: projectID
             )
             touchSession(sessionID: sessionID, projectID: projectID, updatedAt: now)
+            markSidebarActivity(sessionID: sessionID, projectID: projectID, at: now)
             setSessionStatus(.running, sessionID: sessionID, projectID: projectID)
 
             try await service.sendPromptAsync(
@@ -1949,6 +1958,11 @@ final class AppStore {
 
             replaceTranscript(in: sessionID, projectID: projectID, with: originalTranscript)
             touchSession(sessionID: sessionID, projectID: projectID, updatedAt: originalUpdatedAt)
+            markSidebarActivity(sessionID: sessionID, projectID: projectID, at: originalSidebarActivityAt ?? originalUpdatedAt)
+            if originalSidebarActivityAt == nil,
+               let indices = indices(for: sessionID, projectID: projectID) {
+                projects[indices.project].sessions[indices.session].lastSidebarActivityAt = nil
+            }
             refreshSessionStatus(sessionID: sessionID, projectID: projectID)
             cancelStreamingRecoveryCheck(for: sessionID)
             lastError = error.localizedDescription
@@ -4115,6 +4129,10 @@ final class AppStore {
             merged.transcript = []
             merged.status = existing.status
             merged.lastUpdatedAt = max(existing.lastUpdatedAt, incoming.lastUpdatedAt)
+            merged.lastSidebarActivityAt = max(existing.lastSidebarActivityAt ?? .distantPast, incoming.lastSidebarActivityAt ?? .distantPast)
+            if merged.lastSidebarActivityAt == .distantPast {
+                merged.lastSidebarActivityAt = nil
+            }
             if merged.composerState == nil {
                 merged.composerState = existing.composerState
             }
@@ -4153,6 +4171,10 @@ final class AppStore {
             var updated = session
             updated.transcript = []
             updated = updated.applyingInferredTitle(from: transcript)
+            updated.lastSidebarActivityAt = max(existing.lastSidebarActivityAt ?? .distantPast, updated.lastSidebarActivityAt ?? .distantPast)
+            if updated.lastSidebarActivityAt == .distantPast {
+                updated.lastSidebarActivityAt = nil
+            }
             if updated.stats == nil {
                 updated.stats = existing.stats
             }
@@ -4304,6 +4326,9 @@ final class AppStore {
             fallback: previousStatus
         )
         projects[indices.project].sessions[indices.session].status = resolvedStatus
+        if previousStatus.isActive && !resolvedStatus.isActive {
+            markSidebarActivity(sessionID: sessionID, projectID: projectID)
+        }
         updateFinishedIndicator(sessionID: sessionID, previousStatus: previousStatus, newStatus: resolvedStatus)
         refreshSystemSleepAssertion()
         if !resolvedStatus.isActive {
@@ -4416,6 +4441,8 @@ final class AppStore {
                 || message.contains("operation was aborted")
                 || message.contains("request aborted")
                 || message.contains("stream aborted")
+                || message.contains("questionrejectederror")
+                || message.contains("question rejected")
         }
     }
 
@@ -4464,20 +4491,23 @@ final class AppStore {
         bufferedTextDeltas.keys.contains { $0.sessionID == sessionID }
     }
 
-    private func clearFinishedIndicator(for sessionID: String?) {
+    private func clearStatusIndicators(for sessionID: String?) {
         guard let sessionID else { return }
         finishedSessionIDs.remove(sessionID)
+        failedSessionIDs.remove(sessionID)
     }
 
     private func updateFinishedIndicator(sessionID: String, previousStatus: SessionStatus, newStatus: SessionStatus) {
         if newStatus.isActive {
             observedRunningSessionIDs.insert(sessionID)
             finishedSessionIDs.remove(sessionID)
+            failedSessionIDs.remove(sessionID)
             return
         }
 
         if selectedSessionID == sessionID {
             finishedSessionIDs.remove(sessionID)
+            failedSessionIDs.remove(sessionID)
         }
 
         guard observedRunningSessionIDs.contains(sessionID) else { return }
@@ -4487,9 +4517,15 @@ final class AppStore {
             if previousStatus.isActive, selectedSessionID != sessionID {
                 finishedSessionIDs.insert(sessionID)
             }
+            failedSessionIDs.remove(sessionID)
             observedRunningSessionIDs.remove(sessionID)
         case .awaitingInput, .error:
             finishedSessionIDs.remove(sessionID)
+            if newStatus == .error, previousStatus.isActive, selectedSessionID != sessionID {
+                failedSessionIDs.insert(sessionID)
+            } else {
+                failedSessionIDs.remove(sessionID)
+            }
             observedRunningSessionIDs.remove(sessionID)
         case .running, .retrying:
             break
@@ -4781,6 +4817,11 @@ final class AppStore {
         guard let indices = indices(for: sessionID, projectID: projectID) else { return }
         projects[indices.project].sessions[indices.session].lastUpdatedAt = updatedAt
         scheduleProjectPersistence()
+    }
+
+    private func markSidebarActivity(sessionID: String, projectID: ProjectSummary.ID, at date: Date = .now) {
+        guard let indices = indices(for: sessionID, projectID: projectID) else { return }
+        projects[indices.project].sessions[indices.session].lastSidebarActivityAt = date
     }
 
     private func replacePendingPermissions(_ requests: [OpenCodePermissionRequest], in projectID: ProjectSummary.ID) {
@@ -5634,6 +5675,10 @@ final class AppStore {
         }
         replacement.transcript = []
         replacement.lastUpdatedAt = max(existing.lastUpdatedAt, session.lastUpdatedAt)
+        replacement.lastSidebarActivityAt = max(existing.lastSidebarActivityAt ?? .distantPast, session.lastSidebarActivityAt ?? .distantPast)
+        if replacement.lastSidebarActivityAt == .distantPast {
+            replacement.lastSidebarActivityAt = nil
+        }
         projects[projectIndex].sessions[sessionIndex] = replacement
         moveTranscript(from: sessionID, to: session.id)
         scheduleProjectPersistence()
@@ -5768,6 +5813,10 @@ final class AppStore {
         }
 
         merged.lastUpdatedAt = max(existing.lastUpdatedAt, incoming.lastUpdatedAt)
+        merged.lastSidebarActivityAt = max(existing.lastSidebarActivityAt ?? .distantPast, incoming.lastSidebarActivityAt ?? .distantPast)
+        if merged.lastSidebarActivityAt == .distantPast {
+            merged.lastSidebarActivityAt = nil
+        }
         merged.isEphemeral = existing.isEphemeral && incoming.isEphemeral
         return merged.applyingInferredTitle(from: merged.transcript)
     }

@@ -331,6 +331,32 @@ struct NeoCodeCoreTests {
         }
     }
 
+    @Test func rejectedQuestionToolPartsRenderAsCancelled() {
+        let timestamp = Date(timeIntervalSince1970: 1_710_616_270)
+        let part = OpenCodePart(
+            id: "part_question_rejected",
+            sessionID: "ses_1",
+            messageID: "msg_1",
+            type: .tool,
+            text: nil,
+            tool: "functions.question",
+            mime: nil,
+            filename: nil,
+            url: nil,
+            source: nil,
+            state: OpenCodeToolState(
+                status: .error,
+                input: nil,
+                output: nil,
+                error: "QuestionRejectedError"
+            ),
+            time: OpenCodeTimeContainer(created: timestamp, updated: timestamp, completed: timestamp)
+        )
+
+        #expect(part.renderedText == "question cancelled")
+        #expect(part.shouldDisplay == true)
+    }
+
     @Test func decodesSessionCompactedEvent() throws {
         let event = try OpenCodeEventDecoder.decode(
             frame: OpenCodeSSEFrame(
@@ -1074,6 +1100,32 @@ struct NeoCodeCoreTests {
         #expect(project.displayedSessions(showAll: true).map(\.id) == sessions.reversed().map(\.id))
     }
 
+    @Test func projectSummaryOrdersDisplayedSessionsBySidebarActivityDate() {
+        let sessions = [
+            SessionSummary(
+                id: "ses_old",
+                title: "Old",
+                lastUpdatedAt: Date(timeIntervalSince1970: 300)
+            ),
+            SessionSummary(
+                id: "ses_finished",
+                title: "Finished",
+                lastUpdatedAt: Date(timeIntervalSince1970: 100),
+                lastSidebarActivityAt: Date(timeIntervalSince1970: 400)
+            ),
+            SessionSummary(
+                id: "ses_running",
+                title: "Running",
+                lastUpdatedAt: Date(timeIntervalSince1970: 350),
+                lastSidebarActivityAt: Date(timeIntervalSince1970: 200)
+            ),
+        ]
+
+        let project = ProjectSummary(name: "NeoCode", path: "/tmp/NeoCode", sessions: sessions)
+
+        #expect(project.displayedSessions(showAll: true).map(\.id) == ["ses_finished", "ses_old", "ses_running"])
+    }
+
     @Test func sessionSummaryOmitsPlaceholderTitlesWhenCreatingRemoteSessions() {
         let draft = SessionSummary(id: "draft", title: "New session", lastUpdatedAt: .distantPast, isEphemeral: true)
         let timestamped = SessionSummary(id: "draft-2", title: "New session - 2026-03-13T10:00:00Z", lastUpdatedAt: .distantPast, isEphemeral: true)
@@ -1513,6 +1565,130 @@ struct NeoCodeMainActorTests {
 
         #expect(store.selectedSession?.status == .idle)
         #expect(store.showsFinishedIndicator(for: "ses_1") == false)
+    }
+
+    @MainActor
+    @Test func appStoreMovesCompletedBackgroundSessionToTopOfSidebarOrdering() async throws {
+        let store = AppStore(projects: [
+            ProjectSummary(
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(
+                        id: "ses_1",
+                        title: "Background",
+                        lastUpdatedAt: Date(timeIntervalSince1970: 100),
+                        lastSidebarActivityAt: Date(timeIntervalSince1970: 100),
+                        status: .running
+                    ),
+                    SessionSummary(
+                        id: "ses_2",
+                        title: "Foreground",
+                        lastUpdatedAt: Date(timeIntervalSince1970: 200),
+                        lastSidebarActivityAt: Date(timeIntervalSince1970: 200)
+                    ),
+                ]
+            ),
+        ])
+        store.selectSession("ses_2")
+
+        store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .busy))
+        store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .idle))
+
+        #expect(store.projects[0].displayedSessions(showAll: true).map(\.id) == ["ses_1", "ses_2"])
+    }
+
+    @MainActor
+    @Test func appStoreShowsFailedIndicatorForBackgroundFailureUntilVisited() {
+        let store = AppStore(projects: [
+            ProjectSummary(
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(id: "ses_1", title: "Background", lastUpdatedAt: .distantPast),
+                    SessionSummary(id: "ses_2", title: "Foreground", lastUpdatedAt: .distantPast),
+                ]
+            ),
+        ])
+        store.selectSession("ses_2")
+
+        store.apply(event: .messagePartDelta(OpenCodePartDelta(
+            sessionID: "ses_1",
+            messageID: "msg_1",
+            partID: "part_1",
+            field: "text",
+            delta: "Working"
+        )))
+        store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .busy))
+        store.apply(event: .messagePartUpdated(OpenCodePart(
+            id: "tool_1",
+            sessionID: "ses_1",
+            messageID: "msg_1",
+            type: .tool,
+            text: nil,
+            tool: "bash",
+            mime: nil,
+            filename: nil,
+            url: nil,
+            source: nil,
+            state: OpenCodeToolState(
+                status: .error,
+                input: nil,
+                output: nil,
+                error: "Permission denied"
+            ),
+            time: OpenCodeTimeContainer(created: .now, updated: .now, completed: .now)
+        )))
+
+        store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .idle))
+
+        #expect(store.projects[0].sessions.first(where: { $0.id == "ses_1" })?.status == .error)
+        #expect(store.showsFailedIndicator(for: "ses_1") == true)
+
+        store.selectSession("ses_1")
+
+        #expect(store.showsFailedIndicator(for: "ses_1") == false)
+    }
+
+    @MainActor
+    @Test func appStoreDoesNotShowFailedIndicatorForSelectedSessionFailure() {
+        let store = AppStore(projects: [
+            ProjectSummary(
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(
+                        id: "ses_1",
+                        title: "Foreground",
+                        lastUpdatedAt: .distantPast,
+                        status: .running,
+                        transcript: [
+                            ChatMessage(
+                                id: "tool_1",
+                                role: .tool,
+                                text: "bash failed",
+                                timestamp: .now,
+                                emphasis: .subtle,
+                                kind: .toolCall(
+                                    ChatMessage.ToolCall(
+                                        name: "bash",
+                                        status: .error,
+                                        detail: "Permission denied",
+                                        error: "Permission denied"
+                                    )
+                                )
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+        ])
+        store.selectSession("ses_1")
+
+        store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .idle))
+
+        #expect(store.selectedSession?.status == .error)
+        #expect(store.showsFailedIndicator(for: "ses_1") == false)
     }
 
     @MainActor
@@ -2369,6 +2545,46 @@ struct NeoCodeMainActorTests {
                                         status: .error,
                                         detail: "Tool execution aborted",
                                         error: "Tool execution aborted"
+                                    )
+                                )
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+        ])
+
+        store.selectSession("ses_1")
+        store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .idle))
+
+        #expect(store.selectedSession?.status == .idle)
+    }
+
+    @MainActor
+    @Test func appStoreTreatsRejectedQuestionToolErrorsAsIdleWhenSessionStops() {
+        let store = AppStore(projects: [
+            ProjectSummary(
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(
+                        id: "ses_1",
+                        title: "Existing",
+                        lastUpdatedAt: .distantPast,
+                        status: .running,
+                        transcript: [
+                            ChatMessage(
+                                id: "tool_1",
+                                role: .tool,
+                                text: "question cancelled",
+                                timestamp: .now,
+                                emphasis: .subtle,
+                                kind: .toolCall(
+                                    ChatMessage.ToolCall(
+                                        name: "functions.question",
+                                        status: .error,
+                                        detail: "QuestionRejectedError",
+                                        error: "QuestionRejectedError"
                                     )
                                 )
                             ),

@@ -554,6 +554,10 @@ struct SessionTreeRow: View {
             return localized("finished", locale: locale)
         }
 
+        if store.showsFailedIndicator(for: session.id) {
+            return localized("failed", locale: locale)
+        }
+
         switch session.status {
         case .idle:
             return nil
@@ -564,13 +568,17 @@ struct SessionTreeRow: View {
         case .retrying:
             return localized("retrying", locale: locale)
         case .error:
-            return localized("failed", locale: locale)
+            return nil
         }
     }
 
     private var statusTone: SidebarSessionStatusBadge.Tone {
         if store.showsFinishedIndicator(for: session.id) {
             return .success
+        }
+
+        if store.showsFailedIndicator(for: session.id) {
+            return .warning
         }
 
         switch session.status {

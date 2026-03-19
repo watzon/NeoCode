@@ -10,6 +10,7 @@ Primary docs live at the repo root:
 Included pieces:
 
 - `create-dmg.sh` builds a distributable DMG from the exported app bundle.
+- `generate-dmg-background.py` renders the DMG background used during packaging.
 - `sign-app-bundle.sh` re-signs Sparkle's nested executables if you ever need a manual signing fallback.
 - `ExportOptions.plist` configures `xcodebuild -exportArchive` for Developer ID distribution.
 

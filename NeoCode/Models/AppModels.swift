@@ -30,8 +30,8 @@ struct ProjectSummary: Codable, Identifiable, Hashable {
         let orderedSessions = sessions
             .enumerated()
             .sorted { lhs, rhs in
-                if lhs.element.lastUpdatedAt != rhs.element.lastUpdatedAt {
-                    return lhs.element.lastUpdatedAt > rhs.element.lastUpdatedAt
+                if lhs.element.sidebarOrderingDate != rhs.element.sidebarOrderingDate {
+                    return lhs.element.sidebarOrderingDate > rhs.element.sidebarOrderingDate
                 }
 
                 return lhs.offset < rhs.offset
@@ -68,6 +68,7 @@ struct SessionSummary: Codable, Identifiable, Hashable {
     let parentID: String?
     var title: String
     var lastUpdatedAt: Date
+    var lastSidebarActivityAt: Date?
     var status: SessionStatus
     var summary: OpenCodeSessionSummary?
     var revert: OpenCodeSessionRevert?
@@ -81,6 +82,7 @@ struct SessionSummary: Codable, Identifiable, Hashable {
         parentID: String? = nil,
         title: String,
         lastUpdatedAt: Date,
+        lastSidebarActivityAt: Date? = nil,
         status: SessionStatus = .idle,
         summary: OpenCodeSessionSummary? = nil,
         revert: OpenCodeSessionRevert? = nil,
@@ -93,6 +95,7 @@ struct SessionSummary: Codable, Identifiable, Hashable {
         self.parentID = parentID
         self.title = title
         self.lastUpdatedAt = lastUpdatedAt
+        self.lastSidebarActivityAt = lastSidebarActivityAt
         self.status = status
         self.summary = summary
         self.revert = revert
@@ -124,6 +127,10 @@ struct SessionSummary: Codable, Identifiable, Hashable {
 
     var hasPlaceholderTitle: Bool {
         Self.isPlaceholderTitle(title)
+    }
+
+    var sidebarOrderingDate: Date {
+        lastSidebarActivityAt ?? lastUpdatedAt
     }
 
     var requestedServerTitle: String? {

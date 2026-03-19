@@ -475,6 +475,9 @@ struct OpenCodePart: Decodable, Equatable, Sendable {
             return "Session compacted"
         case .tool:
             let name = tool ?? "tool"
+            if isRejectedQuestionToolCall {
+                return "question cancelled"
+            }
             switch state?.status {
             case .completed:
                 return "\(name) completed\n\(state?.output?.displayString ?? "")".trimmingCharacters(in: .whitespacesAndNewlines)
@@ -487,6 +490,22 @@ struct OpenCodePart: Decodable, Equatable, Sendable {
             return attachment?.displayTitle ?? text ?? ""
         case .diff, .unknown:
             return text ?? ""
+        }
+    }
+
+    private nonisolated var isRejectedQuestionToolCall: Bool {
+        guard type == .tool,
+              tool?.normalizedToolLeafName == "question",
+              state?.status == .error
+        else {
+            return false
+        }
+
+        let messages = [state?.error, state?.output?.displayString]
+            .compactMap { $0?.lowercased() }
+
+        return messages.contains { message in
+            message.contains("questionrejectederror") || message.contains("question rejected")
         }
     }
 
