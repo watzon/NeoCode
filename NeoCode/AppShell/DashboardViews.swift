@@ -29,16 +29,29 @@ struct DashboardScreen: View {
                     if let snapshot = store.dashboardSnapshot,
                        snapshot.totalProjects > 0 {
                         HStack(alignment: .center, spacing: 12) {
-                            Text(localized("Welcome to NeoCode!", locale: locale))
+                            Text(store.selectedDashboardProject?.name ?? localized("Welcome to NeoCode!", locale: locale))
                                 .font(.system(size: 28, weight: .bold, design: .default))
                                 .foregroundStyle(NeoCodeTheme.textPrimary)
 
                             Spacer(minLength: 12)
 
-                            DashboardRangeSelect(
-                                selectedRange: store.selectedDashboardRange,
-                                onSelect: store.selectDashboardRange
-                            )
+                            HStack(spacing: 10) {
+                                if store.selectedDashboardProject != nil {
+                                    Button {
+                                        store.clearDashboardProjectSelection()
+                                    } label: {
+                                        Label(localized("Back", locale: locale), systemImage: "chevron.left")
+                                            .font(.system(size: 12, weight: .medium))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .foregroundStyle(NeoCodeTheme.textSecondary)
+                                }
+
+                                DashboardRangeSelect(
+                                    selectedRange: store.selectedDashboardRange,
+                                    onSelect: store.selectDashboardRange
+                                )
+                            }
                         }
 
                         HStack(alignment: .top, spacing: 12) {
@@ -639,7 +652,7 @@ private struct DashboardProjectsCard: View {
             } else {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(projects) { project in
-                        DashboardProjectRow(project: project, isSelected: store.selectedProjectID == project.id)
+                        DashboardProjectRow(project: project)
                     }
                 }
             }
@@ -652,19 +665,17 @@ private struct DashboardProjectRow: View {
     @Environment(AppStore.self) private var store
     
     let project: DashboardProjectUsageSummary
-    let isSelected: Bool
 
     var body: some View {
         Button {
-            store.selectProject(project.id)
-            store.selectDashboard()
+            store.selectDashboardProject(project.id)
         } label: {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(project.name)
                             .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(isSelected ? NeoCodeTheme.accent : NeoCodeTheme.textPrimary)
+                            .foregroundStyle(NeoCodeTheme.textPrimary)
                             .lineLimit(1)
 
                         Spacer(minLength: 6)
@@ -680,7 +691,9 @@ private struct DashboardProjectRow: View {
                 }
             }
             .padding(.vertical, 6)
+            .padding(.horizontal, 2)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

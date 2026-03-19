@@ -911,6 +911,30 @@ struct NeoCodeCoreTests {
         #expect(allTime.indexedSessionCount == 2)
     }
 
+    @Test func dashboardStatsCanBeFilteredToSingleProject() async throws {
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let persistence = PersistedDashboardStatsStore(baseDirectoryURL: tempDirectory)
+        let service = DashboardStatsService(persistence: persistence)
+        let projectA = DashboardProjectDescriptor(id: UUID(), name: "NeoCode", path: "/tmp/neocode")
+        let projectB = DashboardProjectDescriptor(id: UUID(), name: "Docs", path: "/tmp/docs")
+
+        _ = await service.prepare(projects: [projectA, projectB])
+
+        _ = await service.ingest([
+            DashboardSessionIngress(project: projectA, session: DashboardRemoteSessionDescriptor(id: "ses_a", title: "NeoCode", createdAt: date("2026-03-10T10:00:00Z"), updatedAt: date("2026-03-10T10:00:00Z")), messages: try dashboardMessages(sessionID: "ses_a", totalTokens: 200, updatedAt: "2026-03-10T10:00:00Z")),
+            DashboardSessionIngress(project: projectB, session: DashboardRemoteSessionDescriptor(id: "ses_b", title: "Docs", createdAt: date("2026-03-11T10:00:00Z"), updatedAt: date("2026-03-11T10:00:00Z")), messages: try dashboardMessages(sessionID: "ses_b", totalTokens: 800, updatedAt: "2026-03-11T10:00:00Z")),
+        ])
+
+        let filtered = await service.currentSnapshot(projectPath: projectA.path)
+
+        #expect(filtered.totalProjects == 1)
+        #expect(filtered.projects.count == 1)
+        #expect(filtered.projects.first?.id == projectA.id)
+        #expect(filtered.tokens.total == 200)
+        #expect(filtered.indexedSessionCount == 1)
+    }
+
     @Test func groupsCompactionMarkerAndSummaryIntoCompactionSection() {
         let now = Date(timeIntervalSince1970: 1_710_616_186)
         let groups = buildDisplayMessageGroups(from: [

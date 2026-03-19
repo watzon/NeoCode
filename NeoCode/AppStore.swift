@@ -169,6 +169,7 @@ final class AppStore {
     var isPromptReady = true
     var promptLoadingText: String?
     var selectedDashboardRange: DashboardTimeRange = .allTime
+    var selectedDashboardProjectID: ProjectSummary.ID?
     var dashboardSnapshot: DashboardSnapshot?
     var dashboardStatus: DashboardRefreshStatus = .idle
     var lastError: String?
@@ -337,6 +338,11 @@ final class AppStore {
             return true
         }
         return false
+    }
+
+    var selectedDashboardProject: ProjectSummary? {
+        guard let selectedDashboardProjectID else { return nil }
+        return projects.first { $0.id == selectedDashboardProjectID }
     }
 
     var isSettingsSelected: Bool {
@@ -646,10 +652,47 @@ final class AppStore {
 
     func selectDashboard() {
         persistComposerStateForSelectedSession()
+        let shouldRefreshSnapshot = selectedDashboardProjectID != nil
+        selectedDashboardProjectID = nil
         selectedSessionID = nil
         loadingTranscriptSessionID = nil
         primePromptState(for: nil)
         scheduleGitRefreshLoop(for: selectedProject?.path)
+
+        guard shouldRefreshSnapshot else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            self.dashboardSnapshot = await self.dashboardStatsService.currentSnapshot(range: self.selectedDashboardRange)
+        }
+    }
+
+    func selectDashboardProject(_ destinationProjectID: ProjectSummary.ID) {
+        guard let destinationProject = projects.first(where: { $0.id == destinationProjectID }) else { return }
+        persistComposerStateForSelectedSession()
+        selectedDashboardProjectID = destinationProjectID
+        selectedContent = .dashboard
+        selectedSessionID = nil
+        loadingTranscriptSessionID = nil
+        primePromptState(for: nil)
+        scheduleGitRefreshLoop(for: destinationProject.path)
+
+        Task { [weak self] in
+            guard let self else { return }
+            self.dashboardSnapshot = await self.dashboardStatsService.currentSnapshot(
+                range: self.selectedDashboardRange,
+                projectPath: destinationProject.path
+            )
+        }
+    }
+
+    func clearDashboardProjectSelection() {
+        guard selectedDashboardProjectID != nil else { return }
+        selectedDashboardProjectID = nil
+
+        Task { [weak self] in
+            guard let self else { return }
+            self.dashboardSnapshot = await self.dashboardStatsService.currentSnapshot(range: self.selectedDashboardRange)
+        }
     }
 
     func selectDashboardRange(_ range: DashboardTimeRange) {
@@ -658,7 +701,10 @@ final class AppStore {
 
         Task { [weak self] in
             guard let self else { return }
-            self.dashboardSnapshot = await self.dashboardStatsService.currentSnapshot(range: range)
+            self.dashboardSnapshot = await self.dashboardStatsService.currentSnapshot(
+                range: range,
+                projectPath: self.selectedDashboardProject?.path
+            )
         }
     }
 
@@ -919,7 +965,8 @@ final class AppStore {
         isDashboardActive = true
         dashboardSnapshot = await dashboardStatsService.prepare(
             projects: projects.map(DashboardProjectDescriptor.init(project:)),
-            range: selectedDashboardRange
+            range: selectedDashboardRange,
+            projectPath: selectedDashboardProject?.path
         )
 
         guard !projects.isEmpty else {
@@ -1074,7 +1121,8 @@ final class AppStore {
                     for: descriptor,
                     sessions: remoteSessions,
                     forceSessionIDs: forcedSessions[project.id] ?? [],
-                    range: selectedDashboardRange
+                    range: selectedDashboardRange,
+                    projectPath: selectedDashboardProject?.path
                 )
                 dashboardSnapshot = plan.snapshot
                 refreshWork.append(contentsOf: plan.changedSessions.map { (project, descriptor, $0) })
@@ -1105,7 +1153,10 @@ final class AppStore {
         )
 
         if refreshWork.isEmpty {
-            dashboardSnapshot = await dashboardStatsService.currentSnapshot(range: selectedDashboardRange)
+            dashboardSnapshot = await dashboardStatsService.currentSnapshot(
+                range: selectedDashboardRange,
+                projectPath: selectedDashboardProject?.path
+            )
             dashboardStatus = failedProjects.isEmpty ? .idle : DashboardRefreshStatus(
                 phase: .failed,
                 title: "Some projects were skipped",
@@ -1158,14 +1209,21 @@ final class AppStore {
             }
 
             if !ingestions.isEmpty {
-                dashboardSnapshot = await dashboardStatsService.ingest(ingestions, range: selectedDashboardRange)
+                dashboardSnapshot = await dashboardStatsService.ingest(
+                    ingestions,
+                    range: selectedDashboardRange,
+                    projectPath: selectedDashboardProject?.path
+                )
                 processedSessions += ingestions.count
             }
 
             await Task.yield()
         }
 
-        dashboardSnapshot = await dashboardStatsService.currentSnapshot(range: selectedDashboardRange)
+        dashboardSnapshot = await dashboardStatsService.currentSnapshot(
+            range: selectedDashboardRange,
+            projectPath: selectedDashboardProject?.path
+        )
         dashboardStatus = failedProjects.isEmpty ? .idle : DashboardRefreshStatus(
             phase: .failed,
             title: "Usage cache updated with gaps",

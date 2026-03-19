@@ -11,7 +11,11 @@ actor DashboardStatsService {
         self.persistence = persistence
     }
 
-    func prepare(projects: [DashboardProjectDescriptor], range: DashboardTimeRange = .allTime) async -> DashboardSnapshot {
+    func prepare(
+        projects: [DashboardProjectDescriptor],
+        range: DashboardTimeRange = .allTime,
+        projectPath: String? = nil
+    ) async -> DashboardSnapshot {
         await loadCacheIfNeeded()
 
         let activePaths = Set(projects.map(\.path))
@@ -25,19 +29,20 @@ actor DashboardStatsService {
         catalogsByPath = nextCatalogs
         sessionsByKey = sessionsByKey.filter { activePaths.contains($0.value.projectPath) }
         await persist()
-        return buildSnapshot(range: range)
+        return buildSnapshot(range: range, projectPath: projectPath)
     }
 
-    func currentSnapshot(range: DashboardTimeRange = .allTime) async -> DashboardSnapshot {
+    func currentSnapshot(range: DashboardTimeRange = .allTime, projectPath: String? = nil) async -> DashboardSnapshot {
         await loadCacheIfNeeded()
-        return buildSnapshot(range: range)
+        return buildSnapshot(range: range, projectPath: projectPath)
     }
 
     func planRefresh(
         for project: DashboardProjectDescriptor,
         sessions: [DashboardRemoteSessionDescriptor],
         forceSessionIDs: Set<String> = [],
-        range: DashboardTimeRange = .allTime
+        range: DashboardTimeRange = .allTime,
+        projectPath: String? = nil
     ) async -> DashboardRefreshPlan {
         await loadCacheIfNeeded()
 
@@ -61,10 +66,17 @@ actor DashboardStatsService {
         }
 
         await persist()
-        return DashboardRefreshPlan(changedSessions: changedSessions, snapshot: buildSnapshot(range: range))
+        return DashboardRefreshPlan(
+            changedSessions: changedSessions,
+            snapshot: buildSnapshot(range: range, projectPath: projectPath)
+        )
     }
 
-    func ingest(_ ingestions: [DashboardSessionIngress], range: DashboardTimeRange = .allTime) async -> DashboardSnapshot {
+    func ingest(
+        _ ingestions: [DashboardSessionIngress],
+        range: DashboardTimeRange = .allTime,
+        projectPath: String? = nil
+    ) async -> DashboardSnapshot {
         await loadCacheIfNeeded()
 
         for ingress in ingestions {
@@ -73,7 +85,7 @@ actor DashboardStatsService {
         }
 
         await persist()
-        return buildSnapshot(range: range)
+        return buildSnapshot(range: range, projectPath: projectPath)
     }
 
     private func loadCacheIfNeeded() async {
@@ -202,8 +214,13 @@ actor DashboardStatsService {
         )
     }
 
-    private func buildSnapshot(range: DashboardTimeRange) -> DashboardSnapshot {
-        let catalogs = catalogsByPath.values.sorted { lhs, rhs in
+    private func buildSnapshot(range: DashboardTimeRange, projectPath: String? = nil) -> DashboardSnapshot {
+        let catalogs = catalogsByPath.values
+            .filter { catalog in
+                guard let projectPath else { return true }
+                return catalog.descriptor.path == projectPath
+            }
+            .sorted { lhs, rhs in
             lhs.descriptor.name.localizedCaseInsensitiveCompare(rhs.descriptor.name) == .orderedAscending
         }
         let activePaths = Set(catalogs.map(\.descriptor.path))
