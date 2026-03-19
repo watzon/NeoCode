@@ -4436,7 +4436,7 @@ final class AppStore {
         projectPath: String,
         using service: any OpenCodeServicing
     ) async -> Bool {
-        guard session(for: sessionID)?.status == .idle,
+        guard canDispatchQueuedMessages(for: sessionID),
               pendingPermission(for: sessionID) == nil,
               pendingQuestion(for: sessionID) == nil,
               let queuedMessage = popFirstQueuedMessage(in: sessionID)
@@ -4465,6 +4465,14 @@ final class AppStore {
             prependQueuedMessage(queuedMessage, in: sessionID)
         }
         return didSend
+    }
+
+    private func canDispatchQueuedMessages(for sessionID: String) -> Bool {
+        guard let status = session(for: sessionID)?.status else {
+            return false
+        }
+
+        return !status.isActive
     }
 
     @discardableResult

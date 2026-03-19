@@ -3577,6 +3577,66 @@ struct NeoCodeMainActorTests {
     }
 
     @MainActor
+    @Test func appStoreSendsQueuedDraftAfterSessionFallsIntoError() async {
+        let projectID = UUID()
+        let store = AppStore(projects: [
+            ProjectSummary(
+                id: projectID,
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(id: "ses_1", title: "Existing", lastUpdatedAt: .distantPast, status: .running),
+                ]
+            ),
+        ])
+        let service = MockOpenCodeService()
+
+        store.selectSession("ses_1")
+        store.draft = "Queued follow-up"
+        _ = await store.sendDraft(
+            using: service,
+            projectID: projectID,
+            sessionID: "ses_1",
+            allowQueueIfRunning: true
+        )
+
+        store.apply(event: .messagePartUpdated(OpenCodePart(
+            id: "part_patch",
+            sessionID: "ses_1",
+            messageID: "msg_1",
+            type: .tool,
+            text: nil,
+            tool: "apply_patch",
+            mime: nil,
+            filename: nil,
+            url: nil,
+            source: nil,
+            state: OpenCodeToolState(
+                status: .error,
+                input: .object(["patchText": .string("*** Begin Patch\n*** End Patch")]),
+                output: nil,
+                error: "apply_patch verification failed: no hunks found"
+            ),
+            time: OpenCodeTimeContainer(created: .now, updated: .now, completed: .now)
+        )))
+
+        #expect(store.selectedSession?.status == .error)
+
+        let didSend = await store.sendNextQueuedMessageIfPossible(
+            in: "ses_1",
+            projectID: projectID,
+            projectPath: "/tmp/NeoCode",
+            using: service
+        )
+
+        #expect(didSend == true)
+        #expect(store.queuedMessages(for: "ses_1").isEmpty)
+        #expect(service.sentPrompts.count == 1)
+        #expect(service.sentPrompts[0].text == "Queued follow-up")
+        #expect(store.selectedSession?.status == .running)
+    }
+
+    @MainActor
     @Test func appStorePrefersRemoteSlashCommandsOverLocalHandlers() async {
         let projectID = UUID()
         let store = AppStore(projects: [
