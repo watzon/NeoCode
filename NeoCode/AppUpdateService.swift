@@ -7,6 +7,7 @@ import Sparkle
 @MainActor
 @Observable
 final class AppUpdateService: NSObject, SPUUpdaterDelegate {
+    @ObservationIgnored private static let automaticCheckInterval: TimeInterval = 60 * 60 * 6
     struct UpdateRelease: Equatable {
         let displayVersion: String
         let buildVersion: String?
@@ -76,6 +77,7 @@ final class AppUpdateService: NSObject, SPUUpdaterDelegate {
             delegate: self
         )
         updater.automaticallyDownloadsUpdates = false
+        updater.updateCheckInterval = Self.automaticCheckInterval
         _ = updater.clearFeedURLFromUserDefaults()
 
         do {
@@ -92,6 +94,8 @@ final class AppUpdateService: NSObject, SPUUpdaterDelegate {
         if let lastCheckedAt {
             phase = .upToDate(lastCheckedAt)
         }
+
+        performLaunchBackgroundCheckIfNeeded(using: updater)
     }
 
     var installedVersionDescription: String {
@@ -215,6 +219,36 @@ final class AppUpdateService: NSObject, SPUUpdaterDelegate {
         logger.info("Checking for updates")
         phase = .checking
         updater.checkForUpdates()
+    }
+
+    func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: Error?) {
+        refreshLastCheckedAt(using: updater)
+
+        guard error == nil else {
+            if updateCheck == .updatesInBackground, activeRelease == nil, shouldResetToIdleAfterAutomaticCheck {
+                phase = .idle
+            }
+            return
+        }
+
+        guard activeRelease == nil else { return }
+
+        switch updateCheck {
+        case .updates:
+            if shouldPromoteToUpToDateAfterFinishedCheck {
+                phase = .upToDate(lastCheckedAt)
+            }
+        case .updatesInBackground:
+            if shouldResetToIdleAfterAutomaticCheck {
+                phase = .idle
+            }
+        case .updateInformation:
+            if shouldPromoteToUpToDateAfterFinishedCheck {
+                phase = .upToDate(lastCheckedAt)
+            }
+        @unknown default:
+            break
+        }
     }
 
     func performPrimaryAction() {
@@ -398,6 +432,37 @@ final class AppUpdateService: NSObject, SPUUpdaterDelegate {
         downloadCancellationHandler = nil
         expectedDownloadBytes = 0
         downloadedBytes = 0
+    }
+
+    private var shouldPromoteToUpToDateAfterFinishedCheck: Bool {
+        switch phase {
+        case .checking, .idle, .upToDate:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private var shouldResetToIdleAfterAutomaticCheck: Bool {
+        switch phase {
+        case .checking, .idle, .upToDate, .error:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func performLaunchBackgroundCheckIfNeeded(using updater: SPUUpdater) {
+        guard updater.automaticallyChecksForUpdates else { return }
+
+        logger.info("Checking for updates in background on launch")
+        updater.checkForUpdatesInBackground()
+    }
+
+    private func refreshLastCheckedAt(using updater: SPUUpdater) {
+        if let lastUpdateCheckDate = updater.lastUpdateCheckDate {
+            lastCheckedAt = lastUpdateCheckDate
+        }
     }
 
     private static func currentInstalledRelease() -> UpdateRelease {
