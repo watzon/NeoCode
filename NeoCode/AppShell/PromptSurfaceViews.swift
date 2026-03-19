@@ -272,7 +272,7 @@ private struct PermissionPromptSurfaceView: View {
         .frame(maxWidth: contentWidth, alignment: .leading)
         .padding(.horizontal, 12)
         .padding(.top, 12)
-        .padding(.bottom, 8)
+        .padding(.bottom, 12)
         .background(
             RoundedRectangle(cornerRadius: 18)
                 .fill(NeoCodeTheme.panelRaised)
@@ -485,7 +485,7 @@ private struct QuestionPromptSurfaceView: View {
         .frame(maxWidth: contentWidth, alignment: .leading)
         .padding(.horizontal, 14)
         .padding(.top, 14)
-        .padding(.bottom, 10)
+        .padding(.bottom, 14)
         .background(
             RoundedRectangle(cornerRadius: 18)
                 .fill(NeoCodeTheme.panelRaised)
