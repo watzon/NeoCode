@@ -27,8 +27,19 @@ struct ProjectSummary: Codable, Identifiable, Hashable {
     }
 
     func displayedSessions(showAll: Bool = false) -> [SessionSummary] {
-        guard !showAll else { return sessions }
-        return Array(sessions.prefix(Self.displayedSessionLimit))
+        let orderedSessions = sessions
+            .enumerated()
+            .sorted { lhs, rhs in
+                if lhs.element.lastUpdatedAt != rhs.element.lastUpdatedAt {
+                    return lhs.element.lastUpdatedAt > rhs.element.lastUpdatedAt
+                }
+
+                return lhs.offset < rhs.offset
+            }
+            .map(\.element)
+
+        guard !showAll else { return orderedSessions }
+        return Array(orderedSessions.prefix(Self.displayedSessionLimit))
     }
 
     var hiddenSessionCount: Int {

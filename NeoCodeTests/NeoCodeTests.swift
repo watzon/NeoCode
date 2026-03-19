@@ -1044,10 +1044,10 @@ struct NeoCodeCoreTests {
 
         #expect(project.sessions.count == 10)
         #expect(project.displayedSessions().count == 8)
-        #expect(project.displayedSessions().map(\.id) == Array(sessions.prefix(8)).map(\.id))
+        #expect(project.displayedSessions().map(\.id) == Array(sessions.reversed().prefix(8)).map(\.id))
         #expect(project.hasHiddenSessions)
         #expect(project.hiddenSessionCount == 2)
-        #expect(project.displayedSessions(showAll: true).map(\.id) == sessions.map(\.id))
+        #expect(project.displayedSessions(showAll: true).map(\.id) == sessions.reversed().map(\.id))
     }
 
     @Test func sessionSummaryOmitsPlaceholderTitlesWhenCreatingRemoteSessions() {
