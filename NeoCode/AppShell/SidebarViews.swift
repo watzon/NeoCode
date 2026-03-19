@@ -427,10 +427,10 @@ struct SessionTreeRow: View {
         .animation(.easeOut(duration: 0.16), value: isHovering)
         .contextMenu {
             SessionActionMenuContent(
-                canCompact: store.canCompactSession(session.id),
+                canCompact: store.canCompactSession(currentSession.id),
                 onCompact: {
                     Task {
-                        _ = await store.compactSession(session.id, using: runtime)
+                        _ = await store.compactSession(currentSession.id, using: runtime)
                     }
                 },
                 onRename: {
@@ -439,7 +439,7 @@ struct SessionTreeRow: View {
                 },
                 onDelete: {
                     Task {
-                        await store.deleteSession(session.id, using: runtime)
+                        await store.deleteSession(currentSession.id, using: runtime)
                     }
                 }
             )
@@ -453,7 +453,7 @@ struct SessionTreeRow: View {
             Button(localized("Save", locale: locale)) {
                 let newTitle = renameTitle
                 Task {
-                    await store.renameSession(session.id, to: newTitle, using: runtime)
+                    await store.renameSession(currentSession.id, to: newTitle, using: runtime)
                 }
             }
         } message: {
@@ -486,10 +486,10 @@ struct SessionTreeRow: View {
     private var sessionMenuButton: some View {
         Menu {
             SessionActionMenuContent(
-                canCompact: store.canCompactSession(session.id),
+                canCompact: store.canCompactSession(currentSession.id),
                 onCompact: {
                     Task {
-                        _ = await store.compactSession(session.id, using: runtime)
+                        _ = await store.compactSession(currentSession.id, using: runtime)
                     }
                 },
                 onRename: {
@@ -498,7 +498,7 @@ struct SessionTreeRow: View {
                 },
                 onDelete: {
                     Task {
-                        await store.deleteSession(session.id, using: runtime)
+                        await store.deleteSession(currentSession.id, using: runtime)
                     }
                 }
             )

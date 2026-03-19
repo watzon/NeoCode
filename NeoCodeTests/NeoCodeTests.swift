@@ -1381,6 +1381,28 @@ struct NeoCodeCoreTests {
         #expect(preview.deletions(includeUnstaged: true) == 0)
     }
 
+    @MainActor
+    @Test func gitCommitPreviewWorksBeforeGitCreatesAnIndexFile() async throws {
+        let repoURL = try createTemporaryGitRepository()
+        defer { try? FileManager.default.removeItem(at: repoURL) }
+
+        let gitDirectoryPath = try runGit(["rev-parse", "--absolute-git-dir"], in: repoURL)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let indexURL = URL(fileURLWithPath: gitDirectoryPath, isDirectory: true)
+            .appendingPathComponent("index", isDirectory: false)
+
+        #expect(FileManager.default.fileExists(atPath: indexURL.path) == false)
+
+        try write("alpha\nbeta\n", to: repoURL.appendingPathComponent("new-file.txt"))
+
+        let preview = try await GitRepositoryService().commitPreview(in: repoURL.path)
+
+        #expect(preview.changedFiles.count == 1)
+        #expect(preview.changedFiles[0].isUntracked == true)
+        #expect(preview.additions(includeUnstaged: true) == 2)
+        #expect(preview.deletions(includeUnstaged: true) == 0)
+    }
+
 }
 
 @Suite(.serialized)
@@ -4354,6 +4376,35 @@ struct NeoCodeMainActorTests {
 
         store.selectSession("ses_1")
         store.selectProject(secondProject.id)
+    @MainActor
+    @Test func promotedSessionAliasesKeepSidebarActionsAddressable() async throws {
+        let store = AppStore(projects: [ProjectSummary(name: "NeoCode", path: "/tmp/NeoCode")])
+        let runtime = OpenCodeRuntime()
+        let now = Date()
+
+        await store.createSession(using: runtime)
+        let projectID = try #require(store.selectedProjectID)
+        let ephemeralID = try #require(store.selectedSessionID)
+
+        await store.promoteEphemeralSession(
+            ephemeralID,
+            in: projectID,
+            to: OpenCodeSession(
+                id: "ses_promoted",
+                title: nil,
+                parentID: nil,
+                time: OpenCodeTimeContainer(created: now, updated: now, completed: nil)
+            )
+        )
+
+        let resolvedSession = try #require(store.sessionSummary(for: ephemeralID))
+        #expect(resolvedSession.id == "ses_promoted")
+        #expect(store.project(for: ephemeralID)?.id == projectID)
+
+        store.selectSession(ephemeralID)
+        #expect(store.selectedSessionID == "ses_promoted")
+    }
+
 
         #expect(store.selectedProjectID == secondProject.id)
         #expect(store.selectedSessionID == nil)

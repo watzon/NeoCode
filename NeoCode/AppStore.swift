@@ -251,6 +251,7 @@ final class AppStore {
     private var isDashboardActive = false
     private var queuedMessageDispatchingSessionIDs = Set<String>()
     private var sessionCreationTasksBySessionID: [String: Task<String?, Never>] = [:]
+    private var sessionIDAliases: [String: String] = [:]
     private var pendingSendStatesByOriginalSessionID: [String: PendingSendState] = [:]
     private var lastWorkspaceSelection: AppContentSelection = .dashboard
     private var sessionListSyncActivityByProjectID: [ProjectSummary.ID: Int] = [:]
@@ -478,7 +479,8 @@ final class AppStore {
     }
 
     func project(for sessionID: String) -> ProjectSummary? {
-        projects.first(where: { project in
+        let sessionID = resolvedSessionID(for: sessionID)
+        return projects.first(where: { project in
             project.sessions.contains(where: { $0.id == sessionID })
         })
     }
@@ -748,6 +750,7 @@ final class AppStore {
     }
 
     func selectSession(_ sessionID: String) {
+        let sessionID = resolvedSessionID(for: sessionID)
         guard selectedSessionID != sessionID else { return }
         persistComposerStateForSelectedSession()
         let destinationProjectID = projectID(for: sessionID)
@@ -1326,6 +1329,7 @@ final class AppStore {
     }
 
     func renameSession(_ sessionID: String, to title: String, using runtime: OpenCodeRuntime) async {
+        let sessionID = resolvedSessionID(for: sessionID)
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty,
               let projectID = projectID(for: sessionID)
@@ -1354,6 +1358,7 @@ final class AppStore {
 
     @discardableResult
     func compactSession(_ sessionID: String, using runtime: OpenCodeRuntime) async -> Bool {
+        let sessionID = resolvedSessionID(for: sessionID)
         guard let projectID = projectID(for: sessionID) else { return false }
         guard let service = await liveService(for: projectID, runtime: runtime) else { return false }
 
@@ -1363,6 +1368,7 @@ final class AppStore {
     }
 
     func deleteSession(_ sessionID: String, using runtime: OpenCodeRuntime) async {
+        let sessionID = resolvedSessionID(for: sessionID)
         guard let projectID = projectID(for: sessionID) else { return }
 
         if removeEphemeralSessionIfNeeded(sessionID: sessionID, projectID: projectID) {
@@ -4224,6 +4230,7 @@ final class AppStore {
         finishedSessionIDs.remove(sessionID)
         pendingPermissionsBySession.removeValue(forKey: sessionID)
         pendingQuestionsBySession.removeValue(forKey: sessionID)
+        clearSessionAliases(referencing: sessionID)
         if selectedSessionID == sessionID {
             selectedSessionID = nil
         }
@@ -5298,15 +5305,42 @@ final class AppStore {
     }
 
     private func projectID(for sessionID: String) -> ProjectSummary.ID? {
-        projects.first(where: { project in
+        let sessionID = resolvedSessionID(for: sessionID)
+        return projects.first(where: { project in
             project.sessions.contains(where: { $0.id == sessionID })
         })?.id
     }
 
     private func session(for sessionID: String) -> SessionSummary? {
-        projects
+        let sessionID = resolvedSessionID(for: sessionID)
+        return projects
             .flatMap(\.sessions)
             .first(where: { $0.id == sessionID })
+    }
+
+    private func resolvedSessionID(for sessionID: String) -> String {
+        var resolvedID = sessionID
+        var visitedIDs = Set<String>()
+
+        while let nextID = sessionIDAliases[resolvedID], visitedIDs.insert(resolvedID).inserted {
+            resolvedID = nextID
+        }
+
+        return resolvedID
+    }
+
+    private func registerSessionAlias(from oldSessionID: String, to newSessionID: String) {
+        let newSessionID = resolvedSessionID(for: newSessionID)
+        guard oldSessionID != newSessionID else {
+            sessionIDAliases.removeValue(forKey: oldSessionID)
+            return
+        }
+
+        sessionIDAliases[oldSessionID] = newSessionID
+    }
+
+    private func clearSessionAliases(referencing sessionID: String) {
+        sessionIDAliases = sessionIDAliases.filter { $0.key != sessionID && $0.value != sessionID }
     }
 
     private func setTranscript(_ transcript: [ChatMessage], for sessionID: String) {
@@ -5695,6 +5729,7 @@ final class AppStore {
             replacement.lastSidebarActivityAt = nil
         }
         projects[projectIndex].sessions[sessionIndex] = replacement
+        registerSessionAlias(from: sessionID, to: session.id)
         moveTranscript(from: sessionID, to: session.id)
         scheduleProjectPersistence()
     }
