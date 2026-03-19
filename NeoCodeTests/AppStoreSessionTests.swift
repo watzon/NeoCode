@@ -1357,6 +1357,46 @@ struct AppStoreSessionTests {
         }
 
         @MainActor
+        @Test func appStoreTreatsRejectedPermissionToolErrorsAsIdleWhenSessionStops() {
+            let store = AppStore(projects: [
+                ProjectSummary(
+                    name: "NeoCode",
+                    path: "/tmp/NeoCode",
+                    sessions: [
+                        SessionSummary(
+                            id: "ses_1",
+                            title: "Existing",
+                            lastUpdatedAt: .distantPast,
+                            status: .running,
+                            transcript: [
+                                ChatMessage(
+                                    id: "tool_1",
+                                    role: .tool,
+                                    text: "read failed",
+                                    timestamp: .now,
+                                    emphasis: .subtle,
+                                    kind: .toolCall(
+                                        ChatMessage.ToolCall(
+                                            name: "read",
+                                            status: .error,
+                                            detail: "The user rejected permission to use this specific tool call.",
+                                            error: "The user rejected permission to use this specific tool call."
+                                        )
+                                    )
+                                ),
+                            ]
+                        ),
+                    ]
+                ),
+            ])
+
+            store.selectSession("ses_1")
+            store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .idle))
+
+            #expect(store.selectedSession?.status == .idle)
+        }
+
+        @MainActor
         @Test func appStoreMarksNonAbortedToolErrorsAsFailed() {
             let store = AppStore(projects: [
                 ProjectSummary(

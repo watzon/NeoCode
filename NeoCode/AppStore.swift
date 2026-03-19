@@ -3163,16 +3163,20 @@ final class AppStore {
         do {
             let messages = try await service.listMessages(sessionID: sessionID)
             guard !Task.isCancelled else { return }
+            let existingTranscript = transcript(for: sessionID)
+            let liveActivity = liveSessionStatuses[sessionID]
+            let hasLiveBusyStatus = liveActivity == .busy || {
+                if case .retry = liveActivity {
+                    return true
+                }
+                return false
+            }()
             let shouldPreserveInProgressSuffix = hasBufferedTextDeltas(for: sessionID)
-                || liveSessionStatuses[sessionID] == .busy
-                || {
-                    if case .retry = liveSessionStatuses[sessionID] {
-                        return true
-                    }
-                    return false
-                }()
+                || (hasLiveBusyStatus
+                    && isSessionLocallyActive(sessionID)
+                    && existingTranscript.contains(where: \.isInProgress))
             let transcript = Self.reconcileLoadedTranscript(
-                existing: transcript(for: sessionID),
+                existing: existingTranscript,
                 incoming: ChatMessage.makeTranscript(from: messages),
                 preserveInProgressSuffix: shouldPreserveInProgressSuffix
             )
@@ -3435,7 +3439,6 @@ final class AppStore {
 
     private func apply(part: OpenCodePart, projectID: ProjectSummary.ID) {
         guard let sessionID = resolvedSessionID(for: part) else { return }
-        markSessionLocallyActive(sessionID)
         flushBufferedTextDeltas(for: sessionID, projectID: projectID)
         applyActiveTodos(from: part, sessionID: sessionID)
         let defaultRole = part.messageID.flatMap { messageRoles[$0] } ?? .assistant
@@ -3445,6 +3448,8 @@ final class AppStore {
         guard let message = ChatMessage(part: part, defaultRole: defaultRole) ?? streamingPlaceholder(for: part, defaultRole: defaultRole) else {
             return
         }
+
+        markSessionLocallyActive(sessionID)
 
         if message.role == .user {
             reconcileOptimisticUserMessage(with: message, sessionID: sessionID, projectID: projectID)
@@ -3926,6 +3931,8 @@ final class AppStore {
             return
         }
 
+        flushBufferedTextDeltas(for: sessionID, projectID: projectID)
+
         var transcript = transcript(for: sessionID)
         var didChangeTranscript = false
 
@@ -4017,6 +4024,7 @@ final class AppStore {
                 || message.contains("operation was aborted")
                 || message.contains("request aborted")
                 || message.contains("stream aborted")
+                || message.contains("the user rejected permission")
                 || message.contains("questionrejectederror")
                 || message.contains("question rejected")
         }
@@ -4435,6 +4443,7 @@ final class AppStore {
         }
 
         for sessionID in sessionIDs {
+            reconcileLocalSessionActivityIfSettled(sessionID: sessionID)
             refreshSessionStatus(sessionID: sessionID, projectID: projectID)
         }
     }
@@ -4463,15 +4472,8 @@ final class AppStore {
             pendingPermissionsBySession[sessionID] = requests
         }
 
-        guard let indices = indices(for: sessionID, projectID: projectID) else { return }
-        let transcript = transcript(for: sessionID)
-        projects[indices.project].sessions[indices.session].status = resolvedSessionStatus(
-            sessionID: sessionID,
-            transcript: transcript,
-            fallback: .idle
-        )
-        bumpSessionUIRevision()
-        scheduleProjectPersistence()
+        reconcileLocalSessionActivityIfSettled(sessionID: sessionID)
+        refreshSessionStatus(sessionID: sessionID, projectID: projectID)
     }
 
     private func shouldAutoRespond(to request: OpenCodePermissionRequest) -> Bool {
@@ -4735,6 +4737,7 @@ final class AppStore {
         }
 
         for sessionID in sessionIDs {
+            reconcileLocalSessionActivityIfSettled(sessionID: sessionID)
             refreshSessionStatus(sessionID: sessionID, projectID: projectID)
         }
     }
@@ -4763,15 +4766,8 @@ final class AppStore {
             pendingQuestionsBySession[sessionID] = requests
         }
 
-        guard let indices = indices(for: sessionID, projectID: projectID) else { return }
-        let transcript = transcript(for: sessionID)
-        projects[indices.project].sessions[indices.session].status = resolvedSessionStatus(
-            sessionID: sessionID,
-            transcript: transcript,
-            fallback: .idle
-        )
-        bumpSessionUIRevision()
-        scheduleProjectPersistence()
+        reconcileLocalSessionActivityIfSettled(sessionID: sessionID)
+        refreshSessionStatus(sessionID: sessionID, projectID: projectID)
     }
 
     private func hasCachedSessions(in projectID: ProjectSummary.ID) -> Bool {
