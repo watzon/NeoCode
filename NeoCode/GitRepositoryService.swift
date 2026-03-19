@@ -181,23 +181,26 @@ struct GitRepositoryService: Sendable {
     nonisolated func commitPreview(in projectPath: String) async throws -> GitCommitPreview {
         async let statusOutput = Self.runGit(["status", "--porcelain=v1", "--branch"], in: projectPath)
         async let currentBranch = Self.currentBranch(in: projectPath)
-        async let stagedStats = Self.runGit(["diff", "--cached", "--numstat"], in: projectPath)
-        async let unstagedStats = Self.runGit(["diff", "--numstat"], in: projectPath)
-        async let totalStats = Self.pendingCommitStats(in: projectPath)
+        async let stagedStats = try? Self.runGit(["diff", "--cached", "--numstat"], in: projectPath)
+        async let unstagedStats = try? Self.runGit(["diff", "--numstat"], in: projectPath)
+        async let totalStats = try? Self.pendingCommitStats(in: projectPath)
 
         let resolvedStatusOutput = try await statusOutput
         let resolvedCurrentBranch = try await currentBranch
-        let resolvedStagedStats = try await stagedStats
-        let resolvedUnstagedStats = try await unstagedStats
-        let resolvedTotalStats = try await totalStats
+        let resolvedStagedStatsOutput = await stagedStats
+        let resolvedUnstagedStatsOutput = await unstagedStats
+        let resolvedTotalStatsOutput = await totalStats
+        let resolvedStagedStats = Self.parseNumstat(resolvedStagedStatsOutput ?? "")
+        let resolvedUnstagedStats = Self.parseNumstat(resolvedUnstagedStatsOutput ?? "")
+        let resolvedTotalStats = resolvedTotalStatsOutput ?? resolvedUnstagedStats
 
         return GitCommitPreview(
             branch: resolvedCurrentBranch,
             changedFiles: Self.parseChangedFiles(from: resolvedStatusOutput),
-            stagedAdditions: Self.parseNumstat(resolvedStagedStats).additions,
-            stagedDeletions: Self.parseNumstat(resolvedStagedStats).deletions,
-            unstagedAdditions: Self.parseNumstat(resolvedUnstagedStats).additions,
-            unstagedDeletions: Self.parseNumstat(resolvedUnstagedStats).deletions,
+            stagedAdditions: resolvedStagedStats.additions,
+            stagedDeletions: resolvedStagedStats.deletions,
+            unstagedAdditions: resolvedUnstagedStats.additions,
+            unstagedDeletions: resolvedUnstagedStats.deletions,
             totalAdditions: resolvedTotalStats.additions,
             totalDeletions: resolvedTotalStats.deletions
         )
@@ -346,8 +349,6 @@ struct GitRepositoryService: Sendable {
 
         if FileManager.default.fileExists(atPath: liveIndexURL.path) {
             try FileManager.default.copyItem(at: liveIndexURL, to: temporaryIndexURL)
-        } else {
-            FileManager.default.createFile(atPath: temporaryIndexURL.path, contents: Data())
         }
 
         defer {

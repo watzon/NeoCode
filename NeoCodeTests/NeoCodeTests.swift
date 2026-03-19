@@ -4355,28 +4355,6 @@ struct NeoCodeMainActorTests {
     }
 
     @MainActor
-    @Test func selectingProjectDoesNotAutoSelectFirstThread() async {
-        let firstProject = ProjectSummary(
-            id: UUID(),
-            name: "NeoCode",
-            path: "/tmp/NeoCode",
-            sessions: [
-                SessionSummary(id: "ses_1", title: "Existing", lastUpdatedAt: .distantPast),
-            ]
-        )
-        let secondProject = ProjectSummary(
-            id: UUID(),
-            name: "Docs",
-            path: "/tmp/Docs",
-            sessions: [
-                SessionSummary(id: "ses_2", title: "Imported", lastUpdatedAt: .distantPast),
-            ]
-        )
-        let store = AppStore(projects: [firstProject, secondProject])
-
-        store.selectSession("ses_1")
-        store.selectProject(secondProject.id)
-    @MainActor
     @Test func promotedSessionAliasesKeepSidebarActionsAddressable() async throws {
         let store = AppStore(projects: [ProjectSummary(name: "NeoCode", path: "/tmp/NeoCode")])
         let runtime = OpenCodeRuntime()
@@ -4405,6 +4383,28 @@ struct NeoCodeMainActorTests {
         #expect(store.selectedSessionID == "ses_promoted")
     }
 
+    @MainActor
+    @Test func selectingProjectDoesNotAutoSelectFirstThread() async {
+        let firstProject = ProjectSummary(
+            id: UUID(),
+            name: "NeoCode",
+            path: "/tmp/NeoCode",
+            sessions: [
+                SessionSummary(id: "ses_1", title: "Existing", lastUpdatedAt: .distantPast),
+            ]
+        )
+        let secondProject = ProjectSummary(
+            id: UUID(),
+            name: "Docs",
+            path: "/tmp/Docs",
+            sessions: [
+                SessionSummary(id: "ses_2", title: "Imported", lastUpdatedAt: .distantPast),
+            ]
+        )
+        let store = AppStore(projects: [firstProject, secondProject])
+
+        store.selectSession("ses_1")
+        store.selectProject(secondProject.id)
 
         #expect(store.selectedProjectID == secondProject.id)
         #expect(store.selectedSessionID == nil)
