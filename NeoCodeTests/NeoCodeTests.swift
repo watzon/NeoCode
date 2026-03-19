@@ -5052,6 +5052,58 @@ struct NeoCodeMainActorTests {
         )
     }
 
+    @Test func transcriptScrollPinningUnpinsImmediatelyWhenUserScrollsUp() {
+        let previousOffsetY: CGFloat = 600
+        let metrics = TranscriptScrollMetrics(
+            contentOffsetY: 560,
+            contentHeight: 2_000,
+            visibleMaxY: 1_400
+        )
+
+        let isPinned = TranscriptScrollPinning.nextPinnedState(
+            for: metrics,
+            previousOffsetY: previousOffsetY,
+            isMaintainingPinnedPosition: false,
+            autoScrollThreshold: 72
+        )
+
+        #expect(isPinned == false)
+    }
+
+    @Test func transcriptScrollPinningRepinsWhenViewportReturnsNearBottom() {
+        let metrics = TranscriptScrollMetrics(
+            contentOffsetY: 1_120,
+            contentHeight: 1_600,
+            visibleMaxY: 1_548
+        )
+
+        let isPinned = TranscriptScrollPinning.nextPinnedState(
+            for: metrics,
+            previousOffsetY: 1_120,
+            isMaintainingPinnedPosition: false,
+            autoScrollThreshold: 72
+        )
+
+        #expect(isPinned)
+    }
+
+    @Test func transcriptScrollPinningStaysPinnedDuringProgrammaticScroll() {
+        let metrics = TranscriptScrollMetrics(
+            contentOffsetY: 320,
+            contentHeight: 1_600,
+            visibleMaxY: 1_200
+        )
+
+        let isPinned = TranscriptScrollPinning.nextPinnedState(
+            for: metrics,
+            previousOffsetY: 380,
+            isMaintainingPinnedPosition: true,
+            autoScrollThreshold: 72
+        )
+
+        #expect(isPinned)
+    }
+
 }
 
 private func decode<T: Decodable>(_ json: String) throws -> T {

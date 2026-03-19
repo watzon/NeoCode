@@ -116,8 +116,7 @@ struct ConversationView: View {
     @State private var isPinnedToBottom = true
     @State private var isMaintainingPinnedPosition = false
     @State private var isAwaitingInitialScroll = true
-    @State private var transcriptViewportHeight: CGFloat = 0
-    @State private var transcriptContentFrame: CGRect = .zero
+    @State private var lastObservedTranscriptContentOffsetY: CGFloat?
     @State private var loadedMessageCount = 120
     @State private var isLoadingOlderMessages = false
     @State private var pendingRevertPreview: SessionRevertPreview?
@@ -525,33 +524,20 @@ struct ConversationView: View {
                 .padding(.bottom, 0)
                 .frame(maxWidth: transcriptColumnWidth, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .center)
-                .background(
-                    GeometryReader { geometry in
-                        Color.clear.preference(
-                            key: TranscriptContentFramePreferenceKey.self,
-                            value: geometry.frame(in: .named(transcriptScrollSpaceName))
-                        )
+                .background {
+                    // Attach inside the scroll content hierarchy so AppKit scroll
+                    // notifications track real transcript movement instead of only
+                    // firing when SwiftUI re-renders the outer container.
+                    TranscriptScrollObserver { metrics in
+                        DispatchQueue.main.async {
+                            updateTranscriptScrollMetrics(metrics, using: proxy)
+                        }
                     }
-                )
+                }
             }
+            .accessibilityIdentifier("conversation.transcript.scrollView")
             .background(.clear)
             .coordinateSpace(name: transcriptScrollSpaceName)
-            .background(
-                GeometryReader { geometry in
-                    Color.clear.preference(
-                        key: TranscriptViewportHeightPreferenceKey.self,
-                        value: geometry.size.height
-                    )
-                }
-            )
-            .onPreferenceChange(TranscriptViewportHeightPreferenceKey.self) { viewportHeight in
-                transcriptViewportHeight = viewportHeight
-                updateTranscriptScrollMetrics(using: proxy)
-            }
-            .onPreferenceChange(TranscriptContentFramePreferenceKey.self) { contentFrame in
-                transcriptContentFrame = contentFrame
-                updateTranscriptScrollMetrics(using: proxy)
-            }
 
             if showsNewSessionEmptyState {
                 NewSessionEmptyStateView()
@@ -741,6 +727,7 @@ struct ConversationView: View {
         }
         .buttonStyle(.plain)
         .frame(maxWidth: .infinity, alignment: .center)
+        .accessibilityIdentifier("conversation.backToBottom")
     }
 
     @ViewBuilder
@@ -930,17 +917,11 @@ struct ConversationView: View {
         isPinnedToBottom = nextPinnedState
     }
 
-    private func updateTranscriptScrollMetrics(using proxy: ScrollViewProxy) {
-        guard transcriptViewportHeight > 0 else { return }
-
-        let contentOffsetY = -transcriptContentFrame.minY
-        let metrics = TranscriptScrollMetrics(
-            contentOffsetY: contentOffsetY,
-            contentHeight: transcriptContentFrame.height,
-            visibleMaxY: contentOffsetY + transcriptViewportHeight
-        )
-
+    private func updateTranscriptScrollMetrics(_ metrics: TranscriptScrollMetrics, using proxy: ScrollViewProxy) {
         guard !isAwaitingInitialScroll else { return }
+
+        let previousOffsetY = lastObservedTranscriptContentOffsetY
+        lastObservedTranscriptContentOffsetY = metrics.contentOffsetY
 
         if metrics.contentOffsetY <= olderMessagesLoadThreshold {
             DispatchQueue.main.async {
@@ -948,13 +929,12 @@ struct ConversationView: View {
             }
         }
 
-        let nextPinnedState: Bool
-        if isMaintainingPinnedPosition {
-            nextPinnedState = true
-        } else {
-            let distanceToBottom = max(0, metrics.contentHeight - metrics.visibleMaxY)
-            nextPinnedState = distanceToBottom <= autoScrollThreshold
-        }
+        let nextPinnedState = TranscriptScrollPinning.nextPinnedState(
+            for: metrics,
+            previousOffsetY: previousOffsetY,
+            isMaintainingPinnedPosition: isMaintainingPinnedPosition,
+            autoScrollThreshold: autoScrollThreshold
+        )
 
         DispatchQueue.main.async {
             schedulePinnedStateUpdate(nextPinnedState)
@@ -993,6 +973,7 @@ struct ConversationView: View {
         isPinnedToBottom = true
         isMaintainingPinnedPosition = false
         isAwaitingInitialScroll = true
+        lastObservedTranscriptContentOffsetY = nil
         resetLoadedMessageWindow()
 
         if shouldShowTranscriptLoadingState {
@@ -1234,18 +1215,188 @@ enum ConversationLayout {
     )
 }
 
-private struct TranscriptContentFramePreferenceKey: PreferenceKey {
-    static var defaultValue: CGRect = .zero
+struct TranscriptScrollPinning {
+    static let upwardScrollTolerance: CGFloat = 8
 
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
-        value = nextValue()
+    static func nextPinnedState(
+        for metrics: TranscriptScrollMetrics,
+        previousOffsetY: CGFloat?,
+        isMaintainingPinnedPosition: Bool,
+        autoScrollThreshold: CGFloat
+    ) -> Bool {
+        if isMaintainingPinnedPosition {
+            return true
+        }
+
+        if let previousOffsetY,
+           metrics.contentOffsetY < previousOffsetY - upwardScrollTolerance {
+            return false
+        }
+
+        let distanceToBottom = max(0, metrics.contentHeight - metrics.visibleMaxY)
+        return distanceToBottom <= autoScrollThreshold
     }
 }
 
-private struct TranscriptViewportHeightPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
+private struct TranscriptScrollObserver: NSViewRepresentable {
+    let onMetricsChange: (TranscriptScrollMetrics) -> Void
 
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onMetricsChange: onMetricsChange)
+    }
+
+    func makeNSView(context: Context) -> ObserverView {
+        let view = ObserverView()
+        view.coordinator = context.coordinator
+        return view
+    }
+
+    func updateNSView(_ nsView: ObserverView, context: Context) {
+        context.coordinator.onMetricsChange = onMetricsChange
+        nsView.attachToEnclosingScrollViewIfNeeded()
+        context.coordinator.reportMetricsIfPossible()
+    }
+
+    final class Coordinator: NSObject {
+        var onMetricsChange: (TranscriptScrollMetrics) -> Void
+        weak var clipView: NSClipView?
+        weak var documentView: NSView?
+
+        init(onMetricsChange: @escaping (TranscriptScrollMetrics) -> Void) {
+            self.onMetricsChange = onMetricsChange
+        }
+
+        func attach(to scrollView: NSScrollView) {
+            guard clipView !== scrollView.contentView else { return }
+
+            detach()
+
+            let clipView = scrollView.contentView
+            let documentView = scrollView.documentView
+
+            self.clipView = clipView
+            self.documentView = documentView
+
+            clipView.postsBoundsChangedNotifications = true
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(clipViewBoundsDidChange),
+                name: NSView.boundsDidChangeNotification,
+                object: clipView
+            )
+
+            documentView?.postsFrameChangedNotifications = true
+            if let documentView {
+                NotificationCenter.default.addObserver(
+                    self,
+                    selector: #selector(documentViewFrameDidChange),
+                    name: NSView.frameDidChangeNotification,
+                    object: documentView
+                )
+            }
+
+        }
+
+        func detach() {
+            NotificationCenter.default.removeObserver(self)
+            clipView = nil
+            documentView = nil
+        }
+
+        @objc
+        func clipViewBoundsDidChange() {
+            reportMetricsIfPossible()
+        }
+
+        @objc
+        func documentViewFrameDidChange() {
+            reportMetricsIfPossible()
+        }
+
+        func reportMetricsIfPossible() {
+            guard let clipView, let documentView else { return }
+
+            let visibleRect = clipView.documentVisibleRect
+            let contentHeight = max(documentView.bounds.height, visibleRect.height)
+            let contentOffsetY: CGFloat
+
+            if documentView.isFlipped {
+                contentOffsetY = max(0, visibleRect.minY)
+            } else {
+                contentOffsetY = max(0, contentHeight - visibleRect.maxY)
+            }
+
+            let metrics = TranscriptScrollMetrics(
+                contentOffsetY: contentOffsetY,
+                contentHeight: contentHeight,
+                visibleMaxY: min(contentHeight, contentOffsetY + visibleRect.height)
+            )
+
+            onMetricsChange(metrics)
+        }
+
+        deinit {
+            NotificationCenter.default.removeObserver(self)
+        }
+    }
+
+    final class ObserverView: NSView {
+        weak var coordinator: Coordinator?
+
+        override func viewDidMoveToSuperview() {
+            super.viewDidMoveToSuperview()
+            attachToEnclosingScrollViewIfNeeded()
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            attachToEnclosingScrollViewIfNeeded()
+        }
+
+        func attachToEnclosingScrollViewIfNeeded() {
+            guard let coordinator else { return }
+            guard let scrollView = locateScrollView() else { return }
+            coordinator.attach(to: scrollView)
+            coordinator.reportMetricsIfPossible()
+        }
+
+        private func locateScrollView() -> NSScrollView? {
+            if let direct = observedEnclosingScrollView {
+                return direct
+            }
+
+            // SwiftUI can insert additional hosting/container views between this
+            // probe view and the actual transcript scroll view, so fall back to a
+            // broader ancestor-subtree search before giving up.
+            var ancestor = superview
+            while let current = ancestor {
+                if let discovered = findScrollView(in: current) {
+                    return discovered
+                }
+                ancestor = current.superview
+            }
+
+            return window?.contentView.flatMap(findScrollView(in:))
+        }
+
+        private var observedEnclosingScrollView: NSScrollView? {
+            sequence(first: superview, next: { $0?.superview }).first {
+                $0 is NSScrollView
+            } as? NSScrollView
+        }
+
+        private func findScrollView(in view: NSView) -> NSScrollView? {
+            if let scrollView = view as? NSScrollView {
+                return scrollView
+            }
+
+            for subview in view.subviews {
+                if let match = findScrollView(in: subview) {
+                    return match
+                }
+            }
+
+            return nil
+        }
     }
 }

@@ -11,6 +11,7 @@ import AppKit
 final class NeoCodeUITests: XCTestCase {
     private let targetBundleIdentifier = "tech.watzon.NeoCode"
     private let uiTestModeKey = "NEOCODE_UI_TEST_MODE"
+    private let scrollFixtureKey = "NEOCODE_UI_TEST_SCROLL_FIXTURE"
     private var launchedApplication: XCUIApplication?
 
     override func setUpWithError() throws {
@@ -51,9 +52,36 @@ final class NeoCodeUITests: XCTestCase {
         terminateLaunchedApplicationsIfNeeded()
     }
 
-    private func configuredApplication() -> XCUIApplication {
+    @MainActor
+    func testBackToBottomAppearsAfterScrollingTranscriptFixture() throws {
+        try skipIfTargetAppIsAlreadyRunning()
+
+        let app = configuredApplication(scrollFixture: true)
+        launchedApplication = app
+        app.launch()
+
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 5))
+
+        let transcript = app.scrollViews["conversation.transcript.scrollView"]
+        XCTAssertTrue(transcript.waitForExistence(timeout: 5))
+
+        let backToBottomButton = app.buttons["conversation.backToBottom"]
+        XCTAssertFalse(backToBottomButton.exists)
+
+        transcript.click()
+        transcript.typeKey(.pageUp, modifierFlags: [])
+        transcript.typeKey(.pageUp, modifierFlags: [])
+
+        let appeared = backToBottomButton.waitForExistence(timeout: 2)
+        XCTAssertTrue(appeared, "Expected back-to-bottom button after paging upward in the transcript fixture.")
+    }
+
+    private func configuredApplication(scrollFixture: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment[uiTestModeKey] = "1"
+        if scrollFixture {
+            app.launchEnvironment[scrollFixtureKey] = "1"
+        }
         return app
     }
 

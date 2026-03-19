@@ -143,6 +143,59 @@ private enum AppTestMode {
     }
 }
 
+private enum AppUITestFixture {
+    private static let scrollFixtureKey = "NEOCODE_UI_TEST_SCROLL_FIXTURE"
+
+    static var scrollFixtureSessionID: String? {
+        guard ProcessInfo.processInfo.environment[scrollFixtureKey] == "1" else { return nil }
+        return "ses_ui_scroll_fixture"
+    }
+
+    static func makeStoreIfNeeded() -> AppStore? {
+        guard let sessionID = scrollFixtureSessionID else { return nil }
+
+        let now = Date(timeIntervalSince1970: 1_773_935_000)
+        let transcript = (0..<80).flatMap { index -> [ChatMessage] in
+            let timestamp = now.addingTimeInterval(Double(index) * 30)
+            return [
+                ChatMessage(
+                    id: "fixture-user-\(index)",
+                    messageID: "fixture-user-msg-\(index)",
+                    role: .user,
+                    text: "User prompt \(index)",
+                    timestamp: timestamp,
+                    emphasis: .normal
+                ),
+                ChatMessage(
+                    id: "fixture-assistant-\(index)",
+                    messageID: "fixture-assistant-msg-\(index)",
+                    role: .assistant,
+                    text: "Assistant response \(index)\n\n" + String(repeating: "This is fixture transcript content for UI scrolling. ", count: 10),
+                    timestamp: timestamp.addingTimeInterval(5),
+                    emphasis: .normal
+                ),
+            ]
+        }
+
+        let store = AppStore(projects: [
+            ProjectSummary(
+                name: "NeoCode UI Tests",
+                path: "/tmp/NeoCodeUITests",
+                sessions: [
+                    SessionSummary(
+                        id: sessionID,
+                        title: "Scroll Fixture",
+                        lastUpdatedAt: now,
+                        transcript: transcript
+                    ),
+                ]
+            ),
+        ])
+        store.selectSession(sessionID)
+        return store
+    }
+}
+
 private struct UnitTestHostView: View {
     var body: some View {
         Color.clear
@@ -160,10 +213,15 @@ private struct UnitTestHostView: View {
 }
 
 private struct AppSceneView: View {
-    @State private var store = AppStore()
+    @State private var store: AppStore
     @State private var runtime = OpenCodeRuntime()
     @State private var updateService = AppUpdateService()
     let appDelegate: AppDelegate
+
+    init(appDelegate: AppDelegate) {
+        self.appDelegate = appDelegate
+        _store = State(initialValue: AppUITestFixture.makeStoreIfNeeded() ?? AppStore())
+    }
 
     var body: some View {
         ContentView()
