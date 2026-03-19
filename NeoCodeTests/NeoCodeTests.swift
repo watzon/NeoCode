@@ -1870,6 +1870,91 @@ struct NeoCodeMainActorTests {
     }
 
     @MainActor
+    @Test func appStoreRefreshesGitAfterCompletedFileModifyingToolCall() async throws {
+        let repoURL = try createTemporaryGitRepository()
+        defer { try? FileManager.default.removeItem(at: repoURL) }
+
+        try write("tracked\n", to: repoURL.appendingPathComponent("tracked.txt"))
+        try runGit(["add", "tracked.txt"], in: repoURL)
+        try runGit(["commit", "-m", "Initial commit"], in: repoURL)
+
+        let session = SessionSummary(id: "ses_1", title: "Existing", lastUpdatedAt: .distantPast)
+        let store = AppStore(projects: [ProjectSummary(name: "NeoCode", path: repoURL.path, sessions: [session])])
+        store.selectSession("ses_1")
+        await store.refreshGitStatus()
+        #expect(store.gitStatus.hasChanges == false)
+
+        try write("tracked updated\n", to: repoURL.appendingPathComponent("tracked.txt"))
+
+        store.apply(event: .messagePartUpdated(
+            OpenCodePart(
+                id: "part_tool",
+                sessionID: "ses_1",
+                messageID: "msg_1",
+                type: .tool,
+                text: nil,
+                tool: "apply_patch",
+                mime: nil,
+                filename: nil,
+                url: nil,
+                source: nil,
+                state: OpenCodeToolState(status: .completed, input: nil, output: nil, error: nil),
+                time: nil
+            )
+        ))
+
+        try await Task.sleep(for: .milliseconds(400))
+
+        #expect(store.gitStatus.hasChanges == true)
+    }
+
+    @MainActor
+    @Test func appStoreRefreshesGitAfterCompletedBashGitToolCall() async throws {
+        let repoURL = try createTemporaryGitRepository()
+        defer { try? FileManager.default.removeItem(at: repoURL) }
+
+        try write("tracked\n", to: repoURL.appendingPathComponent("tracked.txt"))
+        try runGit(["add", "tracked.txt"], in: repoURL)
+        try runGit(["commit", "-m", "Initial commit"], in: repoURL)
+        try write("tracked updated\n", to: repoURL.appendingPathComponent("tracked.txt"))
+
+        let session = SessionSummary(id: "ses_1", title: "Existing", lastUpdatedAt: .distantPast)
+        let store = AppStore(projects: [ProjectSummary(name: "NeoCode", path: repoURL.path, sessions: [session])])
+        store.selectSession("ses_1")
+        await store.refreshGitStatus()
+        #expect(store.gitStatus.hasChanges == true)
+
+        try runGit(["add", "tracked.txt"], in: repoURL)
+        try runGit(["commit", "-m", "Update tracked"], in: repoURL)
+
+        store.apply(event: .messagePartUpdated(
+            OpenCodePart(
+                id: "part_bash",
+                sessionID: "ses_1",
+                messageID: "msg_1",
+                type: .tool,
+                text: nil,
+                tool: "bash",
+                mime: nil,
+                filename: nil,
+                url: nil,
+                source: nil,
+                state: OpenCodeToolState(
+                    status: .completed,
+                    input: .object(["command": .string("git commit -m \"Update tracked\"")]),
+                    output: nil,
+                    error: nil
+                ),
+                time: nil
+            )
+        ))
+
+        try await Task.sleep(for: .milliseconds(400))
+
+        #expect(store.gitStatus.hasChanges == false)
+    }
+
+    @MainActor
     @Test func reconcileLoadedTranscriptDropsStaleInProgressSuffixWhenNotPreserving() {
         let existing = [
             ChatMessage(

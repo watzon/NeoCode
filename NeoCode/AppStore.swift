@@ -204,7 +204,7 @@ final class AppStore {
     private var cachedModelsByProjectPath: [String: [ComposerModelOption]] = [:]
     private var cachedCommandsByProjectPath: [String: [OpenCodeCommand]] = [:]
     private let runtimeIdleTTL: Duration = .seconds(60)
-    private let gitRefreshFallbackInterval: Duration = .seconds(90)
+    private let gitRefreshFallbackInterval: Duration = .seconds(300)
     private let gitCommitPreviewRetryDelays: [Duration] = [.milliseconds(150), .milliseconds(500)]
     private var isRefreshingGitCommitPreview = false
     private var liveServices: [ProjectSummary.ID: any OpenCodeServicing] = [:]
@@ -214,13 +214,11 @@ final class AppStore {
     private var refreshTask: Task<Void, Never>?
     private var gitRefreshTask: Task<Void, Never>?
     private var gitRefreshDebounceTask: Task<Void, Never>?
-    private var gitMonitorSetupTask: Task<Void, Never>?
     private var persistTask: Task<Void, Never>?
     private var subscribedConnectionIdentifiers: [ProjectSummary.ID: String] = [:]
     private var runtimeIdleTasks: [ProjectSummary.ID: Task<Void, Never>] = [:]
     private var gitStateByProjectPath: [String: GitCachedState] = [:]
     private var gitOperationStateByProjectPath: [String: GitOperationState] = [:]
-    private var gitRepositoryMonitor: GitRepositoryMonitor?
     private var streamingRecoveryTasks: [String: Task<Void, Never>] = [:]
     private var transcriptStateBySessionID: [String: SessionTranscriptState] = [:]
     private var messageRoles: [String: ChatMessage.Role] = [:]
@@ -2190,7 +2188,6 @@ final class AppStore {
         }
 
         applyCachedGitState(for: projectPath)
-        startGitRepositoryMonitor(for: projectPath)
         scheduleGitFallbackRefresh(for: projectPath)
         scheduleGitRefresh(reason: "project-selected", projectPath: projectPath, refreshCommitPreviewIfLoaded: false, delay: .milliseconds(0))
     }
@@ -2200,10 +2197,6 @@ final class AppStore {
         gitRefreshTask = nil
         gitRefreshDebounceTask?.cancel()
         gitRefreshDebounceTask = nil
-        gitMonitorSetupTask?.cancel()
-        gitMonitorSetupTask = nil
-        gitRepositoryMonitor?.stop()
-        gitRepositoryMonitor = nil
     }
 
     func handleApplicationDidBecomeActive() {
@@ -2216,36 +2209,6 @@ final class AppStore {
             refreshCommitPreviewIfLoaded: gitCommitPreview != nil,
             delay: .milliseconds(100)
         )
-    }
-
-    private func startGitRepositoryMonitor(for projectPath: String) {
-        gitMonitorSetupTask?.cancel()
-        gitRepositoryMonitor?.stop()
-
-        let monitor = GitRepositoryMonitor { [weak self] in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                self.scheduleGitRefresh(
-                    reason: "git-metadata-changed",
-                    projectPath: projectPath,
-                    refreshCommitPreviewIfLoaded: self.gitCommitPreview != nil,
-                    delay: .milliseconds(200)
-                )
-            }
-        }
-        gitRepositoryMonitor = monitor
-
-        gitMonitorSetupTask = Task { [weak self, weak monitor] in
-            guard let self, let monitor else { return }
-            let watchURLs = await GitRepositoryService().metadataWatchURLs(in: projectPath)
-            guard !Task.isCancelled else { return }
-            guard self.selectedProject?.path == projectPath else { return }
-
-            monitor.watch(urls: watchURLs)
-            self.logger.debug(
-                "Started git metadata monitor path=\(projectPath, privacy: .public) watched=\(watchURLs.count, privacy: .public)"
-            )
-        }
     }
 
     private func scheduleGitFallbackRefresh(for projectPath: String) {
@@ -2555,9 +2518,6 @@ final class AppStore {
             break
         }
 
-        if eventMayAffectGitState(event) {
-            scheduleGitRefreshForProjectActivity(projectID: projectID, reason: event.debugName)
-        }
     }
 
     @discardableResult
@@ -3909,6 +3869,16 @@ final class AppStore {
         upsertMessage(message, in: sessionID, projectID: projectID)
         touchSession(sessionID: sessionID, projectID: projectID, updatedAt: message.timestamp)
         refreshSessionStatus(sessionID: sessionID, projectID: projectID)
+
+        if partTriggersGitRefresh(part, projectID: projectID),
+           let projectPath = project(for: sessionID)?.path {
+            scheduleGitRefresh(
+                reason: "tool-call-file-modified",
+                projectPath: projectPath,
+                refreshCommitPreviewIfLoaded: gitStatus.hasChanges || gitCommitPreview != nil,
+                delay: .milliseconds(150)
+            )
+        }
     }
 
     private func apply(delta: OpenCodePartDelta, projectID: ProjectSummary.ID) {
@@ -4098,6 +4068,28 @@ final class AppStore {
             self.logger.debug("Scheduling post-operation git refresh for path=\(projectPath, privacy: .public)")
             await self.refreshGitStatus()
             await self.refreshGitCommitPreview(showLoadingIndicator: false, projectPathOverride: projectPath)
+        }
+    }
+
+    private func partTriggersGitRefresh(_ part: OpenCodePart, projectID: ProjectSummary.ID) -> Bool {
+        guard selectedProject?.id == projectID,
+              part.type == .tool,
+              part.toolStatus == .completed,
+              let toolName = part.tool?.gitRefreshTriggerToolName
+        else {
+            return false
+        }
+
+        switch toolName {
+        case "applypatch", "copy", "delete", "edit", "move", "remove", "write":
+            return true
+        case "bash":
+            guard let command = part.state?.input?.stringValue(forKey: "command")?.lowercased() else {
+                return false
+            }
+            return command == "git" || command.hasPrefix("git ") || command.contains(" git ")
+        default:
+            return false
         }
     }
 
@@ -4388,44 +4380,6 @@ final class AppStore {
         }
 
         refreshSessionStatus(sessionID: sessionID, projectID: projectID)
-    }
-
-    private func eventMayAffectGitState(_ event: OpenCodeEvent) -> Bool {
-        switch event {
-        case .sessionStatusChanged,
-                .sessionCompacted,
-                .messageUpdated,
-                .messagePartUpdated,
-                .messagePartDelta:
-            return true
-        case .sessionCreated,
-                .sessionUpdated,
-                .sessionDeleted,
-                .permissionAsked,
-                .permissionReplied,
-                .questionAsked,
-                .questionReplied,
-                .questionRejected,
-                .connected,
-                .ignored:
-            return false
-        }
-    }
-
-    private func scheduleGitRefreshForProjectActivity(projectID: ProjectSummary.ID, reason: String) {
-        guard selectedProject?.id == projectID,
-              let projectPath = selectedProject?.path,
-              !projectPath.isEmpty
-        else {
-            return
-        }
-
-        scheduleGitRefresh(
-            reason: "project-activity-\(reason)",
-            projectPath: projectPath,
-            refreshCommitPreviewIfLoaded: gitStatus.hasChanges || gitCommitPreview != nil,
-            delay: .milliseconds(250)
-        )
     }
 
     private func transcriptRevision(for sessionID: String, projectID: ProjectSummary.ID) -> Int {
@@ -6076,4 +6030,29 @@ private struct SlashCommandInvocation {
 private struct LocalSlashCommandInvocation {
     let command: LocalComposerSlashCommand
     let arguments: String
+}
+
+private extension String {
+    var gitRefreshTriggerToolName: String {
+        let leaf = split(whereSeparator: { $0 == "." || $0 == "/" || $0 == ":" }).last.map(String.init) ?? self
+        return leaf
+            .lowercased()
+            .replacingOccurrences(of: "_", with: "")
+    }
+}
+
+private extension JSONValue {
+    var string: String? {
+        guard case .string(let value) = self else { return nil }
+        return value
+    }
+
+    var object: [String: JSONValue]? {
+        guard case .object(let value) = self else { return nil }
+        return value
+    }
+
+    func stringValue(forKey key: String) -> String? {
+        object?[key]?.string
+    }
 }
