@@ -1181,6 +1181,26 @@ struct NeoCodeCoreTests {
         #expect(formatted == "<none>")
     }
 
+    @Test func runtimeDetectsListeningURLFromAlternateLogFormats() throws {
+        let url = try #require(
+            OpenCodeRuntime.detectedServerURL(
+                in: "[server] ready for connections at http://localhost:43123/global/health\n"
+            )
+        )
+
+        #expect(url.absoluteString == "http://localhost:43123")
+    }
+
+    @Test func runtimeDetectsListeningHostPortWithoutSchemeAndNormalizesWildcardHost() throws {
+        let url = try #require(
+            OpenCodeRuntime.detectedServerURL(
+                in: "Listening on 0.0.0.0:54321\n"
+            )
+        )
+
+        #expect(url.absoluteString == "http://127.0.0.1:54321")
+    }
+
     @Test func runtimeResolvesExecutableFromPATH() throws {
         let fileManager = FileManager.default
         let tempDirectory = fileManager.temporaryDirectory
@@ -1230,6 +1250,18 @@ struct NeoCodeCoreTests {
         #expect(OpenCodeRuntime.normalizedExecutablePath(nil) == nil)
         #expect(OpenCodeRuntime.normalizedExecutablePath("   ") == nil)
         #expect(OpenCodeRuntime.normalizedExecutablePath("  /tmp/opencode  ") == "/tmp/opencode")
+    }
+
+    @MainActor
+    @Test func runtimeFailureStateStaysScopedToTheProjectThatFailed() async {
+        let runtime = OpenCodeRuntime()
+        runtime.preferredExecutablePath = "/definitely/missing/opencode"
+
+        await runtime.ensureRunning(for: "/tmp/NeoCode-A")
+
+        #expect(runtime.failureMessage(for: "/tmp/NeoCode-A")?.contains("Could not find the OpenCode CLI") == true)
+        #expect(runtime.failureMessage(for: "/tmp/NeoCode-B") == nil)
+        #expect(runtime.detailLabel(for: "/tmp/NeoCode-B") == "Select a project")
     }
 
     @Test func subprocessRunnerCancelsProcessTree() async throws {

@@ -27,15 +27,8 @@ struct AppTerminationWarningContext: Equatable {
 @Observable
 final class AppStore {
     let logger = Logger(subsystem: "tech.watzon.NeoCode", category: "AppStore")
-    private let projectPersistence = PersistedProjectsStore()
-    private let appSettingsPersistence = PersistedAppSettingsStore()
-    private let workspaceSelectionPersistence = PersistedWorkspaceSelectionStore()
-    private let promptDraftPersistence = PersistedPromptDraftsStore()
-    private let yoloPreferencePersistence = PersistedYoloPreferencesStore()
-    private let favoriteModelPersistence = PersistedFavoriteModelsStore()
-    private let notificationService = NeoCodeNotificationService()
-    private let sleepAssertionService = NeoCodeSleepAssertionService()
-    private let dashboardStatsService = DashboardStatsService()
+    private let persistence: AppStorePersistence
+    private let services: AppStoreServices
     private let newSessionTitle = SessionSummary.defaultTitle
     private let autoRespondedPermissionTTL: TimeInterval = 60 * 60
     private let performanceOptions: AppStorePerformanceOptions
@@ -196,7 +189,7 @@ final class AppStore {
             favoriteModelIDs.insert(id)
         }
         guard isPersistenceEnabled else { return }
-        favoriteModelPersistence.saveFavoriteModelIDs(favoriteModelIDs)
+        persistence.favoriteModels.saveFavoriteModelIDs(favoriteModelIDs)
     }
 
     private var composerOptionsProjectPath: String?
@@ -259,15 +252,19 @@ final class AppStore {
     private var loadingSessionCountsByProjectID: [ProjectSummary.ID: Int] = [:]
 
     init() {
-        let normalizedProjects = Self.normalizedProjects(PersistedProjectsStore().loadProjects())
+        let persistence = AppStorePersistence()
+        let services = AppStoreServices()
+        let normalizedProjects = Self.normalizedProjects(persistence.projects.loadProjects())
         let extractedState = Self.extractTranscriptState(from: normalizedProjects)
-        let loadedAppSettings = PersistedAppSettingsStore().loadSettings()
-        let restoredWorkspaceSelection = PersistedWorkspaceSelectionStore().loadSelection()
+        let loadedAppSettings = persistence.appSettings.loadSettings()
+        let restoredWorkspaceSelection = persistence.workspaceSelection.loadSelection()
         let initialWorkspaceSelection = Self.initialWorkspaceSelection(
             projects: extractedState.projects,
             startupBehavior: loadedAppSettings.general.startupBehavior,
             restoredSelection: restoredWorkspaceSelection
         )
+        self.persistence = persistence
+        self.services = services
         self.projects = extractedState.projects
         self.transcriptStateBySessionID = extractedState.transcripts
         self.selectedProjectID = initialWorkspaceSelection.projectID
@@ -276,9 +273,9 @@ final class AppStore {
         self.loadingTranscriptSessionID = nil
         self.selectedDashboardRange = .allTime
         self.yoloSessionKeys = loadedAppSettings.general.remembersYoloModePerThread
-            ? PersistedYoloPreferencesStore().loadYoloSessionKeys()
+            ? persistence.yoloPreferences.loadYoloSessionKeys()
             : []
-        self.favoriteModelIDs = favoriteModelPersistence.loadFavoriteModelIDs()
+        self.favoriteModelIDs = persistence.favoriteModels.loadFavoriteModelIDs()
         self.performanceOptions = AppStorePerformanceOptions()
         self.isPersistenceEnabled = true
         self.lastWorkspaceSelection = initialWorkspaceSelection.content
@@ -290,17 +287,23 @@ final class AppStore {
     init(
         projects: [ProjectSummary],
         performanceOptions: AppStorePerformanceOptions = AppStorePerformanceOptions(),
-        isPersistenceEnabled: Bool = false
+        isPersistenceEnabled: Bool = false,
+        persistence: AppStorePersistence? = nil,
+        services: AppStoreServices? = nil
     ) {
+        let persistence = persistence ?? AppStorePersistence()
+        let services = services ?? AppStoreServices()
         let normalizedProjects = Self.normalizedProjects(projects)
         let extractedState = Self.extractTranscriptState(from: normalizedProjects)
-        let loadedAppSettings = isPersistenceEnabled ? PersistedAppSettingsStore().loadSettings() : .init()
-        let restoredWorkspaceSelection = isPersistenceEnabled ? PersistedWorkspaceSelectionStore().loadSelection() : nil
+        let loadedAppSettings = isPersistenceEnabled ? persistence.appSettings.loadSettings() : .init()
+        let restoredWorkspaceSelection = isPersistenceEnabled ? persistence.workspaceSelection.loadSelection() : nil
         let initialWorkspaceSelection = Self.initialWorkspaceSelection(
             projects: extractedState.projects,
             startupBehavior: loadedAppSettings.general.startupBehavior,
             restoredSelection: restoredWorkspaceSelection
         )
+        self.persistence = persistence
+        self.services = services
         self.projects = extractedState.projects
         self.transcriptStateBySessionID = extractedState.transcripts
         self.selectedProjectID = initialWorkspaceSelection.projectID
@@ -309,9 +312,9 @@ final class AppStore {
         self.loadingTranscriptSessionID = nil
         self.selectedDashboardRange = .allTime
         self.yoloSessionKeys = isPersistenceEnabled && loadedAppSettings.general.remembersYoloModePerThread
-            ? PersistedYoloPreferencesStore().loadYoloSessionKeys()
+            ? persistence.yoloPreferences.loadYoloSessionKeys()
             : []
-        self.favoriteModelIDs = isPersistenceEnabled ? favoriteModelPersistence.loadFavoriteModelIDs() : []
+        self.favoriteModelIDs = isPersistenceEnabled ? persistence.favoriteModels.loadFavoriteModelIDs() : []
         self.performanceOptions = performanceOptions
         self.isPersistenceEnabled = isPersistenceEnabled
         self.lastWorkspaceSelection = initialWorkspaceSelection.content
@@ -585,7 +588,7 @@ final class AppStore {
 
         if isPersistenceEnabled,
            appSettings.general.remembersYoloModePerThread {
-            yoloPreferencePersistence.saveYoloSessionKeys(yoloSessionKeys)
+            persistence.yoloPreferences.saveYoloSessionKeys(yoloSessionKeys)
         }
     }
 
@@ -646,7 +649,7 @@ final class AppStore {
         isPromptReady = false
         promptLoadingText = promptDraftsByKey[promptKey].flatMap { $0.nonEmptyTrimmed }
 
-        let loadedDraft = await promptDraftPersistence.loadDraft(forKey: promptKey)
+        let loadedDraft = await persistence.promptDrafts.loadDraft(forKey: promptKey)
         guard selectedSessionID == sessionID else {
             promptDraftsByKey[promptKey] = loadedDraft
             loadedPromptKeys.insert(promptKey)
@@ -689,7 +692,10 @@ final class AppStore {
         guard shouldRefreshSnapshot else { return }
         Task { [weak self] in
             guard let self else { return }
-            self.dashboardSnapshot = await self.dashboardStatsService.currentSnapshot(range: self.selectedDashboardRange)
+            self.dashboardSnapshot = await self.services.dashboardStats.currentSnapshot(
+                range: self.selectedDashboardRange,
+                projectPath: nil
+            )
         }
     }
 
@@ -705,7 +711,7 @@ final class AppStore {
 
         Task { [weak self] in
             guard let self else { return }
-            self.dashboardSnapshot = await self.dashboardStatsService.currentSnapshot(
+            self.dashboardSnapshot = await self.services.dashboardStats.currentSnapshot(
                 range: self.selectedDashboardRange,
                 projectPath: destinationProject.path
             )
@@ -718,7 +724,10 @@ final class AppStore {
 
         Task { [weak self] in
             guard let self else { return }
-            self.dashboardSnapshot = await self.dashboardStatsService.currentSnapshot(range: self.selectedDashboardRange)
+            self.dashboardSnapshot = await self.services.dashboardStats.currentSnapshot(
+                range: self.selectedDashboardRange,
+                projectPath: nil
+            )
         }
     }
 
@@ -728,7 +737,7 @@ final class AppStore {
 
         Task { [weak self] in
             guard let self else { return }
-            self.dashboardSnapshot = await self.dashboardStatsService.currentSnapshot(
+            self.dashboardSnapshot = await self.services.dashboardStats.currentSnapshot(
                 range: range,
                 projectPath: self.selectedDashboardProject?.path
             )
@@ -873,7 +882,7 @@ final class AppStore {
                 loadedPromptKeys = []
 
                 if isPersistenceEnabled {
-                    let promptDraftPersistence = promptDraftPersistence
+                    let promptDraftPersistence = persistence.promptDrafts
                     Task {
                         await promptDraftPersistence.clearAll()
                     }
@@ -884,9 +893,9 @@ final class AppStore {
         if oldValue.remembersYoloModePerThread != newValue.remembersYoloModePerThread,
            isPersistenceEnabled {
             if newValue.remembersYoloModePerThread {
-                yoloPreferencePersistence.saveYoloSessionKeys(yoloSessionKeys)
+                persistence.yoloPreferences.saveYoloSessionKeys(yoloSessionKeys)
             } else {
-                yoloPreferencePersistence.saveYoloSessionKeys([])
+                persistence.yoloPreferences.saveYoloSessionKeys([])
             }
         }
 
@@ -905,7 +914,7 @@ final class AppStore {
             return
         }
 
-        guard await notificationService.requestAuthorizationIfNeeded() else {
+        guard await services.notifications.requestAuthorizationIfNeeded() else {
             updateGeneral { general in
                 general.notifiesWhenResponseCompletes = false
                 general.notifiesWhenInputIsRequired = false
@@ -917,7 +926,7 @@ final class AppStore {
 
     private func refreshSystemSleepAssertion() {
         let shouldPreventSleep = appSettings.general.preventsSystemSleepWhileRunning && hasRunningSessions
-        sleepAssertionService.setActive(shouldPreventSleep)
+        services.sleepAssertions.setActive(shouldPreventSleep)
     }
 
     private var hasRunningSessions: Bool {
@@ -991,7 +1000,7 @@ final class AppStore {
 
     func startDashboard(using runtime: OpenCodeRuntime) async {
         isDashboardActive = true
-        dashboardSnapshot = await dashboardStatsService.prepare(
+        dashboardSnapshot = await services.dashboardStats.prepare(
             projects: projects.map(DashboardProjectDescriptor.init(project:)),
             range: selectedDashboardRange,
             projectPath: selectedDashboardProject?.path
@@ -1122,7 +1131,7 @@ final class AppStore {
         }
 
         var refreshWork: [(project: ProjectSummary, descriptor: DashboardProjectDescriptor, session: DashboardRemoteSessionDescriptor)] = []
-        var services: [ProjectSummary.ID: DashboardRuntimeService] = [:]
+        var runtimeServices: [ProjectSummary.ID: DashboardRuntimeService] = [:]
         var failedProjects: [String] = []
 
         for project in activeProjects {
@@ -1133,7 +1142,7 @@ final class AppStore {
                 continue
             }
 
-            services[project.id] = runtimeService
+            runtimeServices[project.id] = runtimeService
 
             do {
                 let sessions = try await runtimeService.service.listSessions()
@@ -1145,7 +1154,7 @@ final class AppStore {
                         fallbackTitle: sessionSummary(for: session.id, projectID: project.id)?.title ?? SessionSummary.defaultTitle
                     )
                 }
-                let plan = await dashboardStatsService.planRefresh(
+                let plan = await self.services.dashboardStats.planRefresh(
                     for: descriptor,
                     sessions: remoteSessions,
                     forceSessionIDs: forcedSessions[project.id] ?? [],
@@ -1156,7 +1165,7 @@ final class AppStore {
                 refreshWork.append(contentsOf: plan.changedSessions.map { (project, descriptor, $0) })
             } catch {
                 guard !Task.isCancelled, !(error is CancellationError) else {
-                    stopDashboardOnlyRuntimes(services, runtime: runtime)
+                    stopDashboardOnlyRuntimes(runtimeServices, runtime: runtime)
                     return
                 }
                 logger.error("Failed to scan dashboard sessions for project \(project.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
@@ -1181,7 +1190,7 @@ final class AppStore {
         )
 
         if refreshWork.isEmpty {
-            dashboardSnapshot = await dashboardStatsService.currentSnapshot(
+            dashboardSnapshot = await self.services.dashboardStats.currentSnapshot(
                 range: selectedDashboardRange,
                 projectPath: selectedDashboardProject?.path
             )
@@ -1195,7 +1204,7 @@ final class AppStore {
                 currentSessionTitle: nil,
                 lastUpdatedAt: dashboardSnapshot?.generatedAt
             )
-            stopDashboardOnlyRuntimes(services, runtime: runtime)
+            stopDashboardOnlyRuntimes(runtimeServices, runtime: runtime)
             return
         }
 
@@ -1210,7 +1219,7 @@ final class AppStore {
 
             var ingestions: [DashboardSessionIngress] = []
             for item in batch {
-                guard let runtimeService = services[item.project.id] else { continue }
+                guard let runtimeService = runtimeServices[item.project.id] else { continue }
                 dashboardStatus = DashboardRefreshStatus(
                     phase: initialPhase,
                     title: hasCachedSnapshot ? "Refreshing usage cache" : "Building usage cache",
@@ -1229,7 +1238,7 @@ final class AppStore {
                     ingestions.append(DashboardSessionIngress(project: item.descriptor, session: item.session, messages: messages))
                 } catch {
                     guard !Task.isCancelled, !(error is CancellationError) else {
-                        stopDashboardOnlyRuntimes(services, runtime: runtime)
+                        stopDashboardOnlyRuntimes(runtimeServices, runtime: runtime)
                         return
                     }
                     logger.error("Failed to fetch dashboard messages for session \(item.session.id, privacy: .public): \(error.localizedDescription, privacy: .public)")
@@ -1237,7 +1246,7 @@ final class AppStore {
             }
 
             if !ingestions.isEmpty {
-                dashboardSnapshot = await dashboardStatsService.ingest(
+                dashboardSnapshot = await self.services.dashboardStats.ingest(
                     ingestions,
                     range: selectedDashboardRange,
                     projectPath: selectedDashboardProject?.path
@@ -1248,7 +1257,7 @@ final class AppStore {
             await Task.yield()
         }
 
-        dashboardSnapshot = await dashboardStatsService.currentSnapshot(
+        dashboardSnapshot = await self.services.dashboardStats.currentSnapshot(
             range: selectedDashboardRange,
             projectPath: selectedDashboardProject?.path
         )
@@ -1262,7 +1271,7 @@ final class AppStore {
             currentSessionTitle: nil,
             lastUpdatedAt: dashboardSnapshot?.generatedAt
         )
-        stopDashboardOnlyRuntimes(services, runtime: runtime)
+        stopDashboardOnlyRuntimes(runtimeServices, runtime: runtime)
     }
 
     private func stopDashboardOnlyRuntimes(_ services: [ProjectSummary.ID: DashboardRuntimeService], runtime: OpenCodeRuntime) {
@@ -2861,22 +2870,22 @@ final class AppStore {
                 lastError = "Select a project before opening a workspace."
                 return false
             }
-            let service = WorkspaceToolService()
-            let tools = service.projectOpenTools()
+            let workspaceTools = services.workspaceTools
+            let tools = workspaceTools.projectOpenTools()
             guard !tools.isEmpty else {
                 lastError = "No supported workspace tools were found."
                 return false
             }
             let preferredID = preferredEditorID(for: projectID)
             let tool = tools.first(where: { $0.id == preferredID })
-                ?? service.defaultProjectOpenTool(from: tools)
+                ?? workspaceTools.defaultProjectOpenTool(from: tools)
                 ?? tools.first
             guard let tool else {
                 lastError = "No supported workspace tools were found."
                 return false
             }
             setPreferredEditorID(tool.id, for: projectID)
-            service.openProject(at: project.path, with: tool)
+            workspaceTools.openProject(at: project.path, with: tool)
             draft = ""
             return true
 
@@ -4466,7 +4475,7 @@ final class AppStore {
         loadedPromptKeys.insert(promptKey)
 
         promptPersistTask?.cancel()
-        let promptDraftPersistence = promptDraftPersistence
+        let promptDraftPersistence = persistence.promptDrafts
         let value = draft
         promptPersistTask = Task {
             try? await Task.sleep(for: .milliseconds(150))
@@ -4515,6 +4524,7 @@ final class AppStore {
     }
 
     private func storePromptDraft(_ value: String, forKey promptKey: String) async {
+        let promptDraftPersistence = persistence.promptDrafts
         guard appSettings.general.restoresPromptDrafts else {
             promptDraftsByKey.removeValue(forKey: promptKey)
             loadedPromptKeys.remove(promptKey)
@@ -4551,7 +4561,7 @@ final class AppStore {
 
     private func persistWorkspaceSelectionIfNeeded() {
         guard isPersistenceEnabled, !isSettingsSelected else { return }
-        workspaceSelectionPersistence.saveSelection(currentWorkspaceSelection)
+        persistence.workspaceSelection.saveSelection(currentWorkspaceSelection)
     }
 
     private var currentWorkspaceSelection: PersistedWorkspaceSelectionStore.Selection {
@@ -4616,7 +4626,7 @@ final class AppStore {
         let body = "NeoCode finished the latest response."
 
         Task { [weak self] in
-            await self?.notificationService.postIfApplicationInactive(
+            await self?.services.notifications.postIfApplicationInactive(
                 identifier: "completion-\(sessionID)",
                 title: title,
                 body: body
@@ -4636,7 +4646,7 @@ final class AppStore {
             : "\(session.title) needs permission before it can continue."
 
         Task { [weak self] in
-            await self?.notificationService.postIfApplicationInactive(
+            await self?.services.notifications.postIfApplicationInactive(
                 identifier: "permission-\(request.id)",
                 title: "Permission required",
                 body: body
@@ -4656,7 +4666,7 @@ final class AppStore {
             : "\(session.title) is waiting for your answer."
 
         Task { [weak self] in
-            await self?.notificationService.postIfApplicationInactive(
+            await self?.services.notifications.postIfApplicationInactive(
                 identifier: "question-\(request.id)",
                 title: "Input required",
                 body: body
@@ -5554,7 +5564,7 @@ final class AppStore {
         hasPendingProjectPersistence = false
         let projectSnapshot = projects
         let transcriptStateSnapshot = transcriptStateBySessionID
-        projectPersistence.saveProjects(projectSnapshot, transcriptStatesBySessionID: transcriptStateSnapshot)
+        persistence.projects.saveProjects(projectSnapshot, transcriptStatesBySessionID: transcriptStateSnapshot)
         projectPersistenceSaveCount += 1
     }
 
@@ -5582,7 +5592,7 @@ final class AppStore {
 
     private func persistAppSettingsIfNeeded() {
         guard isPersistenceEnabled else { return }
-        appSettingsPersistence.saveSettings(appSettings)
+        persistence.appSettings.saveSettings(appSettings)
     }
 }
 

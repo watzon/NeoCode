@@ -46,9 +46,7 @@ final class OpenCodeRuntime {
         var launchID = UUID()
     }
 
-    var userFacingError: String?
-
-    private let client = OpenCodeHTTPClient()
+    private let healthClient = OpenCodeRuntimeHealthClient()
     private let processStore = PersistedRuntimeProcessStore()
     private var entries: [String: RuntimeEntry] = [:]
     private var statesByProjectPath: [String: State] = [:]
@@ -147,6 +145,14 @@ final class OpenCodeRuntime {
         }
     }
 
+    func failureMessage(for projectPath: String?) -> String? {
+        guard case .failed(_, let message) = state(for: projectPath) else {
+            return nil
+        }
+
+        return message
+    }
+
     private func entry(for projectPath: String) -> RuntimeEntry {
         if let entry = entries[projectPath] {
             return entry
@@ -193,7 +199,7 @@ final class OpenCodeRuntime {
             entry.startupPhase = .waitingForListeningAddress
             let baseURL = try await waitForBoundURL(entry: entry, timeout: 15)
             entry.startupPhase = .waitingForHealthCheck
-            let health = try await client.waitUntilHealthy(
+            let health = try await healthClient.waitUntilHealthy(
                 baseURL: baseURL,
                 username: configuration.username,
                 password: configuration.password,
@@ -212,7 +218,6 @@ final class OpenCodeRuntime {
             entry.startupPhase = .idle
             connectionsByProjectPath[projectPath] = connection
             setState(.running(connection), for: projectPath)
-            userFacingError = nil
             return connection
         } catch is CancellationError {
             logger.info(
@@ -225,7 +230,6 @@ final class OpenCodeRuntime {
                 "Runtime failed to start project=\(projectPath, privacy: .public) phase=\(entry.startupPhase.rawValue, privacy: .public) requestedStop=\(entry.requestedStop, privacy: .public) processRunning=\(entry.process?.isRunning == true, privacy: .public) error=\(error.localizedDescription, privacy: .public) lastOutput=\(Self.startupLogOutput(entry.lastOutput), privacy: .public)"
             )
             _ = terminateProcess(entry: entry, projectPath: projectPath, clearStartTask: false, expectedLaunchID: launchID)
-            userFacingError = error.localizedDescription
             setState(.failed(projectPath: projectPath, message: error.localizedDescription), for: projectPath)
             throw error
         }
@@ -265,7 +269,6 @@ final class OpenCodeRuntime {
                 logger.error(
                     "Runtime failed to terminate project=\(projectPath, privacy: .public) pid=\(result.rootPID, privacy: .public)"
                 )
-                userFacingError = message
                 setState(.failed(projectPath: projectPath, message: message), for: projectPath)
                 return false
             }
@@ -357,7 +360,6 @@ final class OpenCodeRuntime {
 
         let detail = lastOutput.isEmpty ? message : lastOutput
         setState(.failed(projectPath: projectPath, message: detail), for: projectPath)
-        userFacingError = detail
         logger.error("Runtime terminated unexpectedly for project \(projectPath, privacy: .public): \(detail, privacy: .public)")
     }
 
@@ -382,7 +384,7 @@ final class OpenCodeRuntime {
         let deadline = Date().addingTimeInterval(timeout)
 
         while Date() < deadline {
-            if let url = extractServerURL(from: entry.outputBuffer) {
+            if let url = Self.detectedServerURL(in: entry.outputBuffer) {
                 return url
             }
 
@@ -446,21 +448,89 @@ final class OpenCodeRuntime {
         return String(normalized.suffix(limit))
     }
 
-    private func extractServerURL(from text: String) -> URL? {
-        let prefix = "opencode server listening on "
+    nonisolated static func detectedServerURL(in text: String) -> URL? {
+        let lines = text.components(separatedBy: .newlines)
 
-        for line in text.components(separatedBy: .newlines) {
-            guard line.contains(prefix) else { continue }
+        for line in lines {
+            if let url = detectedServerURL(in: line, requireSignalWords: true) {
+                return url
+            }
+        }
 
-            let urlString = line.replacingOccurrences(of: prefix, with: "")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-
-            if let url = URL(string: urlString) {
+        for line in lines {
+            if let url = detectedServerURL(in: line, requireSignalWords: false) {
                 return url
             }
         }
 
         return nil
+    }
+
+    private nonisolated static func detectedServerURL(in line: String, requireSignalWords: Bool) -> URL? {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let lowercased = trimmed.lowercased()
+        if requireSignalWords,
+           !["listen", "server", "ready", "started", "bound", "http"].contains(where: lowercased.contains) {
+            return nil
+        }
+
+        if let candidate = firstMatch(in: trimmed, pattern: #"https?://[^\s"'<>]+"#),
+           let url = normalizedServerURL(from: candidate) {
+            return url
+        }
+
+        if let candidate = firstMatch(in: trimmed, pattern: #"(?:127\.0\.0\.1|0\.0\.0\.0|localhost|\[::1\]|::1):\d+"#),
+           let url = normalizedServerURL(from: candidate) {
+            return url
+        }
+
+        return nil
+    }
+
+    private nonisolated static func firstMatch(in text: String, pattern: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return nil
+        }
+
+        let range = NSRange(text.startIndex..., in: text)
+        guard let match = regex.firstMatch(in: text, range: range),
+              let matchRange = Range(match.range, in: text) else {
+            return nil
+        }
+
+        return String(text[matchRange])
+    }
+
+    private nonisolated static func normalizedServerURL(from candidate: String) -> URL? {
+        var cleaned = candidate.trimmingCharacters(in: CharacterSet(charactersIn: " \t\n\r\"'`.,;:!?)]}"))
+        guard !cleaned.isEmpty else { return nil }
+
+        if !cleaned.contains("://") {
+            cleaned = "http://\(cleaned)"
+        }
+
+        guard var components = URLComponents(string: cleaned),
+              let host = components.host,
+              let scheme = components.scheme,
+              !host.isEmpty,
+              !scheme.isEmpty else {
+            return nil
+        }
+
+        switch host {
+        case "0.0.0.0", "::", "::1":
+            components.host = "127.0.0.1"
+        default:
+            break
+        }
+
+        components.scheme = scheme.lowercased()
+        components.path = ""
+        components.query = nil
+        components.fragment = nil
+        return components.url
     }
 
     private func sweepPersistedProcessesIfNeeded() {
@@ -589,54 +659,7 @@ private struct OpenCodeRuntimeConfiguration {
     }
 }
 
-private struct OpenCodeHealth: Decodable {
-    let healthy: Bool
-    let version: String
-}
-
-private struct OpenCodeHTTPClient {
-    func waitUntilHealthy(baseURL: URL, username: String, password: String, timeout: TimeInterval) async throws -> OpenCodeHealth {
-        let deadline = Date().addingTimeInterval(timeout)
-
-        while Date() < deadline {
-            do {
-                let health = try await health(baseURL: baseURL, username: username, password: password)
-                if health.healthy {
-                    return health
-                }
-            } catch {
-                try await Task.sleep(for: .milliseconds(250))
-                continue
-            }
-
-            try await Task.sleep(for: .milliseconds(250))
-        }
-
-        throw OpenCodeRuntimeError.healthCheckTimedOut
-    }
-
-    private func health(baseURL: URL, username: String, password: String) async throws -> OpenCodeHealth {
-        let url = baseURL.appending(path: "/global/health")
-        var request = URLRequest(url: url)
-        request.setValue(Self.authorizationHeader(username: username, password: password), forHTTPHeaderField: "Authorization")
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse,
-              200..<300 ~= httpResponse.statusCode
-        else {
-            throw OpenCodeRuntimeError.invalidServerResponse
-        }
-
-        return try JSONDecoder().decode(OpenCodeHealth.self, from: data)
-    }
-
-    private static func authorizationHeader(username: String, password: String) -> String {
-        let token = Data("\(username):\(password)".utf8).base64EncodedString()
-        return "Basic \(token)"
-    }
-}
-
-private enum OpenCodeRuntimeError: LocalizedError {
+enum OpenCodeRuntimeError: LocalizedError {
     case executableNotFound(String)
     case invalidServerResponse
     case healthCheckTimedOut
@@ -659,122 +682,5 @@ private enum OpenCodeRuntimeError: LocalizedError {
         case .processTerminationTimedOut:
             return "The previous OpenCode runtime did not exit cleanly, so NeoCode refused to start a duplicate background process."
         }
-    }
-}
-
-struct PersistedRuntimeProcessRecord: Codable, Equatable {
-    let projectPath: String
-    let pid: pid_t
-    let recordedAt: Date
-}
-
-struct PersistedRuntimeProcessSweepResult {
-    let totalCount: Int
-    let terminatedCount: Int
-    let survivingCount: Int
-}
-
-struct PersistedRuntimeProcessStore {
-    private static let cacheDirectoryName = "tech.watzon.NeoCode"
-    private static let cacheFileName = "runtime-processes.json"
-
-    private let fileManager = FileManager.default
-    private let encoder = JSONEncoder()
-    private let decoder = JSONDecoder()
-    private let explicitCacheURL: URL?
-
-    init(cacheURL: URL? = nil) {
-        self.explicitCacheURL = cacheURL
-    }
-
-    func record(projectPath: String, pid: pid_t) {
-        guard pid > 0 else { return }
-
-        var records = loadRecords()
-        records.removeAll { $0.projectPath == projectPath || $0.pid == pid }
-        records.append(PersistedRuntimeProcessRecord(projectPath: projectPath, pid: pid, recordedAt: Date()))
-        saveRecords(records)
-    }
-
-    func remove(projectPath: String, pid: pid_t? = nil) {
-        let filtered = loadRecords().filter { record in
-            if record.projectPath != projectPath {
-                return true
-            }
-
-            if let pid {
-                return record.pid != pid
-            }
-
-            return false
-        }
-
-        saveRecords(filtered)
-    }
-
-    func sweepTrackedProcesses() -> PersistedRuntimeProcessSweepResult {
-        let records = loadRecords()
-        guard !records.isEmpty else {
-            return PersistedRuntimeProcessSweepResult(totalCount: 0, terminatedCount: 0, survivingCount: 0)
-        }
-
-        var survivors: [PersistedRuntimeProcessRecord] = []
-        var terminatedCount = 0
-
-        for record in records {
-            if !ManagedProcessRegistry.isProcessAlive(record.pid) {
-                terminatedCount += 1
-                continue
-            }
-
-            if ManagedProcessRegistry.terminateProcessIdentifier(record.pid) {
-                terminatedCount += 1
-            } else {
-                survivors.append(record)
-            }
-        }
-
-        saveRecords(survivors)
-        return PersistedRuntimeProcessSweepResult(
-            totalCount: records.count,
-            terminatedCount: terminatedCount,
-            survivingCount: survivors.count
-        )
-    }
-
-    private func loadRecords() -> [PersistedRuntimeProcessRecord] {
-        guard let url = cacheURL,
-              let data = try? Data(contentsOf: url),
-              let records = try? decoder.decode([PersistedRuntimeProcessRecord].self, from: data)
-        else {
-            return []
-        }
-
-        return records
-    }
-
-    private func saveRecords(_ records: [PersistedRuntimeProcessRecord]) {
-        guard let url = cacheURL else { return }
-
-        do {
-            try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            let data = try encoder.encode(records)
-            try data.write(to: url, options: .atomic)
-        } catch {
-        }
-    }
-
-    private var cacheURL: URL? {
-        if let explicitCacheURL {
-            return explicitCacheURL
-        }
-
-        guard let applicationSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-            return nil
-        }
-
-        return applicationSupportURL
-            .appendingPathComponent(Self.cacheDirectoryName, isDirectory: true)
-            .appendingPathComponent(Self.cacheFileName, isDirectory: false)
     }
 }

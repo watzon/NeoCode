@@ -45,9 +45,13 @@ struct ContentView: View {
         .onChange(of: store.lastError) { _, newValue in
             showToast(newValue)
         }
-        .onChange(of: runtime.userFacingError) { _, newValue in
+        .onChange(of: selectedRuntimeFailureMessage) { _, newValue in
             showToast(newValue)
         }
+    }
+
+    private var selectedRuntimeFailureMessage: String? {
+        runtime.failureMessage(for: store.selectedProject?.path)
     }
 
     private func showToast(_ message: String?) {
