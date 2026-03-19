@@ -509,7 +509,7 @@ struct ConversationView: View {
                             InlineStatusView(text: error, tone: .warning)
                         }
 
-                        LazyVStack(alignment: .leading, spacing: 18) {
+                        VStack(alignment: .leading, spacing: 18) {
                             ForEach(renderedGroups) { group in
                                 transcriptGroupView(group)
                             }

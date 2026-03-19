@@ -47,6 +47,14 @@ struct MarkdownMermaidBlockView: View {
 
     @MainActor
     private func renderDiagramIfNeeded() async {
+        guard MarkdownRenderBudget.shouldRenderMermaid(source: source) else {
+            MermaidDiagramLogger.logger.notice(
+                "Skipping Mermaid render because the source exceeds the safe render budget"
+            )
+            phase = .failure
+            return
+        }
+
         if let cachedImage = MermaidDiagramCache.shared.object(forKey: renderCacheKey) {
             phase = .success(cachedImage)
             return

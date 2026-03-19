@@ -5017,14 +5017,14 @@ struct NeoCodeMainActorTests {
         """)
 
         #expect(blocks.count == 3)
-        #expect(blocks[0] == .prose("Before\n"))
+        #expect(blocks[0] == .prose("Before\n\n"))
         #expect(
             blocks[1] == .code(
                 language: "mermaid",
                 source: "graph TD\n    A[Start] --> B[Done]"
             )
         )
-        #expect(blocks[2] == .prose("\nAfter"))
+        #expect(blocks[2] == .prose("\n\nAfter"))
     }
 
     @MainActor
@@ -5036,6 +5036,20 @@ struct NeoCodeMainActorTests {
         """)
 
         #expect(blocks == [.code(language: nil, source: "let value = 1")])
+    }
+
+    @MainActor
+    @Test func markdownRenderBudgetSkipsOversizedMermaidDiagrams() {
+        let validDiagram = "graph TD\nA[Start] --> B[Done]"
+        let oversizedDiagram = String(repeating: "node\n", count: MarkdownRenderBudget.maxMermaidLines + 1)
+
+        #expect(MarkdownRenderBudget.shouldRenderMermaid(source: validDiagram))
+        #expect(MarkdownRenderBudget.shouldRenderMermaid(source: oversizedDiagram) == false)
+        #expect(
+            MarkdownRenderBudget.shouldRenderMermaid(
+                source: String(repeating: "a", count: MarkdownRenderBudget.maxMermaidCharacters + 1)
+            ) == false
+        )
     }
 
 }

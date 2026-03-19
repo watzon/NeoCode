@@ -547,24 +547,28 @@ private enum MarkdownRenderCache {
     private static let blockCache: NSCache<NSString, CachedMarkdownBlocks> = {
         let cache = NSCache<NSString, CachedMarkdownBlocks>()
         cache.countLimit = 256
+        cache.totalCostLimit = 1_500_000
         return cache
     }()
 
     private static let elementCache: NSCache<NSString, CachedMarkdownElements> = {
         let cache = NSCache<NSString, CachedMarkdownElements>()
         cache.countLimit = 512
+        cache.totalCostLimit = 1_500_000
         return cache
     }()
 
     private static let inlineAttributedCache: NSCache<NSString, CachedInlineMarkdown> = {
         let cache = NSCache<NSString, CachedInlineMarkdown>()
         cache.countLimit = 1024
+        cache.totalCostLimit = 1_000_000
         return cache
     }()
 
     private static let segmentCache: NSCache<NSString, CachedMarkdownSegments> = {
         let cache = NSCache<NSString, CachedMarkdownSegments>()
         cache.countLimit = 512
+        cache.totalCostLimit = 2_000_000
         return cache
     }()
 
@@ -575,7 +579,11 @@ private enum MarkdownRenderCache {
         }
 
         let parsed = parseBlocks(from: markdown)
-        blockCache.setObject(CachedMarkdownBlocks(parsed), forKey: key)
+        blockCache.setObject(
+            CachedMarkdownBlocks(parsed),
+            forKey: key,
+            cost: MarkdownRenderBudget.cacheCost(for: markdown)
+        )
         return parsed
     }
 
@@ -586,7 +594,11 @@ private enum MarkdownRenderCache {
         }
 
         let parsed = parseElements(from: markdown)
-        elementCache.setObject(CachedMarkdownElements(parsed), forKey: key)
+        elementCache.setObject(
+            CachedMarkdownElements(parsed),
+            forKey: key,
+            cost: MarkdownRenderBudget.cacheCost(for: markdown)
+        )
         return parsed
     }
 
@@ -597,7 +609,11 @@ private enum MarkdownRenderCache {
         }
 
         let parsed = parseInlineMarkdown(from: text)
-        inlineAttributedCache.setObject(CachedInlineMarkdown(parsed), forKey: key)
+        inlineAttributedCache.setObject(
+            CachedInlineMarkdown(parsed),
+            forKey: key,
+            cost: MarkdownRenderBudget.cacheCost(for: text)
+        )
         return parsed
     }
 
@@ -608,7 +624,11 @@ private enum MarkdownRenderCache {
         }
 
         let parsed = builder()
-        segmentCache.setObject(CachedMarkdownSegments(parsed), forKey: key)
+        segmentCache.setObject(
+            CachedMarkdownSegments(parsed),
+            forKey: key,
+            cost: MarkdownRenderBudget.cacheCost(for: markdown)
+        )
         return parsed
     }
 
