@@ -1181,6 +1181,57 @@ struct NeoCodeCoreTests {
         #expect(formatted == "<none>")
     }
 
+    @Test func runtimeResolvesExecutableFromPATH() throws {
+        let fileManager = FileManager.default
+        let tempDirectory = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try fileManager.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: tempDirectory) }
+
+        let executableName = "neocode-test-binary-\(UUID().uuidString)"
+        let executableURL = tempDirectory.appendingPathComponent(executableName)
+        try "#!/bin/sh\nexit 0\n".write(to: executableURL, atomically: true, encoding: .utf8)
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path)
+
+        let resolvedURL = try OpenCodeRuntime.resolveExecutableURL(
+            named: executableName,
+            environment: ["PATH": tempDirectory.path]
+        )
+
+        #expect(resolvedURL.path == executableURL.path)
+    }
+
+    @Test func runtimeResolvesExplicitExecutablePath() throws {
+        let fileManager = FileManager.default
+        let tempDirectory = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try fileManager.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: tempDirectory) }
+
+        let executableURL = tempDirectory.appendingPathComponent("opencode")
+        try "#!/bin/sh\nexit 0\n".write(to: executableURL, atomically: true, encoding: .utf8)
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path)
+
+        let resolvedURL = try OpenCodeRuntime.resolveExecutableURL(at: executableURL.path)
+
+        #expect(resolvedURL.path == executableURL.path)
+    }
+
+    @Test func runtimeEnhancedPATHPrependsCommonLocationsWithoutDroppingExistingEntries() {
+        let path = OpenCodeRuntime.enhancedPATH(from: "/custom/bin:/usr/local/bin")
+        let entries = path.split(separator: ":").map(String.init)
+
+        #expect(entries.first == NSHomeDirectory() + "/.bun/bin")
+        #expect(entries.contains("/custom/bin"))
+        #expect(entries.filter { $0 == "/usr/local/bin" }.count == 1)
+    }
+
+    @Test func runtimeNormalizedExecutablePathTreatsBlankInputAsNil() {
+        #expect(OpenCodeRuntime.normalizedExecutablePath(nil) == nil)
+        #expect(OpenCodeRuntime.normalizedExecutablePath("   ") == nil)
+        #expect(OpenCodeRuntime.normalizedExecutablePath("  /tmp/opencode  ") == "/tmp/opencode")
+    }
+
     @Test func subprocessRunnerCancelsProcessTree() async throws {
         let tempDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -4458,6 +4509,7 @@ struct NeoCodeMainActorTests {
                 appLanguage: .spanish,
                 startupBehavior: .lastWorkspace,
                 sendKeyBehavior: .commandReturn,
+                opencodeExecutablePath: "/opt/homebrew/bin/opencode",
                 restoresPromptDrafts: false,
                 remembersYoloModePerThread: false,
                 defaultWorkspaceToolID: "dev.zed.Zed",
@@ -4495,6 +4547,7 @@ struct NeoCodeMainActorTests {
 
         #expect(settings.startupBehavior == .lastWorkspace)
         #expect(settings.sendKeyBehavior == .returnKey)
+        #expect(settings.opencodeExecutablePath == nil)
         #expect(settings.restoresPromptDrafts == true)
         #expect(settings.remembersYoloModePerThread == true)
         #expect(settings.appLanguage == .system)

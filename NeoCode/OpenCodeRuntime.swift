@@ -53,6 +53,7 @@ final class OpenCodeRuntime {
     private var entries: [String: RuntimeEntry] = [:]
     private var statesByProjectPath: [String: State] = [:]
     private var connectionsByProjectPath: [String: Connection] = [:]
+    var preferredExecutablePath: String?
 
     init() {
         sweepPersistedProcessesIfNeeded()
@@ -292,7 +293,16 @@ final class OpenCodeRuntime {
 
     private func makeProcess(for configuration: OpenCodeRuntimeConfiguration, entry: RuntimeEntry, projectPath: String) throws -> Process {
         let process = Process()
-        let opencodeExecutableURL = try Self.resolveOpenCodeExecutableURL()
+        var environment = ProcessInfo.processInfo.environment
+        environment["OPENCODE_SERVER_USERNAME"] = configuration.username
+        environment["OPENCODE_SERVER_PASSWORD"] = configuration.password
+        environment["PATH"] = Self.enhancedPATH(from: environment["PATH"])
+
+        let opencodeExecutableURL = try Self.resolveOpenCodeExecutableURL(
+            preferredPath: preferredExecutablePath,
+            environment: environment
+        )
+
         process.executableURL = opencodeExecutableURL
         process.arguments = [
             "serve",
@@ -300,11 +310,6 @@ final class OpenCodeRuntime {
             "--port", "0",
         ]
         process.currentDirectoryURL = URL(fileURLWithPath: configuration.projectPath)
-
-        var environment = ProcessInfo.processInfo.environment
-        environment["OPENCODE_SERVER_USERNAME"] = configuration.username
-        environment["OPENCODE_SERVER_PASSWORD"] = configuration.password
-        environment["PATH"] = Self.enhancedPATH(from: environment["PATH"])
         process.environment = environment
 
         let outputPipe = Pipe()
@@ -474,55 +479,79 @@ final class OpenCodeRuntime {
         ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil
     }
 
-    private static func resolveOpenCodeExecutableURL() throws -> URL {
+    private static func resolveOpenCodeExecutableURL(
+        preferredPath: String? = nil,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) throws -> URL {
+        if let preferredPath = normalizedExecutablePath(preferredPath) {
+            return try resolveExecutableURL(at: preferredPath)
+        }
+
+        return try resolveExecutableURL(named: "opencode", environment: environment)
+    }
+
+    static func resolveExecutableURL(named executableName: String, environment: [String: String]) throws -> URL {
         let fileManager = FileManager.default
         let homeDirectory = NSHomeDirectory()
-        let environment = ProcessInfo.processInfo.environment
         let homeEnv = environment["HOME"] ?? "<missing>"
         let pathEnv = environment["PATH"] ?? "<missing>"
-        let candidates = [
-            homeDirectory + "/.bun/bin/opencode",
-            "/opt/homebrew/bin/opencode",
-            "/usr/local/bin/opencode",
-        ]
+        let searchPATH = enhancedPATH(from: environment["PATH"])
 
-        resolutionLogger.info("Resolving opencode executable")
+        resolutionLogger.info("Resolving \(executableName, privacy: .public) executable")
         resolutionLogger.debug("NSHomeDirectory: \(homeDirectory, privacy: .public)")
         resolutionLogger.debug("FileManager.homeDirectoryForCurrentUser: \(fileManager.homeDirectoryForCurrentUser.path, privacy: .public)")
         resolutionLogger.debug("HOME env: \(homeEnv, privacy: .public)")
         resolutionLogger.debug("PATH env: \(pathEnv, privacy: .public)")
+        resolutionLogger.debug("Search PATH: \(searchPATH, privacy: .public)")
 
-        for candidate in candidates {
-            let exists = fileManager.fileExists(atPath: candidate)
-            let executable = fileManager.isExecutableFile(atPath: candidate)
-            let resolved = URL(fileURLWithPath: candidate).resolvingSymlinksInPath().path
-            let resolvedExists = fileManager.fileExists(atPath: resolved)
-            let resolvedExecutable = fileManager.isExecutableFile(atPath: resolved)
+        for directory in searchPATH.split(separator: ":") {
+            let candidateURL = URL(fileURLWithPath: String(directory), isDirectory: true)
+                .appendingPathComponent(executableName)
+            let candidatePath = candidateURL.path
+            let resolvedPath = candidateURL.resolvingSymlinksInPath().path
+            let exists = fileManager.fileExists(atPath: candidatePath)
+            let executable = fileManager.isExecutableFile(atPath: candidatePath)
+            let resolvedExists = fileManager.fileExists(atPath: resolvedPath)
+            let resolvedExecutable = fileManager.isExecutableFile(atPath: resolvedPath)
 
-            resolutionLogger.debug("Candidate: \(candidate, privacy: .public) exists=\(exists) executable=\(executable) resolved=\(resolved, privacy: .public) resolvedExists=\(resolvedExists) resolvedExecutable=\(resolvedExecutable)")
+            resolutionLogger.debug("PATH candidate: \(candidatePath, privacy: .public) exists=\(exists) executable=\(executable) resolved=\(resolvedPath, privacy: .public) resolvedExists=\(resolvedExists) resolvedExecutable=\(resolvedExecutable)")
 
             if executable || resolvedExecutable {
-                return URL(fileURLWithPath: candidate)
+                return candidateURL
             }
         }
 
-        if let path = environment["PATH"] {
-            for directory in path.split(separator: ":") {
-                let candidate = String(directory) + "/opencode"
-                let exists = fileManager.fileExists(atPath: candidate)
-                let executable = fileManager.isExecutableFile(atPath: candidate)
-                resolutionLogger.debug("PATH candidate: \(candidate, privacy: .public) exists=\(exists) executable=\(executable)")
-                if executable {
-                    return URL(fileURLWithPath: candidate)
-                }
-            }
-        }
-
-        let details = "HOME=\(homeEnv) PATH=\(pathEnv)"
+        let details = "HOME=\(homeEnv) PATH=\(pathEnv) SEARCH_PATH=\(searchPATH)"
         throw OpenCodeRuntimeError.executableNotFound(details)
     }
 
-    private static func enhancedPATH(from existingPATH: String?) -> String {
+    static func resolveExecutableURL(at path: String) throws -> URL {
+        let fileManager = FileManager.default
+        let candidateURL = URL(fileURLWithPath: path)
+        let candidatePath = candidateURL.path
+        let resolvedPath = candidateURL.resolvingSymlinksInPath().path
+        let executable = fileManager.isExecutableFile(atPath: candidatePath)
+        let resolvedExecutable = fileManager.isExecutableFile(atPath: resolvedPath)
+
+        resolutionLogger.info("Resolving explicit opencode executable path")
+        resolutionLogger.debug("Explicit candidate: \(candidatePath, privacy: .public) executable=\(executable) resolved=\(resolvedPath, privacy: .public) resolvedExecutable=\(resolvedExecutable)")
+
+        guard executable || resolvedExecutable else {
+            throw OpenCodeRuntimeError.executableNotFound("Configured path is not executable: \(candidatePath)")
+        }
+
+        return candidateURL
+    }
+
+    static func normalizedExecutablePath(_ path: String?) -> String? {
+        guard let trimmed = path?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+            return nil
+        }
+
+        return trimmed
+    }
+
+    static func enhancedPATH(from existingPATH: String?) -> String {
         var entries = [
             NSHomeDirectory() + "/.bun/bin",
             "/opt/homebrew/bin",

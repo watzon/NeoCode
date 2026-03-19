@@ -152,6 +152,7 @@ struct NeoCodeGeneralSettings: Codable, Hashable {
     var appLanguage: NeoCodeAppLanguage
     var startupBehavior: NeoCodeStartupBehavior
     var sendKeyBehavior: NeoCodeSendKeyBehavior
+    var opencodeExecutablePath: String?
     var restoresPromptDrafts: Bool
     var remembersYoloModePerThread: Bool
     var defaultWorkspaceToolID: String?
@@ -163,6 +164,7 @@ struct NeoCodeGeneralSettings: Codable, Hashable {
         appLanguage: NeoCodeAppLanguage = .system,
         startupBehavior: NeoCodeStartupBehavior = .dashboard,
         sendKeyBehavior: NeoCodeSendKeyBehavior = .returnKey,
+        opencodeExecutablePath: String? = nil,
         restoresPromptDrafts: Bool = true,
         remembersYoloModePerThread: Bool = true,
         defaultWorkspaceToolID: String? = nil,
@@ -173,6 +175,7 @@ struct NeoCodeGeneralSettings: Codable, Hashable {
         self.appLanguage = appLanguage
         self.startupBehavior = startupBehavior
         self.sendKeyBehavior = sendKeyBehavior
+        self.opencodeExecutablePath = opencodeExecutablePath
         self.restoresPromptDrafts = restoresPromptDrafts
         self.remembersYoloModePerThread = remembersYoloModePerThread
         self.defaultWorkspaceToolID = defaultWorkspaceToolID
@@ -189,6 +192,7 @@ struct NeoCodeGeneralSettings: Codable, Hashable {
         startupBehavior = try container.decodeIfPresent(NeoCodeStartupBehavior.self, forKey: .startupBehavior)
             ?? ((legacyLaunchToDashboard ?? true) ? .dashboard : .lastWorkspace)
         sendKeyBehavior = try container.decodeIfPresent(NeoCodeSendKeyBehavior.self, forKey: .sendKeyBehavior) ?? .returnKey
+        opencodeExecutablePath = try container.decodeIfPresent(String.self, forKey: .opencodeExecutablePath)
         restoresPromptDrafts = try container.decodeIfPresent(Bool.self, forKey: .restoresPromptDrafts) ?? true
         remembersYoloModePerThread = try container.decodeIfPresent(Bool.self, forKey: .remembersYoloModePerThread) ?? true
         defaultWorkspaceToolID = try container.decodeIfPresent(String.self, forKey: .defaultWorkspaceToolID)
@@ -202,6 +206,7 @@ struct NeoCodeGeneralSettings: Codable, Hashable {
         try container.encode(appLanguage, forKey: .appLanguage)
         try container.encode(startupBehavior, forKey: .startupBehavior)
         try container.encode(sendKeyBehavior, forKey: .sendKeyBehavior)
+        try container.encodeIfPresent(opencodeExecutablePath, forKey: .opencodeExecutablePath)
         try container.encode(restoresPromptDrafts, forKey: .restoresPromptDrafts)
         try container.encode(remembersYoloModePerThread, forKey: .remembersYoloModePerThread)
         try container.encodeIfPresent(defaultWorkspaceToolID, forKey: .defaultWorkspaceToolID)
@@ -214,6 +219,7 @@ struct NeoCodeGeneralSettings: Codable, Hashable {
         case appLanguage
         case startupBehavior
         case sendKeyBehavior
+        case opencodeExecutablePath
         case restoresPromptDrafts
         case remembersYoloModePerThread
         case defaultWorkspaceToolID

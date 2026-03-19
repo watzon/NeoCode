@@ -213,6 +213,52 @@ private struct GeneralSettingsView: View {
                             .frame(width: 220, alignment: .trailing)
                         }
                     )
+
+                    SettingsDivider()
+
+                    SettingsControlRow(
+                        title: localized("OpenCode executable", locale: locale),
+                        detail: localized("Optionally set the full path to the OpenCode CLI if NeoCode cannot find it automatically on PATH.", locale: locale),
+                        accessory: {
+                            HStack(spacing: 8) {
+                                TextField(
+                                    "/opt/homebrew/bin/opencode",
+                                    text: opencodeExecutablePathBinding
+                                )
+                                .neoWritingToolsDisabled()
+                                .textFieldStyle(.plain)
+                                .font(.neoMonoSmall)
+                                .foregroundStyle(NeoCodeTheme.textPrimary)
+                                .frame(width: 240)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .fill(NeoCodeTheme.panelSoft)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                .stroke(NeoCodeTheme.line, lineWidth: 1)
+                                        )
+                                )
+
+                                Button(localized("Browse", locale: locale), action: selectOpenCodeExecutable)
+                                    .buttonStyle(.plain)
+                                    .font(.neoAction)
+                                    .foregroundStyle(NeoCodeTheme.textSecondary)
+
+                                if store.appSettings.general.opencodeExecutablePath != nil {
+                                    Button(localized("Clear", locale: locale)) {
+                                        store.updateGeneral { general in
+                                            general.opencodeExecutablePath = nil
+                                        }
+                                    }
+                                    .buttonStyle(.plain)
+                                    .font(.neoAction)
+                                    .foregroundStyle(NeoCodeTheme.textMuted)
+                                }
+                            }
+                        }
+                    )
                 }
             }
 
@@ -322,6 +368,17 @@ private struct GeneralSettingsView: View {
         workspaceToolOptions.first(where: { $0.id == selectedWorkspaceToolOptionID }) ?? .autoDetect
     }
 
+    private var opencodeExecutablePathBinding: Binding<String> {
+        Binding(
+            get: { store.appSettings.general.opencodeExecutablePath ?? "" },
+            set: { newValue in
+                store.updateGeneral { general in
+                    general.opencodeExecutablePath = OpenCodeRuntime.normalizedExecutablePath(newValue)
+                }
+            }
+        )
+    }
+
     private func generalBinding<Value>(_ keyPath: WritableKeyPath<NeoCodeGeneralSettings, Value>) -> Binding<Value> {
         Binding(
             get: { store.appSettings.general[keyPath: keyPath] },
@@ -339,6 +396,27 @@ private struct GeneralSettingsView: View {
 
     private func displayTitle(for option: WorkspaceToolSettingsOption) -> String {
         option.id == Self.autoDetectToolID ? localized("Auto detect", locale: locale) : option.title
+    }
+
+    private func selectOpenCodeExecutable() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.unixExecutable, .data]
+        panel.prompt = localized("Choose", locale: locale)
+        panel.message = localized("Select the OpenCode executable NeoCode should launch.", locale: locale)
+
+        if let currentPath = store.appSettings.general.opencodeExecutablePath {
+            panel.directoryURL = URL(fileURLWithPath: currentPath).deletingLastPathComponent()
+            panel.nameFieldStringValue = URL(fileURLWithPath: currentPath).lastPathComponent
+        }
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        store.updateGeneral { general in
+            general.opencodeExecutablePath = url.path
+        }
     }
 }
 

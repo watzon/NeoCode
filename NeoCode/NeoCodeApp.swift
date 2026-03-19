@@ -172,6 +172,9 @@ private struct AppSceneView: View {
             .environment(runtime)
             .environment(updateService)
             .environment(\.locale, store.appSettings.general.appLanguage.locale)
+            .task(id: store.appSettings.general.opencodeExecutablePath) {
+                runtime.preferredExecutablePath = store.appSettings.general.opencodeExecutablePath
+            }
             .onAppear {
                 NeoCodeTheme.configure(with: store.appSettings.appearance)
                 appDelegate.onDidBecomeActive = {

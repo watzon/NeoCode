@@ -67,6 +67,9 @@
         }
       }
     },
+    "/opt/homebrew/bin/opencode" : {
+
+    },
     "#000000" : {
       "localizations" : {
         "fr" : {
