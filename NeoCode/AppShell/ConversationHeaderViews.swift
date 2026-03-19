@@ -429,7 +429,12 @@ private struct SessionStatsMenuButton: View {
         .accessibilityLabel(localized("Session stats", locale: locale))
         .accessibilityValue(accessibilityValue)
         .background {
-            AnchoredFloatingPanelPresenter(isPresented: isMenuOpen, direction: .down, onDismiss: onDismissMenu) {
+            AnchoredFloatingPanelPresenter(
+                isPresented: isMenuOpen,
+                direction: .down,
+                horizontalAlignment: .trailing,
+                onDismiss: onDismissMenu
+            ) {
                 SessionStatsDropdown(stats: stats)
             }
         }

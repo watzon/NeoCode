@@ -6,11 +6,31 @@ enum FloatingPanelDirection {
     case down
 }
 
+enum FloatingPanelHorizontalAlignment {
+    case leading
+    case trailing
+}
+
 struct AnchoredFloatingPanelPresenter<Content: View>: NSViewRepresentable {
     let isPresented: Bool
     let direction: FloatingPanelDirection
+    let horizontalAlignment: FloatingPanelHorizontalAlignment
     let onDismiss: () -> Void
     @ViewBuilder let content: () -> Content
+
+    init(
+        isPresented: Bool,
+        direction: FloatingPanelDirection,
+        horizontalAlignment: FloatingPanelHorizontalAlignment = .leading,
+        onDismiss: @escaping () -> Void,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.isPresented = isPresented
+        self.direction = direction
+        self.horizontalAlignment = horizontalAlignment
+        self.onDismiss = onDismiss
+        self.content = content
+    }
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -27,6 +47,7 @@ struct AnchoredFloatingPanelPresenter<Content: View>: NSViewRepresentable {
         context.coordinator.update(
             isPresented: isPresented,
             direction: direction,
+            horizontalAlignment: horizontalAlignment,
             onDismiss: onDismiss,
             content: AnyView(content())
         )
@@ -46,6 +67,7 @@ struct AnchoredFloatingPanelPresenter<Content: View>: NSViewRepresentable {
         func update(
             isPresented: Bool,
             direction: FloatingPanelDirection,
+            horizontalAlignment: FloatingPanelHorizontalAlignment,
             onDismiss: @escaping () -> Void,
             content: AnyView
         ) {
@@ -58,7 +80,7 @@ struct AnchoredFloatingPanelPresenter<Content: View>: NSViewRepresentable {
             if isPresented {
                 hostingController.rootView = content
                 presentIfNeeded(from: anchorView)
-                updateFrame(from: anchorView, direction: direction)
+                updateFrame(from: anchorView, direction: direction, horizontalAlignment: horizontalAlignment)
             } else {
                 dismiss()
             }
@@ -147,7 +169,11 @@ struct AnchoredFloatingPanelPresenter<Content: View>: NSViewRepresentable {
             return anchorView.bounds.contains(pointInAnchor)
         }
 
-        private func updateFrame(from anchorView: NSView, direction: FloatingPanelDirection) {
+        private func updateFrame(
+            from anchorView: NSView,
+            direction: FloatingPanelDirection,
+            horizontalAlignment: FloatingPanelHorizontalAlignment
+        ) {
             guard let panel,
                   let window = anchorView.window
             else {
@@ -160,9 +186,29 @@ struct AnchoredFloatingPanelPresenter<Content: View>: NSViewRepresentable {
 
             let anchorFrameInWindow = anchorView.convert(anchorView.bounds, to: nil)
             let anchorFrameOnScreen = window.convertToScreen(anchorFrameInWindow)
-            let panelOrigin = CGPoint(x: anchorFrameOnScreen.minX, y: panelOriginY(for: direction, anchorFrameOnScreen: anchorFrameOnScreen, panelHeight: fittingSize.height))
+            let panelOrigin = CGPoint(
+                x: panelOriginX(
+                    for: horizontalAlignment,
+                    anchorFrameOnScreen: anchorFrameOnScreen,
+                    panelWidth: fittingSize.width
+                ),
+                y: panelOriginY(for: direction, anchorFrameOnScreen: anchorFrameOnScreen, panelHeight: fittingSize.height)
+            )
 
             panel.setFrame(CGRect(origin: panelOrigin, size: fittingSize), display: true)
+        }
+
+        private func panelOriginX(
+            for horizontalAlignment: FloatingPanelHorizontalAlignment,
+            anchorFrameOnScreen: CGRect,
+            panelWidth: CGFloat
+        ) -> CGFloat {
+            switch horizontalAlignment {
+            case .leading:
+                return anchorFrameOnScreen.minX
+            case .trailing:
+                return anchorFrameOnScreen.maxX - panelWidth
+            }
         }
 
         private func panelOriginY(
