@@ -733,6 +733,36 @@ struct AppStoreSessionTests {
         }
 
         @MainActor
+        @Test func appStoreIgnoresStaleSessionUpdatesAfterDeletionEvent() async {
+            let now = Date()
+            let store = AppStore(projects: [
+                ProjectSummary(
+                    name: "NeoCode",
+                    path: "/tmp/NeoCode",
+                    sessions: [
+                        SessionSummary(id: "ses_new", title: "New Session", lastUpdatedAt: now),
+                    ]
+                ),
+            ])
+
+            store.selectSession("ses_new")
+            store.apply(event: .sessionDeleted("ses_new"))
+            #expect(store.projects[0].sessions.isEmpty)
+
+            store.apply(event: .sessionUpdated(
+                OpenCodeSession(
+                    id: "ses_new",
+                    title: "New Session",
+                    parentID: nil,
+                    time: OpenCodeTimeContainer(created: now, updated: now.addingTimeInterval(5), completed: nil)
+                )
+            ))
+
+            #expect(store.projects[0].sessions.isEmpty)
+            #expect(store.selectedSessionID == nil)
+        }
+
+        @MainActor
         @Test func appStoreTracksPendingPermissionsAndClearsThemAfterReply() async {
             let store = AppStore(projects: [
                 ProjectSummary(

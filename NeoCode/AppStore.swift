@@ -250,6 +250,7 @@ final class AppStore {
     private var lastWorkspaceSelection: AppContentSelection = .dashboard
     private var sessionListSyncActivityByProjectID: [ProjectSummary.ID: Int] = [:]
     private var loadingSessionCountsByProjectID: [ProjectSummary.ID: Int] = [:]
+    private var locallyDeletedSessionIDsByProjectID: [ProjectSummary.ID: Set<String>] = [:]
 
     init() {
         let persistence = AppStorePersistence()
@@ -1403,12 +1404,14 @@ final class AppStore {
 
         do {
             _ = try await service.deleteSession(sessionID: sessionID)
+            markSessionDeletedLocally(sessionID, in: projectID)
             removeResolvedSessionCluster(sessionID, in: projectID)
             lastError = nil
             reevaluateRuntimeRetention(using: runtime)
         } catch {
             if isNotFoundError(error) {
                 logger.info("Session already missing remotely; pruning local state for \(sessionID, privacy: .public)")
+                markSessionDeletedLocally(sessionID, in: projectID)
                 removeResolvedSessionCluster(sessionID, in: projectID)
                 lastError = nil
             } else {
@@ -2170,6 +2173,7 @@ final class AppStore {
     private func apply(event: OpenCodeEvent, projectID: ProjectSummary.ID) {
         switch event {
         case .sessionCreated(let session), .sessionUpdated(let session):
+            guard !isLocallyDeletedSession(session.id, in: projectID) else { return }
             if session.isRootVisible {
                 let fallbackTitle = sessionSummary(for: session.id, projectID: projectID)?.title ?? SessionSummary.defaultTitle
                 upsert(session: SessionSummary(session: session, fallbackTitle: fallbackTitle), in: projectID, preferTopInsertion: event.isCreated)
@@ -2177,6 +2181,7 @@ final class AppStore {
                 removeSession(session.id, in: projectID)
             }
         case .sessionDeleted(let sessionID):
+            markSessionDeletedLocally(sessionID, in: projectID)
             removeResolvedSessionCluster(sessionID, in: projectID)
         case .sessionCompacted(let sessionID):
             if let service = liveServices[projectID] {
@@ -3187,6 +3192,7 @@ final class AppStore {
         } catch {
             if isNotFoundError(error) {
                 logger.info("Session messages missing remotely; pruning local state for \(sessionID, privacy: .public)")
+                markSessionDeletedLocally(sessionID, in: projectID)
                 removeResolvedSessionCluster(sessionID, in: projectID)
                 if !keepsCurrentUI {
                     lastError = nil
@@ -3631,15 +3637,22 @@ final class AppStore {
 
     private func replaceSessions(in projectID: ProjectSummary.ID, with sessions: [SessionSummary]) {
         guard let projectIndex = projects.firstIndex(where: { $0.id == projectID }) else { return }
+        let locallyDeletedSessionIDs = locallyDeletedSessionIDsByProjectID[projectID] ?? []
+        let remoteResolvedSessionIDs = Set(sessions.map { resolvedSessionID(for: $0.id) })
+        clearDeletedSessionMarkers(
+            locallyDeletedSessionIDs.subtracting(remoteResolvedSessionIDs),
+            in: projectID
+        )
+        let filteredSessions = sessions.filter { !locallyDeletedSessionIDs.contains(resolvedSessionID(for: $0.id)) }
         let ephemeralSessions = projects[projectIndex].sessions.filter(\.isEphemeral)
         let cachedSessions = Self.sessionLookup(for: projects[projectIndex].sessions)
         let previousSessionIDs = Set(projects[projectIndex].sessions.map(\.id))
 
-        for session in sessions {
+        for session in filteredSessions {
             seedTranscript(session.transcript, for: session.id)
         }
 
-        let mergedSessions = ephemeralSessions + sessions.map { incoming in
+        let mergedSessions = ephemeralSessions + filteredSessions.map { incoming in
             let transcript = transcript(for: incoming.id)
             guard let existing = cachedSessions[incoming.id] else {
                 var inserted = incoming.applyingInferredTitle(from: transcript)
@@ -3746,6 +3759,27 @@ final class AppStore {
             selectedSessionID = nil
         }
         scheduleProjectPersistence()
+    }
+
+    private func markSessionDeletedLocally(_ sessionID: String, in projectID: ProjectSummary.ID) {
+        let resolvedID = resolvedSessionID(for: sessionID)
+        locallyDeletedSessionIDsByProjectID[projectID, default: []].insert(resolvedID)
+    }
+
+    private func clearDeletedSessionMarkers(_ sessionIDs: Set<String>, in projectID: ProjectSummary.ID) {
+        guard !sessionIDs.isEmpty else { return }
+        guard var locallyDeletedSessionIDs = locallyDeletedSessionIDsByProjectID[projectID] else { return }
+
+        locallyDeletedSessionIDs.subtract(sessionIDs)
+        if locallyDeletedSessionIDs.isEmpty {
+            locallyDeletedSessionIDsByProjectID.removeValue(forKey: projectID)
+        } else {
+            locallyDeletedSessionIDsByProjectID[projectID] = locallyDeletedSessionIDs
+        }
+    }
+
+    private func isLocallyDeletedSession(_ sessionID: String, in projectID: ProjectSummary.ID) -> Bool {
+        locallyDeletedSessionIDsByProjectID[projectID]?.contains(resolvedSessionID(for: sessionID)) == true
     }
 
     private func removeResolvedSessionCluster(_ sessionID: String, in projectID: ProjectSummary.ID) {
