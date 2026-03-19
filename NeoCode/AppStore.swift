@@ -164,6 +164,7 @@ final class AppStore {
     private(set) var lifecycleRefreshToken = 0
     var isSending = false
     var queuedMessagesBySessionID: [String: [ComposerQueuedMessage]] = [:]
+    var activeTodosBySessionID: [String: SessionTodoSnapshot] = [:]
     var isRespondingToPrompt = false
     var isPromptReady = true
     var promptLoadingText: String?
@@ -380,6 +381,14 @@ final class AppStore {
         queuedMessages(for: selectedSessionID)
     }
 
+    var selectedTodos: [SessionTodoItem] {
+        todos(for: selectedSessionID)
+    }
+
+    var selectedRemainingTodoCount: Int {
+        remainingTodoCount(for: selectedSessionID)
+    }
+
     func transcript(for sessionID: String?) -> [ChatMessage] {
         guard let sessionID else { return [] }
         return transcriptStateBySessionID[sessionID]?.messages ?? []
@@ -398,6 +407,16 @@ final class AppStore {
     func queuedMessages(for sessionID: String?) -> [ComposerQueuedMessage] {
         guard let sessionID else { return [] }
         return queuedMessagesBySessionID[sessionID] ?? []
+    }
+
+    func todos(for sessionID: String?) -> [SessionTodoItem] {
+        guard let sessionID else { return [] }
+        return activeTodosBySessionID[sessionID]?.items ?? []
+    }
+
+    func remainingTodoCount(for sessionID: String?) -> Int {
+        guard let sessionID else { return 0 }
+        return activeTodosBySessionID[sessionID]?.remainingCount ?? 0
     }
 
     func transcriptRevisionToken(for sessionID: String?) -> Int {
@@ -2543,6 +2562,7 @@ final class AppStore {
         locallyActiveSessionIDs = []
         pendingPermissionsBySession = [:]
         pendingQuestionsBySession = [:]
+        activeTodosBySessionID = [:]
         sessionListSyncActivityByProjectID = [:]
         loadingSessionCountsByProjectID = [:]
         isSending = false
@@ -2572,6 +2592,7 @@ final class AppStore {
             clearLocalSessionActivity(sessionID)
             pendingPermissionsBySession.removeValue(forKey: sessionID)
             pendingQuestionsBySession.removeValue(forKey: sessionID)
+            activeTodosBySessionID.removeValue(forKey: sessionID)
             refreshSessionStatus(sessionID: sessionID, projectID: projectID)
         }
 
@@ -3520,6 +3541,7 @@ final class AppStore {
                 messageRoles[message.info.id] = message.info.chatRole
             }
             replaceTranscript(in: sessionID, projectID: projectID, with: transcript)
+            replaceActiveTodos(in: sessionID, with: SessionTodoParser.latestSnapshot(from: messages))
             refreshSessionStats(sessionID: sessionID, projectID: projectID)
             refreshSessionStatus(sessionID: sessionID, projectID: projectID)
             if !keepsCurrentUI {
@@ -3763,9 +3785,10 @@ final class AppStore {
     }
 
     private func apply(part: OpenCodePart, projectID: ProjectSummary.ID) {
-        guard let sessionID = part.sessionID else { return }
+        guard let sessionID = resolvedSessionID(for: part) else { return }
         markSessionLocallyActive(sessionID)
         flushBufferedTextDeltas(for: sessionID, projectID: projectID)
+        applyActiveTodos(from: part, sessionID: sessionID)
         let defaultRole = part.messageID.flatMap { messageRoles[$0] } ?? .assistant
         guard !shouldSuppressTranscriptPart(part, defaultRole: defaultRole) else {
             return
@@ -4086,6 +4109,7 @@ final class AppStore {
         discardBufferedTextDeltas(for: sessionID, projectID: projectID)
         clearLocalSessionActivity(sessionID)
         queuedMessagesBySessionID.removeValue(forKey: sessionID)
+        activeTodosBySessionID.removeValue(forKey: sessionID)
         queuedMessageDispatchingSessionIDs.remove(sessionID)
         removeTranscript(for: sessionID)
         projects[projectIndex].sessions.removeAll(where: { $0.id == sessionID })
@@ -4099,6 +4123,38 @@ final class AppStore {
             selectedSessionID = nil
         }
         scheduleProjectPersistence()
+    }
+
+    private func applyActiveTodos(from part: OpenCodePart, sessionID: String) {
+        guard let snapshot = SessionTodoParser.snapshot(from: part) else { return }
+        replaceActiveTodos(in: sessionID, with: snapshot)
+    }
+
+    private func replaceActiveTodos(in sessionID: String, with snapshot: SessionTodoSnapshot?) {
+        guard let snapshot else {
+            activeTodosBySessionID.removeValue(forKey: sessionID)
+            return
+        }
+
+        if snapshot.isEmpty {
+            activeTodosBySessionID.removeValue(forKey: sessionID)
+        } else {
+            activeTodosBySessionID[sessionID] = snapshot
+        }
+    }
+
+    private func resolvedSessionID(for part: OpenCodePart) -> String? {
+        if let sessionID = part.sessionID {
+            return sessionID
+        }
+
+        guard let messageID = part.messageID else { return nil }
+
+        for (sessionID, infos) in messageInfosBySessionID where infos[messageID] != nil {
+            return sessionID
+        }
+
+        return nil
     }
 
     private func upsertMessage(_ message: ChatMessage, in sessionID: String, projectID: ProjectSummary.ID) {

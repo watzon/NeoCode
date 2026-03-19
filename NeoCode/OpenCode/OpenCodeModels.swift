@@ -456,10 +456,10 @@ struct OpenCodePart: Decodable, Equatable, Sendable {
         case .text, .reasoning, .diff, .unknown:
             return !trimmedText.isEmpty
         case .tool:
-            if ["todoread", "todowrite"].contains(tool?.lowercased() ?? "") {
+            if tool?.normalizedToolLeafName.isTodoToolName == true {
                 return false
             }
-            if tool?.lowercased() == "question",
+            if tool?.normalizedToolLeafName == "question",
                toolStatus == nil || toolStatus == .pending || toolStatus == .running {
                 return false
             }
@@ -536,6 +536,18 @@ struct OpenCodePart: Decodable, Equatable, Sendable {
             )
         }
         return .plain
+    }
+}
+
+private extension String {
+    nonisolated var normalizedToolLeafName: String {
+        let leaf = split(whereSeparator: { $0 == "." || $0 == "/" || $0 == ":" }).last.map(String.init) ?? self
+        return leaf.lowercased()
+    }
+
+    nonisolated var isTodoToolName: Bool {
+        let normalized = normalizedToolLeafName.replacingOccurrences(of: "_", with: "")
+        return normalized == "todoread" || normalized == "todowrite"
     }
 }
 

@@ -172,6 +172,148 @@ struct NeoCodeCoreTests {
         #expect(transcript.contains(where: { $0.text.contains("Called the Read tool") }) == false)
     }
 
+    @Test func parsesTodosFromTodoWriteToolInput() {
+        let timestamp = Date(timeIntervalSince1970: 1_710_616_200)
+        let part = OpenCodePart(
+            id: "part_todo_write",
+            sessionID: "ses_1",
+            messageID: "msg_1",
+            type: .tool,
+            text: nil,
+            tool: "todowrite",
+            mime: nil,
+            filename: nil,
+            url: nil,
+            source: nil,
+            state: OpenCodeToolState(
+                status: .completed,
+                input: .object([
+                    "todos": .array([
+                        .object([
+                            "content": .string("Wire the todo UI into the composer dock"),
+                            "status": .string("in_progress"),
+                            "priority": .string("high")
+                        ]),
+                        .object([
+                            "content": .string("Review hover behavior"),
+                            "status": .string("pending"),
+                            "priority": .string("medium")
+                        ]),
+                        .object([
+                            "content": .string("Ship it"),
+                            "status": .string("completed"),
+                            "priority": .string("low")
+                        ])
+                    ])
+                ]),
+                output: nil,
+                error: nil
+            ),
+            time: OpenCodeTimeContainer(created: timestamp, updated: timestamp, completed: timestamp)
+        )
+
+        let snapshot = SessionTodoParser.snapshot(from: part)
+
+        #expect(snapshot?.items.count == 3)
+        #expect(snapshot?.items.map(\.content) == [
+            "Wire the todo UI into the composer dock",
+            "Review hover behavior",
+            "Ship it"
+        ])
+        #expect(snapshot?.items.first?.priority == .high)
+        #expect(snapshot?.remainingCount == 2)
+    }
+
+    @Test func parsesActiveTodosFromNamespacedTodoToolName() {
+        let timestamp = Date(timeIntervalSince1970: 1_710_616_210)
+        let part = OpenCodePart(
+            id: "part_namespaced_todo_write",
+            sessionID: "ses_1",
+            messageID: "msg_1",
+            type: .tool,
+            text: nil,
+            tool: "functions.todowrite",
+            mime: nil,
+            filename: nil,
+            url: nil,
+            source: nil,
+            state: OpenCodeToolState(
+                status: .completed,
+                input: .object([
+                    "todos": .array([
+                        .object([
+                            "content": .string("Namespaced todo tool should still render"),
+                            "status": .string("pending"),
+                            "priority": .string("high")
+                        ])
+                    ])
+                ]),
+                output: nil,
+                error: nil
+            ),
+            time: OpenCodeTimeContainer(created: timestamp, updated: timestamp, completed: timestamp)
+        )
+
+        let snapshot = SessionTodoParser.snapshot(from: part)
+
+        #expect(snapshot?.items.map(\.content) == ["Namespaced todo tool should still render"])
+        #expect(part.shouldDisplay == false)
+    }
+
+    @Test func latestTodoSnapshotPreservesCompletedItems() {
+        let timestamp = Date(timeIntervalSince1970: 1_710_616_240)
+        let envelopes = [
+            OpenCodeMessageEnvelope(
+                info: OpenCodeMessageInfo(
+                    id: "msg_todos",
+                    sessionID: "ses_1",
+                    role: "assistant",
+                    summary: nil,
+                    agent: nil,
+                    providerID: nil,
+                    modelID: nil,
+                    cost: nil,
+                    tokens: nil,
+                    time: OpenCodeTimeContainer(created: timestamp, updated: timestamp, completed: timestamp)
+                ),
+                parts: [
+                    OpenCodePart(
+                        id: "part_todo_read",
+                        sessionID: "ses_1",
+                        messageID: "msg_todos",
+                        type: .tool,
+                        text: nil,
+                        tool: "todo_read",
+                        mime: nil,
+                        filename: nil,
+                        url: nil,
+                        source: nil,
+                        state: OpenCodeToolState(
+                            status: .completed,
+                            input: nil,
+                            output: .object([
+                                "todos": .array([
+                                    .object([
+                                        "content": .string("Already done"),
+                                        "status": .string("completed"),
+                                        "priority": .string("low")
+                                    ])
+                                ])
+                            ]),
+                            error: nil
+                        ),
+                        time: OpenCodeTimeContainer(created: timestamp, updated: timestamp, completed: timestamp)
+                    )
+                ]
+            )
+        ]
+
+        let snapshot = SessionTodoParser.latestSnapshot(from: envelopes)
+
+        #expect(snapshot?.items.map(\.content) == ["Already done"])
+        #expect(snapshot?.remainingCount == 0)
+    }
+
     @Test func parsesSSEFramesIntoDomainEvents() throws {
         var parser = OpenCodeSSEParser()
         #expect(parser.ingest(line: "event: message.part.updated") == nil)

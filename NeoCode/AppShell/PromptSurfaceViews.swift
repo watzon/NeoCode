@@ -32,6 +32,7 @@ struct SessionPromptAreaView: View {
     let surface: SessionPromptSurface
     @Binding var draftText: String
     @Binding var selectionRequest: ComposerTextSelectionRequest?
+    @Binding var isTodoListPresented: Bool
     @FocusState.Binding var composerFocused: Bool
     @Binding var textInputHeight: CGFloat
     let onConfirmAuxiliarySelection: () -> Bool
@@ -47,6 +48,7 @@ struct SessionPromptAreaView: View {
                 ComposerView(
                     text: $draftText,
                     selectionRequest: $selectionRequest,
+                    isTodoListPresented: $isTodoListPresented,
                     onConfirmAuxiliarySelection: onConfirmAuxiliarySelection,
                     onMoveAuxiliarySelection: onMoveAuxiliarySelection,
                     onCancelAuxiliaryUI: onCancelAuxiliaryUI,

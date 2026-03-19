@@ -12,6 +12,7 @@ struct ComposerView: View {
 
     @Binding var text: String
     @Binding var selectionRequest: ComposerTextSelectionRequest?
+    @Binding var isTodoListPresented: Bool
     let onConfirmAuxiliarySelection: () -> Bool
     let onMoveAuxiliarySelection: (Int) -> Bool
     let onCancelAuxiliaryUI: () -> Bool
@@ -141,6 +142,11 @@ struct ComposerView: View {
                 textViewHeight = ComposerLayout.minimumTextViewHeight
             }
         }
+        .onChange(of: store.selectedTodos) { _, todos in
+            if todos.isEmpty {
+                isTodoListPresented = false
+            }
+        }
     }
 
     private var composerCard: some View {
@@ -172,6 +178,7 @@ struct ComposerView: View {
                 onImportAttachments: importAttachments
             )
             .frame(height: textViewHeight)
+            .padding(.trailing, store.selectedTodos.isEmpty ? 0 : 60)
 
             HStack(alignment: .center, spacing: 8) {
                 NeoCodeMenuButton(direction: .up) { isPresented in
@@ -318,6 +325,16 @@ struct ComposerView: View {
                         .stroke(NeoCodeTheme.line, lineWidth: 1)
                 )
         )
+        .overlay(alignment: .topTrailing) {
+            if !store.selectedTodos.isEmpty {
+                ComposerTodoBadgeButton(
+                    count: store.selectedRemainingTodoCount,
+                    isPresented: $isTodoListPresented
+                )
+                .padding(.top, 16)
+                .padding(.trailing, 16)
+            }
+        }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 

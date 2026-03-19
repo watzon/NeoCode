@@ -128,6 +128,7 @@ struct ConversationView: View {
     @State private var composerSelectionRequest: ComposerTextSelectionRequest?
     @State private var fileMentionResults: [ProjectFileSearchResult] = []
     @State private var fileSearchTask: Task<Void, Never>?
+    @State private var isTodoListPresented = false
 
     private let bottomAnchorSpacerHeight: CGFloat = 1
     private let autoScrollThreshold: CGFloat = 72
@@ -140,6 +141,9 @@ struct ConversationView: View {
     private let composerControlSpacing: CGFloat = 12
     private let queuedMessageReservedHeight: CGFloat = 100
     private let queuedMessageStackOverlap: CGFloat = 20
+    private let todoPanelBottomSpacing: CGFloat = 12
+    private let todoPanelTitleHeight: CGFloat = 40
+    private let todoPanelRowHeight: CGFloat = 58
     private let loadingPromptFallbackHeight: CGFloat = 96
     private let permissionPromptFallbackHeight: CGFloat = 280
     private let questionPromptFallbackHeight: CGFloat = 360
@@ -179,9 +183,15 @@ struct ConversationView: View {
             .onChange(of: sessionID) { _, _ in
                 prepareSessionPresentation(using: proxy)
                 composerFocused = promptSurface.isComposer
+                isTodoListPresented = false
             }
             .onChange(of: promptSurface.id) { _, _ in
                 composerFocused = promptSurface.isComposer
+            }
+            .onChange(of: store.todos(for: sessionID)) { _, todos in
+                if todos.isEmpty {
+                    isTodoListPresented = false
+                }
             }
             .onChange(of: transcriptCount) { oldValue, newValue in
                 if isAwaitingInitialScroll {
@@ -638,10 +648,18 @@ struct ConversationView: View {
                 .zIndex(1)
             }
 
+            if isTodoListPresented, !store.todos(for: sessionID).isEmpty {
+                ComposerTodoPanel(items: store.todos(for: sessionID))
+                    .frame(width: transcriptColumnWidth)
+                    .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
+                    .zIndex(1)
+            }
+
             SessionPromptAreaView(
                 surface: promptSurface,
                 draftText: draftBinding,
                 selectionRequest: $composerSelectionRequest,
+                isTodoListPresented: $isTodoListPresented,
                 composerFocused: $composerFocused,
                 textInputHeight: $textInputHeight,
                 onConfirmAuxiliarySelection: confirmAuxiliarySelection,
@@ -766,8 +784,14 @@ struct ConversationView: View {
         // height measurement lags or under-reports during transitions.
         max(
             bottomAnchorSpacerHeight,
-            max(promptOverlayHeight, promptOverlayFallbackHeight) + queuedMessagesBottomInset + bottomClearance + transcriptBottomPadding
+            max(promptOverlayHeight, promptOverlayFallbackHeight) + queuedMessagesBottomInset + todoPanelBottomInset + bottomClearance + transcriptBottomPadding
         )
+    }
+
+    private var todoPanelBottomInset: CGFloat {
+        let todoCount = store.todos(for: sessionID).count
+        guard isTodoListPresented, todoCount > 0 else { return 0 }
+        return todoPanelBottomSpacing + todoPanelTitleHeight + CGFloat(todoCount) * todoPanelRowHeight
     }
 
     private var queuedMessagesBottomInset: CGFloat {
