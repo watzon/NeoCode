@@ -3452,6 +3452,7 @@ final class AppStore {
         }
 
         upsertMessage(message, in: sessionID, projectID: projectID)
+        reconcileLocalSessionActivityIfSettled(sessionID: sessionID)
         touchSession(sessionID: sessionID, projectID: projectID, updatedAt: message.timestamp)
         refreshSessionStatus(sessionID: sessionID, projectID: projectID)
 
@@ -4027,23 +4028,24 @@ final class AppStore {
     ) -> OpenCodeSessionActivity? {
         guard let activity = liveSessionStatuses[sessionID] else { return nil }
 
+        let hasLocalActivity = isSessionLocallyActive(sessionID)
+            || transcript.contains(where: \.isInProgress)
+            || hasBufferedTextDeltas(for: sessionID)
+        let isAwaitingFirstAssistantUpdate = transcript.isEmpty || transcript.last?.role == .user
+        let isAwaitingInput = pendingPermission(for: sessionID) != nil || pendingQuestion(for: sessionID) != nil
+
         switch activity {
         case .idle:
-            if isSessionLocallyActive(sessionID)
-                || transcript.contains(where: \.isInProgress)
-                || hasBufferedTextDeltas(for: sessionID) {
+            if hasLocalActivity {
                 return .idle
             }
             return nil
         case .busy, .retry:
-            guard isSessionLocallyActive(sessionID)
-                    || transcript.contains(where: \.isInProgress)
-                    || hasBufferedTextDeltas(for: sessionID)
-                    || transcript.last?.role == .user
-                    || pendingPermission(for: sessionID) != nil
-                    || pendingQuestion(for: sessionID) != nil
+            guard hasLocalActivity
+                    || isAwaitingFirstAssistantUpdate
+                    || isAwaitingInput
             else {
-                return activity
+                return nil
             }
             return activity
         }
@@ -4064,6 +4066,18 @@ final class AppStore {
 
         setTranscript(transcript, for: sessionID)
         projects[indices.project].sessions[indices.session].lastUpdatedAt = transcript.last?.timestamp ?? projects[indices.project].sessions[indices.session].lastUpdatedAt
+    }
+
+    private func reconcileLocalSessionActivityIfSettled(sessionID: String) {
+        guard !transcript(for: sessionID).contains(where: \.isInProgress),
+              !hasBufferedTextDeltas(for: sessionID),
+              pendingPermission(for: sessionID) == nil,
+              pendingQuestion(for: sessionID) == nil
+        else {
+            return
+        }
+
+        clearLocalSessionActivity(sessionID)
     }
 
     private func hasBufferedTextDeltas(for sessionID: String) -> Bool {

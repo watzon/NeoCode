@@ -331,6 +331,67 @@ struct AppStoreSessionTests {
         }
 
         @MainActor
+        @Test func appStoreClearsStaleBusyStatusWhenFinalToolPartCompletes() {
+            let store = AppStore(projects: [
+                ProjectSummary(
+                    name: "NeoCode",
+                    path: "/tmp/NeoCode",
+                    sessions: [
+                        SessionSummary(id: "ses_1", title: "Existing", lastUpdatedAt: .distantPast),
+                    ]
+                ),
+            ])
+
+            store.selectSession("ses_1")
+            store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .busy))
+            store.apply(event: .messagePartUpdated(OpenCodePart(
+                id: "tool_1",
+                sessionID: "ses_1",
+                messageID: "msg_1",
+                type: .tool,
+                text: nil,
+                tool: "bash",
+                mime: nil,
+                filename: nil,
+                url: nil,
+                source: nil,
+                state: OpenCodeToolState(
+                    status: .running,
+                    input: .object(["command": .string("sleep 30 &")]),
+                    output: nil,
+                    error: nil
+                ),
+                time: OpenCodeTimeContainer(created: .now, updated: .now, completed: nil)
+            )))
+
+            #expect(store.selectedSession?.status == .running)
+            #expect(store.selectedSessionActivity == .busy)
+
+            store.apply(event: .messagePartUpdated(OpenCodePart(
+                id: "tool_1",
+                sessionID: "ses_1",
+                messageID: "msg_1",
+                type: .tool,
+                text: nil,
+                tool: "bash",
+                mime: nil,
+                filename: nil,
+                url: nil,
+                source: nil,
+                state: OpenCodeToolState(
+                    status: .completed,
+                    input: .object(["command": .string("sleep 30 &")]),
+                    output: .string("started"),
+                    error: nil
+                ),
+                time: OpenCodeTimeContainer(created: .now, updated: .now, completed: .now)
+            )))
+
+            #expect(store.selectedSession?.status == .idle)
+            #expect(store.selectedSessionActivity == nil)
+        }
+
+        @MainActor
         @Test func appStoreClearsBackgroundWorkingBadgeWhenCompletedPartArrives() async throws {
             let store = AppStore(projects: [
                 ProjectSummary(
