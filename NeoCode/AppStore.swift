@@ -1381,12 +1381,18 @@ final class AppStore {
 
         do {
             _ = try await service.deleteSession(sessionID: sessionID)
-            removeSession(sessionID, in: projectID)
+            removeResolvedSessionCluster(sessionID, in: projectID)
             lastError = nil
             reevaluateRuntimeRetention(using: runtime)
         } catch {
-            logger.error("Failed to delete session: \(error.localizedDescription, privacy: .public)")
-            lastError = error.localizedDescription
+            if isNotFoundError(error) {
+                logger.info("Session already missing remotely; pruning local state for \(sessionID, privacy: .public)")
+                removeResolvedSessionCluster(sessionID, in: projectID)
+                lastError = nil
+            } else {
+                logger.error("Failed to delete session: \(error.localizedDescription, privacy: .public)")
+                lastError = error.localizedDescription
+            }
             reevaluateRuntimeRetention(using: runtime)
         }
     }
@@ -2472,7 +2478,7 @@ final class AppStore {
                 removeSession(session.id, in: projectID)
             }
         case .sessionDeleted(let sessionID):
-            removeSession(sessionID, in: projectID)
+            removeResolvedSessionCluster(sessionID, in: projectID)
         case .sessionCompacted(let sessionID):
             if let service = liveServices[projectID] {
                 Task { [weak self] in
@@ -3620,10 +3626,18 @@ final class AppStore {
         } catch is CancellationError {
             logger.debug("Cancelled message load for session \(sessionID, privacy: .public)")
         } catch {
-            logger.error("Failed to load messages for session \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")
-            if !keepsCurrentUI {
-                lastError = error.localizedDescription
-                setSessionStatus(.error, sessionID: sessionID, projectID: projectID)
+            if isNotFoundError(error) {
+                logger.info("Session messages missing remotely; pruning local state for \(sessionID, privacy: .public)")
+                removeResolvedSessionCluster(sessionID, in: projectID)
+                if !keepsCurrentUI {
+                    lastError = nil
+                }
+            } else {
+                logger.error("Failed to load messages for session \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                if !keepsCurrentUI {
+                    lastError = error.localizedDescription
+                    setSessionStatus(.error, sessionID: sessionID, projectID: projectID)
+                }
             }
         }
     }
@@ -4235,6 +4249,21 @@ final class AppStore {
             selectedSessionID = nil
         }
         scheduleProjectPersistence()
+    }
+
+    private func removeResolvedSessionCluster(_ sessionID: String, in projectID: ProjectSummary.ID) {
+        guard let projectIndex = projects.firstIndex(where: { $0.id == projectID }) else { return }
+
+        let targetSessionID = resolvedSessionID(for: sessionID)
+        let linkedSessionIDs = Set(
+            projects[projectIndex].sessions
+                .map(\.id)
+                .filter { resolvedSessionID(for: $0) == targetSessionID }
+        )
+
+        for linkedSessionID in linkedSessionIDs {
+            removeSession(linkedSessionID, in: projectID)
+        }
     }
 
     private func applyActiveTodos(from part: OpenCodePart, sessionID: String) {
@@ -5341,6 +5370,14 @@ final class AppStore {
 
     private func clearSessionAliases(referencing sessionID: String) {
         sessionIDAliases = sessionIDAliases.filter { $0.key != sessionID && $0.value != sessionID }
+    }
+
+    private func isNotFoundError(_ error: Error) -> Bool {
+        guard case OpenCodeClientError.httpStatus(404) = error else {
+            return false
+        }
+
+        return true
     }
 
     private func setTranscript(_ transcript: [ChatMessage], for sessionID: String) {
