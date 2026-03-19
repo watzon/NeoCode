@@ -162,6 +162,7 @@ final class AppStore {
     }
     var loadingTranscriptSessionID: String?
     private(set) var lifecycleRefreshToken = 0
+    private(set) var sessionUIRevision = 0
     var isSending = false
     var queuedMessagesBySessionID: [String: [ComposerQueuedMessage]] = [:]
     var activeTodosBySessionID: [String: SessionTodoSnapshot] = [:]
@@ -374,6 +375,7 @@ final class AppStore {
     }
 
     var selectedSession: SessionSummary? {
+        let _ = sessionUIRevision
         guard let selectedSessionID else { return nil }
         return projects
             .flatMap(\.sessions)
@@ -437,7 +439,8 @@ final class AppStore {
     }
 
     func sessionSummary(for sessionID: String) -> SessionSummary? {
-        session(for: sessionID)
+        let _ = sessionUIRevision
+        return session(for: sessionID)
     }
 
     var selectedProject: ProjectSummary? {
@@ -462,6 +465,7 @@ final class AppStore {
     }
 
     var selectedSessionActivity: OpenCodeSessionActivity? {
+        let _ = sessionUIRevision
         guard let selectedSessionID else { return nil }
         return effectiveLiveSessionActivity(
             for: selectedSessionID,
@@ -470,6 +474,7 @@ final class AppStore {
     }
 
     var selectedSessionIsActivelyResponding: Bool {
+        let _ = sessionUIRevision
         guard let selectedSessionID else { return false }
         return isSessionActivelyResponding(selectedSessionID)
     }
@@ -514,19 +519,23 @@ final class AppStore {
     }
 
     func pendingPermission(for sessionID: String) -> OpenCodePermissionRequest? {
-        pendingPermissionsBySession[sessionID]?.first
+        let _ = sessionUIRevision
+        return pendingPermissionsBySession[sessionID]?.first
     }
 
     func pendingQuestion(for sessionID: String) -> OpenCodeQuestionRequest? {
-        pendingQuestionsBySession[sessionID]?.first
+        let _ = sessionUIRevision
+        return pendingQuestionsBySession[sessionID]?.first
     }
 
     func showsFinishedIndicator(for sessionID: String) -> Bool {
-        finishedSessionIDs.contains(sessionID)
+        let _ = sessionUIRevision
+        return finishedSessionIDs.contains(sessionID)
     }
 
     func showsFailedIndicator(for sessionID: String) -> Bool {
-        failedSessionIDs.contains(sessionID)
+        let _ = sessionUIRevision
+        return failedSessionIDs.contains(sessionID)
     }
 
     func terminationWarningContext() -> AppTerminationWarningContext? {
@@ -2545,6 +2554,10 @@ final class AppStore {
         case .connected, .ignored:
             break
         }
+
+        if eventMayAffectGitState(event) {
+            scheduleGitRefreshForProjectActivity(projectID: projectID, reason: event.debugName)
+        }
     }
 
     @discardableResult
@@ -3922,6 +3935,7 @@ final class AppStore {
 
         if projects[indices.project].sessions[indices.session].status == .idle {
             projects[indices.project].sessions[indices.session].status = .running
+            bumpSessionUIRevision()
             refreshSystemSleepAssertion()
         }
         scheduleBufferedDeltaFlush()
@@ -4307,6 +4321,7 @@ final class AppStore {
 
         projects[indices.project].sessions[indices.session].status = status
         updateFinishedIndicator(sessionID: sessionID, previousStatus: previousStatus, newStatus: status)
+        bumpSessionUIRevision()
         refreshSystemSleepAssertion()
         if !status.isActive {
             cancelStreamingRecoveryCheck(for: sessionID)
@@ -4330,6 +4345,7 @@ final class AppStore {
             markSidebarActivity(sessionID: sessionID, projectID: projectID)
         }
         updateFinishedIndicator(sessionID: sessionID, previousStatus: previousStatus, newStatus: resolvedStatus)
+        bumpSessionUIRevision()
         refreshSystemSleepAssertion()
         if !resolvedStatus.isActive {
             cancelStreamingRecoveryCheck(for: sessionID)
@@ -4372,6 +4388,44 @@ final class AppStore {
         }
 
         refreshSessionStatus(sessionID: sessionID, projectID: projectID)
+    }
+
+    private func eventMayAffectGitState(_ event: OpenCodeEvent) -> Bool {
+        switch event {
+        case .sessionStatusChanged,
+                .sessionCompacted,
+                .messageUpdated,
+                .messagePartUpdated,
+                .messagePartDelta:
+            return true
+        case .sessionCreated,
+                .sessionUpdated,
+                .sessionDeleted,
+                .permissionAsked,
+                .permissionReplied,
+                .questionAsked,
+                .questionReplied,
+                .questionRejected,
+                .connected,
+                .ignored:
+            return false
+        }
+    }
+
+    private func scheduleGitRefreshForProjectActivity(projectID: ProjectSummary.ID, reason: String) {
+        guard selectedProject?.id == projectID,
+              let projectPath = selectedProject?.path,
+              !projectPath.isEmpty
+        else {
+            return
+        }
+
+        scheduleGitRefresh(
+            reason: "project-activity-\(reason)",
+            projectPath: projectPath,
+            refreshCommitPreviewIfLoaded: gitStatus.hasChanges || gitCommitPreview != nil,
+            delay: .milliseconds(250)
+        )
     }
 
     private func transcriptRevision(for sessionID: String, projectID: ProjectSummary.ID) -> Int {
@@ -4495,6 +4549,7 @@ final class AppStore {
         guard let sessionID else { return }
         finishedSessionIDs.remove(sessionID)
         failedSessionIDs.remove(sessionID)
+        bumpSessionUIRevision()
     }
 
     private func updateFinishedIndicator(sessionID: String, previousStatus: SessionStatus, newStatus: SessionStatus) {
@@ -4530,6 +4585,10 @@ final class AppStore {
         case .running, .retrying:
             break
         }
+    }
+
+    private func bumpSessionUIRevision() {
+        sessionUIRevision &+= 1
     }
 
     private func queueDispatchSessionID(for event: OpenCodeEvent) -> String? {
@@ -4872,6 +4931,7 @@ final class AppStore {
             transcript: transcript,
             fallback: .idle
         )
+        bumpSessionUIRevision()
         scheduleProjectPersistence()
     }
 
@@ -5170,6 +5230,7 @@ final class AppStore {
             transcript: transcript,
             fallback: .idle
         )
+        bumpSessionUIRevision()
         scheduleProjectPersistence()
     }
 

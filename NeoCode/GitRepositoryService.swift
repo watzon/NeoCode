@@ -133,6 +133,7 @@ struct GitRepositoryService: Sendable {
 
             let gitDirectoryURL = URL(fileURLWithPath: gitDirectoryPath, isDirectory: true)
             return [
+                gitDirectoryURL.appendingPathComponent("index", isDirectory: false),
                 gitDirectoryURL.appendingPathComponent("HEAD", isDirectory: false),
                 gitDirectoryURL.appendingPathComponent("refs/heads", isDirectory: true),
                 gitDirectoryURL.appendingPathComponent("refs/remotes", isDirectory: true),

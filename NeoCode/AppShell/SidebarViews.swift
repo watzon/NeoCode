@@ -409,7 +409,7 @@ struct SessionTreeRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Text(session.title)
+            Text(currentSession.title)
                 .font(.neoBody)
                 .foregroundStyle(isSelected ? NeoCodeTheme.textPrimary : NeoCodeTheme.textSecondary)
                 .lineLimit(1)
@@ -434,7 +434,7 @@ struct SessionTreeRow: View {
                     }
                 },
                 onRename: {
-                    renameTitle = session.title
+                    renameTitle = currentSession.title
                     isRenaming = true
                 },
                 onDelete: {
@@ -448,7 +448,7 @@ struct SessionTreeRow: View {
             TextField(localized("Thread name", locale: locale), text: $renameTitle)
                 .neoWritingToolsDisabled()
             Button(localized("Cancel", locale: locale), role: .cancel) {
-                renameTitle = session.title
+                renameTitle = currentSession.title
             }
             Button(localized("Save", locale: locale)) {
                 let newTitle = renameTitle
@@ -493,7 +493,7 @@ struct SessionTreeRow: View {
                     }
                 },
                 onRename: {
-                    renameTitle = session.title
+                    renameTitle = currentSession.title
                     isRenaming = true
                 },
                 onDelete: {
@@ -525,8 +525,12 @@ struct SessionTreeRow: View {
         return AnyShapeStyle(.clear)
     }
 
+    private var currentSession: SessionSummary {
+        store.sessionSummary(for: session.id) ?? session
+    }
+
     private var relativeAge: String {
-        let seconds = max(0, Int(Date().timeIntervalSince(session.lastUpdatedAt)))
+        let seconds = max(0, Int(Date().timeIntervalSince(currentSession.lastUpdatedAt)))
 
         if seconds < 60 {
             return localized("now", locale: locale)
@@ -558,7 +562,7 @@ struct SessionTreeRow: View {
             return localized("failed", locale: locale)
         }
 
-        switch session.status {
+        switch currentSession.status {
         case .idle:
             return nil
         case .running:
@@ -581,7 +585,7 @@ struct SessionTreeRow: View {
             return .warning
         }
 
-        switch session.status {
+        switch currentSession.status {
         case .idle, .running:
             return .accent
         case .awaitingInput, .retrying, .error:

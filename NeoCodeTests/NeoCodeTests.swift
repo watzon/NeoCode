@@ -1272,6 +1272,18 @@ struct NeoCodeCoreTests {
     }
 
     @MainActor
+    @Test func gitRepositoryMetadataWatchURLsIncludeIndex() async throws {
+        let repoURL = try createTemporaryGitRepository()
+        defer { try? FileManager.default.removeItem(at: repoURL) }
+
+        let watchURLs = await GitRepositoryService().metadataWatchURLs(in: repoURL.path)
+        let watchedNames = Set(watchURLs.map(\.lastPathComponent))
+
+        #expect(watchedNames.contains("index"))
+        #expect(watchedNames.contains("HEAD"))
+    }
+
+    @MainActor
     @Test func gitCommitPreviewUsesCombinedPendingStatsForPartiallyStagedLines() async throws {
         let repoURL = try createTemporaryGitRepository()
         defer { try? FileManager.default.removeItem(at: repoURL) }
@@ -1490,6 +1502,35 @@ struct NeoCodeMainActorTests {
         store.selectSession("ses_1")
         #expect(store.selectedSession?.status == .idle)
         #expect(store.selectedSessionActivity == nil)
+    }
+
+    @MainActor
+    @Test func appStoreBumpsSessionUIRevisionWhenSessionStatusChanges() {
+        let store = AppStore(projects: [
+            ProjectSummary(
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(id: "ses_1", title: "Existing", lastUpdatedAt: .distantPast),
+                ]
+            ),
+        ])
+
+        store.selectSession("ses_1")
+        let initialRevision = store.sessionUIRevision
+
+        store.apply(event: .messagePartDelta(OpenCodePartDelta(
+            sessionID: "ses_1",
+            messageID: "msg_1",
+            partID: "part_1",
+            field: "text",
+            delta: "Working"
+        )))
+        let runningRevision = store.sessionUIRevision
+        store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .idle))
+
+        #expect(runningRevision > initialRevision)
+        #expect(store.sessionUIRevision > runningRevision)
     }
 
     @MainActor
