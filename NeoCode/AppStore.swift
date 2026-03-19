@@ -462,6 +462,11 @@ final class AppStore {
         )
     }
 
+    var selectedSessionIsActivelyResponding: Bool {
+        guard let selectedSessionID else { return false }
+        return isSessionActivelyResponding(selectedSessionID)
+    }
+
     func project(for sessionID: String) -> ProjectSummary? {
         projects.first(where: { project in
             project.sessions.contains(where: { $0.id == sessionID })
@@ -1896,8 +1901,7 @@ final class AppStore {
 
     func stopSelectedSession(using runtime: OpenCodeRuntime) async {
         guard let sessionID = selectedSessionID,
-              let projectID = projectID(for: sessionID),
-              session(for: sessionID)?.status.isActive == true
+              let projectID = projectID(for: sessionID)
         else { return }
 
         guard let service = await liveService(for: projectID, runtime: runtime) else {
@@ -1905,17 +1909,32 @@ final class AppStore {
             return
         }
 
+        _ = await stopSession(sessionID: sessionID, projectID: projectID, using: service)
+        reevaluateRuntimeRetention(using: runtime)
+    }
+
+    @discardableResult
+    func stopSession(
+        sessionID: String,
+        projectID: ProjectSummary.ID,
+        using service: any OpenCodeServicing
+    ) async -> Bool {
+        guard isSessionActivelyResponding(sessionID) else { return false }
+
         do {
             logger.info("Aborting session: \(sessionID, privacy: .public)")
             cancelStreamingRecoveryCheck(for: sessionID)
             flushBufferedTextDeltas(for: sessionID, projectID: projectID)
             try await service.abortSession(sessionID: sessionID)
+            liveSessionStatuses[sessionID] = .idle
+            settleSessionActivity(sessionID: sessionID, projectID: projectID)
+            refreshSessionStatus(sessionID: sessionID, projectID: projectID)
             lastError = nil
-            reevaluateRuntimeRetention(using: runtime)
+            return true
         } catch {
             logger.error("Failed to abort session \(sessionID, privacy: .public): \(error.localizedDescription, privacy: .public)")
             lastError = error.localizedDescription
-            reevaluateRuntimeRetention(using: runtime)
+            return false
         }
     }
 
@@ -2414,7 +2433,7 @@ final class AppStore {
             let previousStatus = liveSessionStatuses[sessionID]
             liveSessionStatuses[sessionID] = status
             if case .idle = status {
-                clearLocalSessionActivity(sessionID)
+                settleSessionActivity(sessionID: sessionID, projectID: projectID)
             }
             refreshSessionStatus(sessionID: sessionID, projectID: projectID)
             notifyIfNeededForCompletedResponse(sessionID: sessionID, previousStatus: previousStatus, status: status)
@@ -4366,6 +4385,23 @@ final class AppStore {
         }
     }
 
+    private func settleSessionActivity(sessionID: String, projectID: ProjectSummary.ID) {
+        flushBufferedTextDeltas(for: sessionID, projectID: projectID)
+        clearLocalSessionActivity(sessionID)
+
+        guard let indices = indices(for: sessionID, projectID: projectID) else { return }
+
+        var transcript = transcript(for: sessionID)
+        guard transcript.contains(where: \.isInProgress) else { return }
+
+        for index in transcript.indices where transcript[index].isInProgress {
+            transcript[index].isInProgress = false
+        }
+
+        setTranscript(transcript, for: sessionID)
+        projects[indices.project].sessions[indices.session].lastUpdatedAt = transcript.last?.timestamp ?? projects[indices.project].sessions[indices.session].lastUpdatedAt
+    }
+
     private func hasBufferedTextDeltas(for sessionID: String) -> Bool {
         bufferedTextDeltas.keys.contains { $0.sessionID == sessionID }
     }
@@ -5411,6 +5447,23 @@ final class AppStore {
 
     private func isSessionLocallyActive(_ sessionID: String) -> Bool {
         locallyActiveSessionIDs.contains(sessionID)
+    }
+
+    private func isSessionActivelyResponding(_ sessionID: String) -> Bool {
+        if let activity = effectiveLiveSessionActivity(for: sessionID, transcript: transcript(for: sessionID)) {
+            switch activity {
+            case .busy, .retry:
+                return true
+            case .idle:
+                return false
+            }
+        }
+
+        if session(for: sessionID)?.status.isActive == true {
+            return true
+        }
+
+        return isSessionLocallyActive(sessionID) || hasBufferedTextDeltas(for: sessionID)
     }
 
     @discardableResult

@@ -43,6 +43,9 @@ struct ComposerTodoPanel: View {
 
     let items: [SessionTodoItem]
 
+    private let maxVisibleRows = 5
+    private let rowHeight: CGFloat = 58
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 8) {
@@ -65,16 +68,19 @@ struct ComposerTodoPanel: View {
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(items.enumerated()), id: \.element.id) { entry in
-                    ComposerTodoPanelRow(item: entry.element)
+            ScrollView(.vertical, showsIndicators: items.count > maxVisibleRows) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(items.enumerated()), id: \.element.id) { entry in
+                        ComposerTodoPanelRow(item: entry.element)
 
-                    if entry.offset < items.count - 1 {
-                        Divider()
-                            .padding(.leading, 36)
+                        if entry.offset < items.count - 1 {
+                            Divider()
+                                .padding(.leading, 36)
+                        }
                     }
                 }
             }
+            .frame(maxHeight: CGFloat(min(items.count, maxVisibleRows)) * rowHeight)
         }
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)

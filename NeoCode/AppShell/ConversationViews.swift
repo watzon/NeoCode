@@ -144,6 +144,7 @@ struct ConversationView: View {
     private let todoPanelBottomSpacing: CGFloat = 12
     private let todoPanelTitleHeight: CGFloat = 40
     private let todoPanelRowHeight: CGFloat = 58
+    private let todoPanelMaxVisibleRows = 5
     private let loadingPromptFallbackHeight: CGFloat = 96
     private let permissionPromptFallbackHeight: CGFloat = 280
     private let questionPromptFallbackHeight: CGFloat = 360
@@ -791,7 +792,8 @@ struct ConversationView: View {
     private var todoPanelBottomInset: CGFloat {
         let todoCount = store.todos(for: sessionID).count
         guard isTodoListPresented, todoCount > 0 else { return 0 }
-        return todoPanelBottomSpacing + todoPanelTitleHeight + CGFloat(todoCount) * todoPanelRowHeight
+        let visibleRows = min(todoCount, todoPanelMaxVisibleRows)
+        return todoPanelBottomSpacing + todoPanelTitleHeight + CGFloat(visibleRows) * todoPanelRowHeight
     }
 
     private var queuedMessagesBottomInset: CGFloat {

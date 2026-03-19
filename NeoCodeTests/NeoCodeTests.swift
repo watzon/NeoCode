@@ -1492,6 +1492,82 @@ struct NeoCodeMainActorTests {
     }
 
     @MainActor
+    @Test func appStoreSettlesInProgressTranscriptWhenSessionTurnsIdle() {
+        let store = AppStore(projects: [
+            ProjectSummary(
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(
+                        id: "ses_1",
+                        title: "Existing",
+                        lastUpdatedAt: .distantPast,
+                        status: .running,
+                        transcript: [
+                            ChatMessage(
+                                id: "part_1",
+                                messageID: "msg_1",
+                                role: .assistant,
+                                text: "Done",
+                                timestamp: .now,
+                                emphasis: .normal,
+                                isInProgress: true
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+        ])
+
+        store.selectSession("ses_1")
+        store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .idle))
+
+        #expect(store.selectedSession?.status == .idle)
+        #expect(store.selectedSessionIsActivelyResponding == false)
+        #expect(store.selectedTranscript.first?.isInProgress == false)
+    }
+
+    @MainActor
+    @Test func appStoreStopSessionClearsActiveStateImmediately() async {
+        let projectID = UUID()
+        let store = AppStore(projects: [
+            ProjectSummary(
+                id: projectID,
+                name: "NeoCode",
+                path: "/tmp/NeoCode",
+                sessions: [
+                    SessionSummary(
+                        id: "ses_1",
+                        title: "Existing",
+                        lastUpdatedAt: .distantPast,
+                        status: .running,
+                        transcript: [
+                            ChatMessage(
+                                id: "part_1",
+                                messageID: "msg_1",
+                                role: .assistant,
+                                text: "Streaming",
+                                timestamp: .now,
+                                emphasis: .normal,
+                                isInProgress: true
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+        ])
+        let service = MockOpenCodeService()
+
+        store.selectSession("ses_1")
+
+        let didStop = await store.stopSession(sessionID: "ses_1", projectID: projectID, using: service)
+
+        #expect(didStop == true)
+        #expect(service.abortedSessionIDs == ["ses_1"])
+        #expect(store.projects[0].sessions[0].status == .idle)
+    }
+
+    @MainActor
     @Test func appStoreActivationIncrementsLifecycleRefreshToken() {
         let store = AppStore(projects: [])
 
@@ -4748,6 +4824,7 @@ private final class MockOpenCodeService: OpenCodeServicing {
     var repliedPermissionIDs: [String] = []
     var repliedQuestionIDs: [String] = []
     var rejectedQuestionIDs: [String] = []
+    var abortedSessionIDs: [String] = []
     var sendPromptError: Error?
     var createSessionError: Error?
     var createdSession: OpenCodeSession?
@@ -4797,7 +4874,9 @@ private final class MockOpenCodeService: OpenCodeServicing {
         return OpenCodeSession(id: sessionID, title: nil, parentID: nil, time: nil)
     }
 
-    func abortSession(sessionID: String) async throws {}
+    func abortSession(sessionID: String) async throws {
+        abortedSessionIDs.append(sessionID)
+    }
     func replyToPermission(requestID: String, reply: OpenCodePermissionReply, message: String?) async throws {
         repliedPermissionIDs.append(requestID)
     }
