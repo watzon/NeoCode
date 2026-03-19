@@ -488,7 +488,8 @@ struct MessageRowView: View {
                 MarkdownMessageView(
                     markdown: message.text,
                     baseFont: message.role == .assistant ? .neoBody : .neoMono,
-                    textColor: textColor
+                    textColor: textColor,
+                    renderCacheStyleID: "message-\(message.role.rawValue)-\(message.emphasis.rawValue)"
                 )
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -551,7 +552,12 @@ struct MessageRowView: View {
                 .foregroundStyle(textColor)
                 .textSelection(.enabled)
         } else {
-            MarkdownMessageView(markdown: message.text, baseFont: .neoMono, textColor: textColor)
+            MarkdownMessageView(
+                markdown: message.text,
+                baseFont: .neoMono,
+                textColor: textColor,
+                renderCacheStyleID: "user-\(message.emphasis.rawValue)"
+            )
         }
     }
 
@@ -621,26 +627,7 @@ struct MessageRowView: View {
     }
 
     private var highlightedUserMessageText: AttributedString? {
-        let sourceTexts = ComposerPromptFileReferenceBuilder.mentionSourceTexts(in: message.text)
-        guard !sourceTexts.isEmpty else { return nil }
-
-        var attributed = AttributedString(message.text)
-
-        for sourceText in sourceTexts {
-            let start = message.text.index(message.text.startIndex, offsetBy: sourceText.start)
-            let end = message.text.index(message.text.startIndex, offsetBy: sourceText.end)
-
-            guard let lowerBound = AttributedString.Index(start, within: attributed),
-                  let upperBound = AttributedString.Index(end, within: attributed)
-            else {
-                continue
-            }
-
-            attributed[lowerBound..<upperBound].foregroundColor = NeoCodeTheme.accent
-            attributed[lowerBound..<upperBound].backgroundColor = NeoCodeTheme.accentDim.opacity(0.42)
-        }
-
-        return attributed
+        UserMessageRenderCache.highlightedText(for: message.text)
     }
 
     private func copyMessageText() {
@@ -652,6 +639,54 @@ struct MessageRowView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
             didCopy = false
         }
+    }
+}
+
+private final class CachedHighlightedUserMessage: NSObject {
+    let value: AttributedString?
+
+    init(_ value: AttributedString?) {
+        self.value = value
+    }
+}
+
+private enum UserMessageRenderCache {
+    private static let highlightedTextCache: NSCache<NSString, CachedHighlightedUserMessage> = {
+        let cache = NSCache<NSString, CachedHighlightedUserMessage>()
+        cache.countLimit = 256
+        return cache
+    }()
+
+    static func highlightedText(for text: String) -> AttributedString? {
+        let key = text as NSString
+        if let cached = highlightedTextCache.object(forKey: key) {
+            return cached.value
+        }
+
+        let sourceTexts = ComposerPromptFileReferenceBuilder.mentionSourceTexts(in: text)
+        guard !sourceTexts.isEmpty else {
+            highlightedTextCache.setObject(CachedHighlightedUserMessage(nil), forKey: key)
+            return nil
+        }
+
+        var attributed = AttributedString(text)
+
+        for sourceText in sourceTexts {
+            let start = text.index(text.startIndex, offsetBy: sourceText.start)
+            let end = text.index(text.startIndex, offsetBy: sourceText.end)
+
+            guard let lowerBound = AttributedString.Index(start, within: attributed),
+                  let upperBound = AttributedString.Index(end, within: attributed)
+            else {
+                continue
+            }
+
+            attributed[lowerBound..<upperBound].foregroundColor = NeoCodeTheme.accent
+            attributed[lowerBound..<upperBound].backgroundColor = NeoCodeTheme.accentDim.opacity(0.42)
+        }
+
+        highlightedTextCache.setObject(CachedHighlightedUserMessage(attributed), forKey: key)
+        return attributed
     }
 }
 

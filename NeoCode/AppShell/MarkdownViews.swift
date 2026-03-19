@@ -5,7 +5,7 @@ struct AssistantOutputView: View {
     let message: ChatMessage
 
     var body: some View {
-        MarkdownMessageView(markdown: message.text, baseFont: .neoBody)
+        MarkdownMessageView(markdown: message.text, baseFont: .neoBody, renderCacheStyleID: "assistant-output")
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
@@ -24,7 +24,8 @@ struct ThinkingRowView: View {
             markdown: message.text,
             baseFont: .neoBody,
             textColor: NeoCodeTheme.textMuted,
-            leadingLabel: showsLabel ? MarkdownLeadingLabel(text: "Thinking: ", color: NeoCodeTheme.accent.opacity(0.72)) : nil
+            leadingLabel: showsLabel ? MarkdownLeadingLabel(text: "Thinking: ", color: NeoCodeTheme.accent.opacity(0.72)) : nil,
+            renderCacheStyleID: "assistant-thinking"
         )
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -40,12 +41,20 @@ struct MarkdownMessageView: View {
     let baseFont: Font
     let textColor: Color
     let leadingLabel: MarkdownLeadingLabel?
+    let renderCacheStyleID: String
 
-    init(markdown: String, baseFont: Font, textColor: Color = NeoCodeTheme.textPrimary, leadingLabel: MarkdownLeadingLabel? = nil) {
+    init(
+        markdown: String,
+        baseFont: Font,
+        textColor: Color = NeoCodeTheme.textPrimary,
+        leadingLabel: MarkdownLeadingLabel? = nil,
+        renderCacheStyleID: String = "default"
+    ) {
         self.markdown = markdown
         self.baseFont = baseFont
         self.textColor = textColor
         self.leadingLabel = leadingLabel
+        self.renderCacheStyleID = renderCacheStyleID
     }
 
     var body: some View {
@@ -57,7 +66,8 @@ struct MarkdownMessageView: View {
                         markdown: text,
                         baseFont: baseFont,
                         textColor: textColor,
-                        leadingLabel: index == 0 ? leadingLabel : nil
+                        leadingLabel: index == 0 ? leadingLabel : nil,
+                        renderCacheStyleID: renderCacheStyleID
                     )
                 case .code(let code):
                     VStack(alignment: .leading, spacing: 8) {
@@ -104,12 +114,20 @@ struct ProseMarkdownView: View {
     let baseFont: Font
     let textColor: Color
     let leadingLabel: MarkdownLeadingLabel?
+    let renderCacheStyleID: String
 
-    init(markdown: String, baseFont: Font, textColor: Color = NeoCodeTheme.textPrimary, leadingLabel: MarkdownLeadingLabel? = nil) {
+    init(
+        markdown: String,
+        baseFont: Font,
+        textColor: Color = NeoCodeTheme.textPrimary,
+        leadingLabel: MarkdownLeadingLabel? = nil,
+        renderCacheStyleID: String = "default"
+    ) {
         self.markdown = markdown
         self.baseFont = baseFont
         self.textColor = textColor
         self.leadingLabel = leadingLabel
+        self.renderCacheStyleID = renderCacheStyleID
     }
 
     var body: some View {
@@ -131,6 +149,27 @@ struct ProseMarkdownView: View {
     }
 
     private var segments: [MarkdownSegment] {
+        MarkdownRenderCache.segments(for: markdown, styleKey: segmentCacheKey) {
+            buildSegments()
+        }
+    }
+
+    private var segmentCacheKey: String {
+        let fontSignature = [
+            NeoCodeTheme.currentUIFontName,
+            NeoCodeTheme.currentCodeFontName,
+            "\(NeoCodeTheme.uiBaseFontSize)",
+            "\(NeoCodeTheme.codeBaseFontSize)"
+        ].joined(separator: "|")
+
+        if let leadingLabel {
+            return "\(renderCacheStyleID)|\(fontSignature)|\(leadingLabel.text)"
+        }
+
+        return "\(renderCacheStyleID)|\(fontSignature)"
+    }
+
+    private func buildSegments() -> [MarkdownSegment] {
         var results: [MarkdownSegment] = []
         var currentText = AttributedString()
 
@@ -437,6 +476,14 @@ private final class CachedInlineMarkdown: NSObject {
     }
 }
 
+private final class CachedMarkdownSegments: NSObject {
+    let value: [MarkdownSegment]
+
+    init(_ value: [MarkdownSegment]) {
+        self.value = value
+    }
+}
+
 private enum MarkdownRenderCache {
     private static let blockCache: NSCache<NSString, CachedMarkdownBlocks> = {
         let cache = NSCache<NSString, CachedMarkdownBlocks>()
@@ -453,6 +500,12 @@ private enum MarkdownRenderCache {
     private static let inlineAttributedCache: NSCache<NSString, CachedInlineMarkdown> = {
         let cache = NSCache<NSString, CachedInlineMarkdown>()
         cache.countLimit = 1024
+        return cache
+    }()
+
+    private static let segmentCache: NSCache<NSString, CachedMarkdownSegments> = {
+        let cache = NSCache<NSString, CachedMarkdownSegments>()
+        cache.countLimit = 512
         return cache
     }()
 
@@ -486,6 +539,17 @@ private enum MarkdownRenderCache {
 
         let parsed = parseInlineMarkdown(from: text)
         inlineAttributedCache.setObject(CachedInlineMarkdown(parsed), forKey: key)
+        return parsed
+    }
+
+    static func segments(for markdown: String, styleKey: String, builder: () -> [MarkdownSegment]) -> [MarkdownSegment] {
+        let key = "\(styleKey)\u{0}\(markdown)" as NSString
+        if let cached = segmentCache.object(forKey: key) {
+            return cached.value
+        }
+
+        let parsed = builder()
+        segmentCache.setObject(CachedMarkdownSegments(parsed), forKey: key)
         return parsed
     }
 

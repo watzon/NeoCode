@@ -129,6 +129,7 @@ struct ConversationView: View {
     @State private var fileMentionResults: [ProjectFileSearchResult] = []
     @State private var fileSearchTask: Task<Void, Never>?
     @State private var isTodoListPresented = false
+    @State private var renderedGroups: [DisplayMessageGroup] = []
 
     private let bottomAnchorSpacerHeight: CGFloat = 1
     private let autoScrollThreshold: CGFloat = 72
@@ -176,6 +177,7 @@ struct ConversationView: View {
             .onAppear {
                 composerFocused = promptSurface.isComposer
                 prepareSessionPresentation(using: proxy)
+                refreshRenderedGroups()
                 refreshFileMentionResults()
             }
             .task(id: sessionID) {
@@ -183,6 +185,7 @@ struct ConversationView: View {
             }
             .onChange(of: sessionID) { _, _ in
                 prepareSessionPresentation(using: proxy)
+                refreshRenderedGroups()
                 composerFocused = promptSurface.isComposer
                 isTodoListPresented = false
             }
@@ -216,11 +219,17 @@ struct ConversationView: View {
                 }
             }
             .onChange(of: transcriptRevision) { oldValue, newValue in
+                refreshRenderedGroups()
                 guard oldValue != newValue, isPinnedToBottom else { return }
                 maintainPinnedPosition(using: proxy, animated: true)
             }
+            .onChange(of: loadedMessageCount) { _, _ in
+                refreshRenderedGroups()
+            }
             .onChange(of: store.loadingTranscriptSessionID) { _, _ in
                 guard isAwaitingInitialScroll, !shouldShowTranscriptLoadingState else { return }
+
+                refreshRenderedGroups()
 
                 if transcriptCount > 0 {
                     completeInitialScroll(using: proxy)
@@ -500,7 +509,7 @@ struct ConversationView: View {
                             InlineStatusView(text: error, tone: .warning)
                         }
 
-                        VStack(alignment: .leading, spacing: 18) {
+                        LazyVStack(alignment: .leading, spacing: 18) {
                             ForEach(renderedGroups) { group in
                                 transcriptGroupView(group)
                             }
@@ -824,10 +833,6 @@ struct ConversationView: View {
         }
     }
 
-    private var renderedGroups: [DisplayMessageGroup] {
-        buildDisplayMessageGroups(from: Array(transcript.suffix(loadedMessageCount)))
-    }
-
     private var session: SessionSummary? {
         store.sessionSummary(for: sessionID)
     }
@@ -976,6 +981,10 @@ struct ConversationView: View {
     private func resetLoadedMessageWindow() {
         loadedMessageCount = min(transcriptPageSize, transcriptCount)
         isLoadingOlderMessages = false
+    }
+
+    private func refreshRenderedGroups() {
+        renderedGroups = buildDisplayMessageGroups(from: Array(transcript.suffix(loadedMessageCount)))
     }
 
     private func prepareSessionPresentation(using proxy: ScrollViewProxy) {
