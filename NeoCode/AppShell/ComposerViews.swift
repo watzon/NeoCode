@@ -961,7 +961,14 @@ struct GrowingTextView: NSViewRepresentable {
         textView.projectPath = projectPath
         textView.updatePlaceholderVisibility()
 
-        if let selectionRequest, context.coordinator.lastSelectionRequestID != selectionRequest.id {
+        if let selectionRequest,
+           selectionRequest.text != text {
+            DispatchQueue.main.async {
+                if self.selectionRequest?.id == selectionRequest.id {
+                    self.selectionRequest = nil
+                }
+            }
+        } else if let selectionRequest, context.coordinator.lastSelectionRequestID != selectionRequest.id {
             context.coordinator.lastSelectionRequestID = selectionRequest.id
             textView.string = selectionRequest.text
             textView.setSelectedRange(NSRange(location: selectionRequest.cursorLocation, length: 0))
