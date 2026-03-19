@@ -7,7 +7,7 @@ import Sparkle
 @MainActor
 @Observable
 final class AppUpdateService: NSObject, SPUUpdaterDelegate {
-    @ObservationIgnored private static let automaticCheckInterval: TimeInterval = 60 * 60 * 6
+    @ObservationIgnored private static let automaticCheckInterval: TimeInterval = 60 * 60
     struct UpdateRelease: Equatable {
         let displayVersion: String
         let buildVersion: String?
@@ -95,7 +95,6 @@ final class AppUpdateService: NSObject, SPUUpdaterDelegate {
             phase = .upToDate(lastCheckedAt)
         }
 
-        performLaunchBackgroundCheckIfNeeded(using: updater)
     }
 
     var installedVersionDescription: String {
@@ -450,13 +449,6 @@ final class AppUpdateService: NSObject, SPUUpdaterDelegate {
         default:
             return false
         }
-    }
-
-    private func performLaunchBackgroundCheckIfNeeded(using updater: SPUUpdater) {
-        guard updater.automaticallyChecksForUpdates else { return }
-
-        logger.info("Checking for updates in background on launch")
-        updater.checkForUpdatesInBackground()
     }
 
     private func refreshLastCheckedAt(using updater: SPUUpdater) {
