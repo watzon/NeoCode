@@ -95,6 +95,7 @@ struct AppearanceSettingsView: View {
                     )
                 }
             }
+
         }
         .frame(maxWidth: 720, alignment: .leading)
         .frame(maxWidth: .infinity, alignment: .center)
@@ -217,6 +218,7 @@ struct AppearanceSettingsView: View {
             break
         }
     }
+
 }
 
 private struct AppearanceThemePreview: View {
@@ -268,6 +270,7 @@ private struct AppearancePreviewPane: View {
                 Text(verbatim: "  accent: \"\(profile.accentHex.uppercased())\",")
                     .foregroundStyle(accent)
                 Text(verbatim: "  background: \"\(profile.backgroundHex.uppercased())\",")
+                Text(verbatim: "  sidebar: \"\(profile.isSidebarTranslucent ? "translucent" : "solid")\",")
                 Text(verbatim: "  uiFont: \"\(uiFontTitle)\",")
                 Text(verbatim: "  codeFont: \"\(codeFontTitle)\",")
                 Text(verbatim: "  contrast: \(Int(profile.contrast))")
@@ -365,6 +368,18 @@ private struct AppearanceThemeEditorCard: View {
                                 .foregroundStyle(NeoCodeTheme.textSecondary)
                                 .frame(width: 30, alignment: .trailing)
                         }
+                    }
+                )
+
+                SettingsDivider()
+
+                SettingsControlRow(
+                    title: localized("Translucent Sidebar", locale: locale),
+                    detail: localized("Keeps the sidebar itself clear and makes the app background subtly translucent for this theme.", locale: locale),
+                    accessory: {
+                        Toggle(localized("Translucent Sidebar", locale: locale), isOn: $profile.isSidebarTranslucent)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
                     }
                 )
 

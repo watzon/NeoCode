@@ -41,6 +41,13 @@ struct WindowChromeConfigurator: NSViewRepresentable {
         window.titlebarAppearsTransparent = true
         window.isMovableByWindowBackground = false
         window.styleMask.insert(.fullSizeContentView)
+        if NeoCodeTheme.isSidebarTranslucent {
+            window.isOpaque = false
+            window.backgroundColor = .clear
+        } else {
+            window.isOpaque = true
+            window.backgroundColor = NeoCodeTheme.canvasColor
+        }
         window.minSize = NSSize(width: 980, height: 600)
         updateService.attach(to: window)
     }

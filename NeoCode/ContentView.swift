@@ -26,7 +26,16 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .ignoresSafeArea(.container, edges: .top)
-        .background(NeoCodeTheme.canvas.ignoresSafeArea())
+        .background(
+            Group {
+                if NeoCodeTheme.isSidebarTranslucent {
+                    NeoCodeTheme.canvas.opacity(NeoCodeTheme.windowWashOpacity)
+                } else {
+                    NeoCodeTheme.canvas
+                }
+            }
+            .ignoresSafeArea()
+        )
         .background(WindowChromeConfigurator(updateService: updateService))
         .overlay(alignment: .topTrailing) {
             if let toastMessage {

@@ -5,7 +5,6 @@ struct NeoCodeAppearanceSettings: Codable, Hashable {
     static let maximumUIFontSize = 18.0
     static let minimumCodeFontSize = 11.0
     static let maximumCodeFontSize = 18.0
-
     var themeMode: NeoCodeThemeMode
     var lightTheme: NeoCodeThemeProfile
     var darkTheme: NeoCodeThemeProfile

@@ -34,6 +34,7 @@ enum NeoCodeTheme {
     static var diffRemovedText: Color { dynamicColor(\.diffRemovedText) }
     static var diffHunkBackground: Color { dynamicColor(\.diffHunkBackground) }
     static var diffHunkText: Color { dynamicColor(\.diffHunkText) }
+    static var canvasColor: NSColor { dynamicNSColor(\.canvas) }
     static var panelColor: NSColor { dynamicNSColor(\.panel) }
     static var panelRaisedColor: NSColor { dynamicNSColor(\.panelRaised) }
     static var lineColor: NSColor { dynamicNSColor(\.line) }
@@ -56,6 +57,14 @@ enum NeoCodeTheme {
 
     static var currentCodeFontName: String {
         activeThemeProfile.codeFontName
+    }
+
+    static var isSidebarTranslucent: Bool {
+        activeThemeProfile.isSidebarTranslucent
+    }
+
+    static var windowWashOpacity: Double {
+        0.99
     }
 
     static func uiAppKitFont(size: CGFloat, weight: NSFont.Weight = .regular) -> NSFont {
