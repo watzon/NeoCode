@@ -2,205 +2,144 @@
 
 ## Purpose
 
-- This repo is a macOS SwiftUI client for OpenCode.
-- The app launches per-project OpenCode runtimes, connects over HTTP/SSE, and renders sessions, transcript items, tool output, permissions, questions, and composer state.
-- Prefer repository-specific behavior over generic Swift or SwiftUI advice.
+- This repo is a native macOS SwiftUI client for OpenCode.
+- The app launches one OpenCode runtime per project, talks to it over HTTP and SSE, and renders sessions, transcript parts, tool output, questions, permissions, todos, and git state.
+- Prefer repository-specific guidance over generic SwiftUI advice.
 
-## Repo Snapshot
+## Repo Facts
 
 - Xcode project: `NeoCode.xcodeproj`
-- App scheme: `NeoCode`
+- Main scheme: `NeoCode`
 - Targets: `NeoCode`, `NeoCodeTests`, `NeoCodeUITests`
-- Release docs: `BUILD.md`, `RELEASING.md`, and `justfile`
-- No `Package.swift`, no SwiftLint config, no SwiftFormat config, no test plan file
-- Checked repo-local rules: no `.cursor/rules/`, no `.cursorrules`, and no `.github/copilot-instructions.md`
+- Command runner: `just`
+- Release docs: `BUILD.md`, `RELEASING.md`, `TRANSLATIONS.md`
+- Repo-local AI rule files checked: no `.cursor/rules/`, no `.cursorrules`, no `.github/copilot-instructions.md`
 
-## Current File Layout
+## Project Layout
 
-- `NeoCode/AppShell/`: split SwiftUI shell views for composer, conversation, sidebar, markdown, prompts, and transcript rows
-- `NeoCode/OpenCode/`: HTTP client, SSE parser, event decoder, and transport/domain models
-- `NeoCode/Models/`: app-side project/session/composer models
-- `NeoCode/Persistence/`: `UserDefaults` and cache-backed persistence helpers for store state
-- Root app files in `NeoCode/`: `NeoCodeApp.swift`, `ContentView.swift`, `AppStore.swift`, `OpenCodeRuntime.swift`, theme, git services, and workspace tool discovery
+- `NeoCode/NeoCodeApp.swift`: app entry and test-host bootstrapping
+- `NeoCode/ContentView.swift`: top-level split view shell and startup gating
+- `NeoCode/AppStore.swift`: main app state, orchestration, persistence hooks, event application, queued sends, dashboard state, git refresh, and composer options
+- `NeoCode/AppStore+ComposerOptions.swift`, `NeoCode/AppStore+Git.swift`: store extensions for focused concerns
+- `NeoCode/OpenCodeRuntime.swift`: launches `opencode serve`, resolves executables, tracks per-project runtime state, and performs health checks
+- `NeoCode/OpenCode/`: transport layer (`OpenCodeClient.swift`, `OpenCodeEventDecoder.swift`, `OpenCodeModels.swift`, `OpenCodeSSE.swift`, `OpenCodeRuntimeHealthClient.swift`)
+- `NeoCode/AppShell/`: split SwiftUI feature views for conversation, composer, sidebar, markdown, diff, dashboard, settings, git, prompt surface, transcript, and window chrome
+- `NeoCode/Models/`: app-side models for sessions, dashboard, diff, tool calls, settings, themes, and composer state
+- `NeoCode/Persistence/`: `UserDefaults` and cache-backed persistence helpers
+- `NeoCodeTests/`: Swift Testing suites
+- `NeoCodeUITests/`: XCTest launch and smoke coverage
 
-## High-Value Paths
+## Build, Test, And Release
 
-- `NeoCode/NeoCodeApp.swift`: app entry point; creates `AppStore` and `OpenCodeRuntime` with `@State`, injects them into the environment
-- `NeoCode/ContentView.swift`: top-level split view shell; gates runtime bootstrapping during UI tests with `NEOCODE_UI_TEST_MODE`
-- `NeoCode/AppShell/ComposerViews.swift`: composer UI, attachments, slash commands, branch creation, and shell window behavior
-- `NeoCode/AppShell/ConversationViews.swift` and `NeoCode/AppShell/ConversationHeaderViews.swift`: conversation layout, session header, git actions, and runtime header state
-- `NeoCode/AppShell/PromptSurfaceViews.swift`, `NeoCode/AppShell/TranscriptViews.swift`, `NeoCode/AppShell/MarkdownViews.swift`, and `NeoCode/AppShell/SidebarViews.swift`: prompts, transcript rows, markdown rendering, and project/session navigation
-- `NeoCode/AppStore.swift`: main app state, persistence hooks, session orchestration, live service caching, event application, and composer options
-- `NeoCode/OpenCodeRuntime.swift`: launches `opencode serve`, resolves executables, owns per-project runtime state, and performs health checks
-- `NeoCode/OpenCode/OpenCodeClient.swift`: HTTP transport and request building; defines `OpenCodeServicing`
-- `NeoCode/OpenCode/OpenCodeEventDecoder.swift`, `NeoCode/OpenCode/OpenCodeModels.swift`, and `NeoCode/OpenCode/OpenCodeSSE.swift`: event decoding, transport models, and SSE framing
-- `NeoCode/Persistence/AppStorePersistence.swift`: persisted project, draft, and yolo preference storage
-- `NeoCode/GitBranchService.swift`, `NeoCode/GitRepositoryService.swift`, and `NeoCode/WorkspaceToolService.swift`: git helpers plus external editor/file-manager discovery
-- `NeoCode/Theme.swift`: canonical color and font tokens
-- `NeoCodeTests/NeoCodeTests.swift`: Swift `Testing` suite for decoding, store behavior, and request building
-- `NeoCodeUITests/`: XCTest smoke tests for launch behavior
-- `BUILD.md` and `RELEASING.md`: canonical release prep, Sparkle, signing, notarization, and GitHub release workflow
-
-## Build And Test Commands
-
-- List schemes and targets: `xcodebuild -list -project "NeoCode.xcodeproj"`
-- Build app: `xcodebuild build -project "NeoCode.xcodeproj" -scheme "NeoCode" -destination 'platform=macOS'`
-- Run all tests: `xcodebuild test -project "NeoCode.xcodeproj" -scheme "NeoCode" -destination 'platform=macOS'`
+- List schemes: `xcodebuild -list -project "NeoCode.xcodeproj"`
+- Debug build: `just build` or `xcodebuild build -project "NeoCode.xcodeproj" -scheme "NeoCode" -configuration Debug -derivedDataPath DerivedData`
+- Release build: `just build-release`
+- Run all tests: `just test` or `xcodebuild test -project "NeoCode.xcodeproj" -scheme "NeoCode" -destination 'platform=macOS'`
 - Run unit tests only: `xcodebuild test -project "NeoCode.xcodeproj" -scheme "NeoCode" -destination 'platform=macOS' -only-testing:NeoCodeTests`
 - Run UI tests only: `xcodebuild test -project "NeoCode.xcodeproj" -scheme "NeoCode" -destination 'platform=macOS' -only-testing:NeoCodeUITests`
-- Run one Swift Testing case: `xcodebuild test -project "NeoCode.xcodeproj" -scheme "NeoCode" -destination 'platform=macOS' -only-testing:NeoCodeTests/NeoCodeTests/<test-name>`
+- Run one Swift Testing suite or case: `xcodebuild test -project "NeoCode.xcodeproj" -scheme "NeoCode" -destination 'platform=macOS' -only-testing:NeoCodeTests/<SuiteName>` or `-only-testing:NeoCodeTests/<SuiteName>/<test-name>`
 - Run one UI test: `xcodebuild test -project "NeoCode.xcodeproj" -scheme "NeoCode" -destination 'platform=macOS' -only-testing:NeoCodeUITests/NeoCodeUITests/<test-name>`
+- Release helpers live in `justfile`; common commands include `just archive`, `just export-app`, `just dmg`, `just notarize dist/NeoCode.dmg`, `just staple dist/NeoCode.dmg`, and `just release X.Y.Z`
 
-## Localization And Translations
+## Toolchain And Platform
 
-The app uses Xcode String Catalogs (`.xcstrings`) for localization with XLIFF export/import for translation workflow:
-
-### Supported Languages
-- English (en) - Source language
-- Spanish (es)
-- Portuguese (pt)
-- French (fr)
-- Italian (it)
-
-### Translation Workflow
-
-**Export localizations to XLIFF:**
-```bash
-./export_localizations.sh
-```
-This generates `.xcloc` bundles in `Localizations/` directory with `.xliff` files for each language.
-
-**Translate XLIFF files:**
-- Edit `.xliff` files directly in `Localizations/<lang>.xcloc/Localized Contents/`
-- Or open `.xcloc` bundles in Xcode's XLIFF editor
-- Fill in `<target>` elements and change `state="new"` to `state="translated"`
-
-**Import translations back:**
-```bash
-./import_localizations.sh
-```
-
-### Key Files
-- `NeoCode/Localization/Localizable.xcstrings` - Main string catalog (source of truth)
-- `NeoCode/AppLocalization.swift` - Language enum and localization helpers
-- `TRANSLATIONS.md` - Detailed translation workflow documentation
-
-### Adding A New Language
-1. Add case to `NeoCodeAppLanguage` enum in `NeoCode/AppLocalization.swift`
-2. Add language name key to `Localizable.xcstrings`
-3. Run `./export_localizations.sh` with new language
-4. Translate the XLIFF file
-5. Run `./import_localizations.sh`
-6. Update `TRANSLATIONS.md` with new language status
-
-## Linting And Verification Expectations
-
-- There is no dedicated lint command in the repo.
-- Treat compiler warnings, language-server diagnostics, and focused `xcodebuild` runs as the lint layer.
-- Before larger edits, prefer language-server diagnostics for quick Swift feedback.
-- Before finishing, run the narrowest relevant `xcodebuild` command that exercises the changed area.
-- If you touch `NeoCode/OpenCode/`, `NeoCode/Models/`, or event application in `NeoCode/AppStore.swift`, run unit tests.
-- If you touch launch behavior, shell layout, or window chrome, run at least the UI smoke tests if feasible.
-
-## Platform And Toolchain Facts
-
-- Platform: macOS
-- Deployment target: macOS 26.1
-- Swift version in project settings: 5.0
-- App target enables `SWIFT_APPROACHABLE_CONCURRENCY = YES`
-- App target enables `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`
-- Test targets also enable approachable concurrency
+- Project deployment target in `NeoCode.xcodeproj/project.pbxproj`: macOS 14.0
+- Swift version: 5.0
+- `SWIFT_APPROACHABLE_CONCURRENCY = YES` for app and test targets
+- `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` for the app target
+- The app still follows main-actor-owned state even where project settings are permissive
 
 ## Architecture Rules
 
-- Keep `NeoCode/NeoCodeApp.swift` and `NeoCode/ContentView.swift` thin; they should mostly wire environment state and high-level layout.
-- `AppStore` is the main state owner; session selection, persistence, transport coordination, and server event application belong there.
+- Keep `NeoCode/NeoCodeApp.swift` and `NeoCode/ContentView.swift` thin; they should mostly wire state, scenes, and top-level layout.
+- `AppStore` is the primary state owner. Session selection, event application, persistence coordination, queued sends, notifications, dashboard refresh, and runtime-facing orchestration belong there.
 - `OpenCodeRuntime` is the only place that should launch, stop, or health-check the OpenCode server process.
-- `OpenCodeClient` and the other files in `NeoCode/OpenCode/` own HTTP, SSE, and payload decoding; do not move transport logic into views.
-- Keep git-specific shelling out inside `GitBranchService` and `GitRepositoryService` instead of scattering `Process` usage.
-- Keep workspace app/editor discovery inside `WorkspaceToolService`.
-- Add new files near the layer they belong to; do not mix UI, runtime, persistence, and transport concerns.
+- Keep HTTP request construction inside `NeoCode/OpenCode/OpenCodeClient.swift`.
+- Keep SSE framing inside `NeoCode/OpenCode/OpenCodeSSE.swift` and server event decoding inside `NeoCode/OpenCode/OpenCodeEventDecoder.swift`.
+- Keep git shelling-out isolated to `GitRepositoryService.swift` and `GitBranchService.swift`.
+- Keep external app and editor discovery in `WorkspaceToolService.swift`.
+- Place new files beside the layer they belong to; do not mix UI, transport, persistence, and process concerns.
 
-## State Management Rules
+## State And Concurrency Conventions
 
-- Follow the Observation pattern already in use.
-- Shared mutable app state belongs in `@Observable` reference types such as `AppStore` and `OpenCodeRuntime`.
-- Preserve `@MainActor` on observable state containers and actor-sensitive tests.
-- Access shared state in views with `@Environment(AppStore.self)` and `@Environment(OpenCodeRuntime.self)`.
+- Shared mutable state lives in `@Observable` reference types such as `AppStore`, `OpenCodeRuntime`, and `AppUpdateService`.
+- Preserve `@MainActor` on state containers and actor-sensitive tests.
+- Views access app state through `@Environment(AppStore.self)` and `@Environment(OpenCodeRuntime.self)`.
+- Use `Task` from UI handlers to bridge into async work, but keep the real side effects in store, runtime, or service layers.
+- Be careful with long-lived tasks already tracked by the store: refresh, event subscription, runtime idle shutdown, streaming recovery, persistence, dashboard refresh, and git debounce tasks.
 - Do not introduce singleton globals for app state.
 
-## Type And Modeling Rules
+## Type And Modeling Conventions
 
-- Prefer `struct` for app models and transport payloads, following patterns like `ProjectSummary`, `SessionSummary`, `OpenCodeSession`, and `OpenCodeCommand`.
-- Existing models commonly conform to `Codable` or `Decodable` plus `Identifiable`, `Equatable`, or `Hashable`; match the nearby pattern instead of inventing a new one.
-- Use `JSONValue` for mixed-shape server payloads instead of ad hoc `[String: Any]` dictionaries.
-- Reuse `JSONDecoder.opencode` for server timestamps and mixed date formats.
-- When storing protocol-typed services, use the current `any OpenCodeServicing` style.
+- Prefer `struct` for transport and domain models, matching patterns like `ProjectSummary`, `SessionSummary`, `OpenCodeSession`, `OpenCodeCommand`, and theme/settings models.
+- Existing models usually conform to `Codable` or `Decodable` plus `Equatable`, `Hashable`, or `Identifiable`; match nearby types.
+- Protocol-typed services use existential syntax such as `any OpenCodeServicing`.
+- Reuse `JSONDecoder.opencode` for server payloads and date parsing.
+- Use `JSONValue` for mixed-shape server payloads instead of inventing `[String: Any]` plumbing.
 
-## Naming And Style Conventions
+## Naming And Style
 
 - Types use UpperCamelCase.
-- Properties, functions, enum cases, and locals use lowerCamelCase.
-- Prefer names that describe role and UI meaning instead of implementation trivia.
-- View types are noun-based and feature-scoped, for example `ComposerView`, `ConversationScreen`, `SessionHeaderView`, and `MessageRowView`.
-- Service and store types are also noun-based, for example `OpenCodeRuntime`, `GitRepositoryService`, and `WorkspaceToolService`.
-- Favor small computed properties and focused helpers over long inline branching in `body` implementations.
+- Properties, methods, enum cases, and locals use lowerCamelCase.
+- Keep names feature-scoped and role-based: `ConversationViews`, `DashboardSnapshot`, `WorkspaceToolService`, `GitOperationState`.
+- Prefer small computed properties and focused helpers over long `body` branches or giant inline transforms.
+- Follow the existing split-by-feature file organization inside `NeoCode/AppShell/` and `NeoCode/Models/`.
+- Reuse existing terminology from the app: project, session, transcript, prompt, permission, question, todo, dashboard, runtime.
 
-## SwiftUI Conventions
+## SwiftUI And UI Rules
 
-- Reuse `NeoCodeTheme` colors and `Font.neo*` tokens before introducing new styling constants.
-- Match the existing warm, dark, terminal-adjacent visual language.
-- Keep the current split AppShell structure; add UI code to the relevant file in `NeoCode/AppShell/` instead of reintroducing a monolithic shell view file.
-- For app-owned UI copy, prefer the shared localization helpers and `NeoCode/Localization/Localizable.xcstrings`; keep user-facing strings translatable and respect the app-selected locale instead of hardcoding English in views or models.
+- Reuse `NeoCodeTheme` colors and `Font.neo*` tokens before adding new styling constants.
+- Preserve the app's warm, terminal-adjacent aesthetic rather than introducing a generic Apple-default look.
+- Keep user-facing copy localizable; add strings through `NeoCode/Localization/Localizable.xcstrings` and the app localization helpers rather than hardcoding English.
 - Keep previews working when touching previewed views.
-- Preserve the existing minimum window sizing expectations around `980x600` unless the task explicitly changes shell layout requirements.
+- Preserve the hidden-title-bar window treatment and current minimum-size expectations unless the task explicitly changes shell layout.
+- When changing transcript or conversation chrome, verify accessibility identifiers used by UI tests such as `conversation.transcript.scrollView` and `conversation.backToBottom` still work.
 
-## Concurrency Conventions
+## Error Handling And Logging
 
-- The app defaults toward main-actor-owned state.
-- Use `Task` from UI handlers when bridging async work from taps, menus, or gestures.
-- Keep async side effects in store, runtime, service, or transport layers rather than rendering helpers.
-- Be careful with long-lived tasks in `AppStore`; the store already tracks refresh, persistence, runtime idle, event subscription, and streaming recovery tasks.
+- Prefer early `guard` exits for missing prerequisites; `AppStore.swift` relies on this style heavily.
+- Use `do`/`catch` around async service calls and surface user-visible failures through `lastError` or other explicit state.
+- Keep structured logging with `Logger(subsystem: "tech.watzon.NeoCode", category: ...)`.
+- Reuse typed `LocalizedError` enums for reusable failures such as runtime, client, test-support, or mermaid rendering errors.
+- When changing failure flows, preserve both developer visibility in logs and user-facing error state.
 
-## Error Handling Rules
+## Runtime And Networking Rules
 
-- Prefer early `guard` exits for missing prerequisites, especially in store/runtime entry points.
-- Use `do/catch` around async service calls in `AppStore` and surface user-facing failures through `lastError`.
-- Keep developer visibility with `Logger` using subsystem `tech.watzon.NeoCode`.
-- Favor typed `LocalizedError` enums for reusable client/runtime failures.
-- When an operation fails in runtime/store code, preserve both logging and user-facing error state such as `lastError` or `userFacingError`.
-
-## Networking And Runtime Rules
-
-- Preserve the current env-var contract used by runtime launch: `OPENCODE_SERVER_USERNAME` and `OPENCODE_SERVER_PASSWORD`.
-- Keep request construction inside `NeoCode/OpenCode/OpenCodeClient.swift`.
-- Keep SSE parsing in `NeoCode/OpenCode/OpenCodeSSE.swift` and event decoding in `NeoCode/OpenCode/OpenCodeEventDecoder.swift`.
-- If you add or change a server event, update the transport models, decoder, `OpenCodeEvent`, and `AppStore` application logic together.
+- Preserve the runtime env-var contract: `OPENCODE_SERVER_USERNAME` and `OPENCODE_SERVER_PASSWORD`.
 - Do not hardcode runtime credentials, executable paths, or health-check behavior outside `OpenCodeRuntime`.
+- If you add or change an event type, update models, decoder, and `AppStore` event application together.
+- Keep authorization, multipart body construction, and request payload shaping inside `OpenCodeClient`.
 
 ## Testing Conventions
 
-- Unit tests use Swift `Testing`, not XCTest.
-- Follow the established style in `NeoCodeTests/NeoCodeTests.swift`: `@Suite(.serialized)`, `@Test`, `#expect`, `#require`, and `Issue.record`.
-- Mark actor-sensitive unit tests with `@MainActor`.
-- Inline multiline JSON payloads are the norm for decode, request, and event tests.
-- UI tests launch with `NEOCODE_UI_TEST_MODE=1`; preserve that behavior when changing app startup.
-- UI tests intentionally skip if NeoCode is already running, so avoid changes that would force-terminate an active local session.
+- Unit tests use Swift Testing, not XCTest.
+- Test suites are split across files like `OpenCodeDecodingTests.swift`, `OpenCodeTransportTests.swift`, `AppStoreSessionTests.swift`, `AppStoreComposerTests.swift`, `AppStoreGitTests.swift`, `RuntimeTests.swift`, `SettingsAndThemeTests.swift`, `TranscriptRenderingTests.swift`, `ToolCallPresentationTests.swift`, and `ComposerAuxiliaryTests.swift`.
+- Swift Testing suites commonly use `@Suite(.serialized)`, `@Test`, `#expect`, `#require`, and inline multiline JSON payloads.
+- Shared unit-test helpers live in `NeoCodeTests/TestSupport.swift`.
+- UI tests use XCTest and launch the app with `NEOCODE_UI_TEST_MODE=1`; some transcript scroll coverage also uses `NEOCODE_UI_TEST_SCROLL_FIXTURE=1`.
+- UI tests intentionally skip if NeoCode is already running; avoid changes that would force-terminate an active local session.
 
-## Change Guidance By Area
+## Verification Expectations
 
-- UI-only change: edit the relevant file in `NeoCode/AppShell/`, `NeoCode/ContentView.swift`, or `NeoCode/Theme.swift`.
-- App state change: update `NeoCode/AppStore.swift` first, then adjust models, bindings, and tests.
-- Runtime/process change: update `NeoCode/OpenCodeRuntime.swift` and verify startup, stop, and error propagation.
-- Transport or event change: update files under `NeoCode/OpenCode/` and add or adjust unit coverage in `NeoCodeTests/NeoCodeTests.swift`.
-- Persistence change: update `NeoCode/Persistence/AppStorePersistence.swift` and verify cache migration behavior if relevant.
-- Git integration change: keep it inside `NeoCode/GitBranchService.swift` or `NeoCode/GitRepositoryService.swift`.
-- Workspace tool integration change: update `NeoCode/WorkspaceToolService.swift` rather than embedding launch logic inside a view.
+- There is no dedicated linter; treat compiler warnings, Swift diagnostics, and focused `xcodebuild` runs as the lint layer.
+- Prefer the narrowest verification that covers the files you changed.
+- If you touch `NeoCode/OpenCode/`, runtime launch logic, event decoding, or `AppStore` event application, run unit tests.
+- If you touch launch behavior, transcript scrolling, window chrome, or other shell interactions, run the relevant UI smoke tests when feasible.
+- If you touch localization behavior, verify the impacted strings still resolve from `Localizable.xcstrings` and keep the XLIFF workflow intact via `export_localizations.sh` and `import_localizations.sh`.
 
-## Agent Workflow Expectations
+## Practical Change Map
 
-- Start with the smallest relevant edit.
-- Preserve the current architecture unless the task clearly requires refactoring.
-- Avoid introducing new dependencies or tooling unless the repo already points that way.
-- Keep patches surgical and repository-specific.
-- After edits, verify with the narrowest useful build or test command and report any remaining failures clearly.
+- UI-only work: `NeoCode/AppShell/`, `NeoCode/ContentView.swift`, `NeoCode/Theme.swift`
+- Runtime/process work: `NeoCode/OpenCodeRuntime.swift`, `NeoCode/OpenCode/OpenCodeRuntimeHealthClient.swift`
+- Transport/event work: `NeoCode/OpenCode/` plus matching tests in `NeoCodeTests/`
+- Store/state work: `NeoCode/AppStore.swift` and related model or persistence files
+- Git integration: `NeoCode/GitRepositoryService.swift`, `NeoCode/GitBranchService.swift`, `NeoCode/AppStore+Git.swift`
+- Settings/theme/localization work: `NeoCode/AppLocalization.swift`, `NeoCode/Localization/Localizable.xcstrings`, theme/settings models and views
+
+## Workflow Expectations
+
+- Start with the smallest repository-specific edit that solves the task.
+- Preserve the current architecture unless the request clearly requires refactoring.
+- Avoid new dependencies or new tooling unless the repo already points that way.
+- Keep patches surgical, and update tests when behavior changes.
+- After changes, report the exact files touched and the narrowest verification you ran.
