@@ -34,6 +34,13 @@ enum NeoCodeTheme {
     static var diffRemovedText: Color { dynamicColor(\.diffRemovedText) }
     static var diffHunkBackground: Color { dynamicColor(\.diffHunkBackground) }
     static var diffHunkText: Color { dynamicColor(\.diffHunkText) }
+    static var panelColor: NSColor { dynamicNSColor(\.panel) }
+    static var panelRaisedColor: NSColor { dynamicNSColor(\.panelRaised) }
+    static var lineColor: NSColor { dynamicNSColor(\.line) }
+    static var lineStrongColor: NSColor { dynamicNSColor(\.lineStrong) }
+    static var textPrimaryColor: NSColor { dynamicNSColor(\.textPrimary) }
+    static var textMutedColor: NSColor { dynamicNSColor(\.textMuted) }
+    static var accentColor: NSColor { dynamicNSColor(\.accent) }
 
     static var uiBaseFontSize: CGFloat {
         CGFloat(appearanceSettings.uiFontSize)
@@ -140,9 +147,13 @@ enum NeoCodeTheme {
     }
 
     private static func dynamicColor(_ keyPath: KeyPath<ResolvedPalette, NSColor>) -> Color {
-        Color(nsColor: NSColor(name: nil) { appearance in
+        Color(nsColor: dynamicNSColor(keyPath))
+    }
+
+    private static func dynamicNSColor(_ keyPath: KeyPath<ResolvedPalette, NSColor>) -> NSColor {
+        NSColor(name: nil) { appearance in
             resolvedPalette(for: isDark(appearance))[keyPath: keyPath]
-        })
+        }
     }
 
     private static func resolvedPalette(for isDark: Bool) -> ResolvedPalette {
@@ -321,7 +332,7 @@ extension Color {
 }
 
 extension NSColor {
-    convenience init?(neoHex: String) {
+    nonisolated convenience init?(neoHex: String) {
         let trimmed = neoHex.trimmingCharacters(in: .whitespacesAndNewlines)
         let sanitized = trimmed.hasPrefix("#") ? String(trimmed.dropFirst()) : trimmed
         guard sanitized.count == 6,
@@ -336,7 +347,7 @@ extension NSColor {
         self.init(red: red, green: green, blue: blue, alpha: 1)
     }
 
-    func mixed(with other: NSColor, ratio: CGFloat) -> NSColor {
+    nonisolated func mixed(with other: NSColor, ratio: CGFloat) -> NSColor {
         let clamped = min(max(ratio, 0), 1)
         let source = usingColorSpace(.deviceRGB) ?? self
         let destination = other.usingColorSpace(.deviceRGB) ?? other
@@ -349,11 +360,11 @@ extension NSColor {
         return NSColor(red: red, green: green, blue: blue, alpha: alpha)
     }
 
-    func lighter(by amount: Double) -> NSColor {
+    nonisolated func lighter(by amount: Double) -> NSColor {
         mixed(with: .white, ratio: 1 - CGFloat(amount))
     }
 
-    func darker(by amount: Double) -> NSColor {
+    nonisolated func darker(by amount: Double) -> NSColor {
         mixed(with: .black, ratio: 1 - CGFloat(amount))
     }
 }

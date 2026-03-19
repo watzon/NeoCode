@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		A14E0A6B2F70000100D1F001 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A14E0A6B2F70000200D1F001 /* Sparkle */; };
+		B5A1F2013A11000100C0D001 /* BeautifulMermaid in Frameworks */ = {isa = PBXBuildFile; productRef = B5A1F2023A11000100C0D001 /* BeautifulMermaid */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -56,6 +57,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B5A1F2013A11000100C0D001 /* BeautifulMermaid in Frameworks */,
 				A14E0A6B2F70000100D1F001 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -117,6 +119,7 @@
 			);
 			name = NeoCode;
 			packageProductDependencies = (
+				B5A1F2023A11000100C0D001 /* BeautifulMermaid */,
 				A14E0A6B2F70000200D1F001 /* Sparkle */,
 			);
 			productName = NeoCode;
@@ -206,6 +209,7 @@
 			mainGroup = 2C8E372E2F647471006EA26D;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				B5A1F2033A11000100C0D001 /* XCRemoteSwiftPackageReference "beautiful-mermaid-swift" */,
 				A14E0A6B2F70000300D1F001 /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -590,6 +594,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		B5A1F2033A11000100C0D001 /* XCRemoteSwiftPackageReference "beautiful-mermaid-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/lukilabs/beautiful-mermaid-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.1.0;
+			};
+		};
 		A14E0A6B2F70000300D1F001 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/sparkle-project/Sparkle";
@@ -601,6 +613,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		B5A1F2023A11000100C0D001 /* BeautifulMermaid */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B5A1F2033A11000100C0D001 /* XCRemoteSwiftPackageReference "beautiful-mermaid-swift" */;
+			productName = BeautifulMermaid;
+		};
 		A14E0A6B2F70000200D1F001 /* Sparkle */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = A14E0A6B2F70000300D1F001 /* XCRemoteSwiftPackageReference "Sparkle" */;

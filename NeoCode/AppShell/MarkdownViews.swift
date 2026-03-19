@@ -69,7 +69,7 @@ struct MarkdownMessageView: View {
                         leadingLabel: index == 0 ? leadingLabel : nil,
                         renderCacheStyleID: renderCacheStyleID
                     )
-                case .code(let code):
+                case .code(let language, let source):
                     VStack(alignment: .leading, spacing: 8) {
                         if index == 0, let leadingLabel {
                             Text(leadingLabel.text)
@@ -77,13 +77,14 @@ struct MarkdownMessageView: View {
                                 .foregroundStyle(leadingLabel.color)
                         }
 
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            Text(code)
-                                .font(.neoMono)
-                                .foregroundStyle(textColor)
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(12)
+                        if languageIdentifier(language) == "mermaid" {
+                            MarkdownMermaidBlockView(
+                                source: source,
+                                fallbackSource: source,
+                                textColor: textColor
+                            )
+                        } else {
+                            MarkdownCodeBlockView(source: source, textColor: textColor)
                         }
                     }
                     .background(
@@ -102,11 +103,18 @@ struct MarkdownMessageView: View {
     private var blocks: [MarkdownBlock] {
         MarkdownRenderCache.blocks(for: markdown)
     }
+
+    private func languageIdentifier(_ language: String?) -> String? {
+        language?
+            .split(whereSeparator: \.isWhitespace)
+            .first
+            .map { $0.lowercased() }
+    }
 }
 
-enum MarkdownBlock {
+enum MarkdownBlock: Equatable {
     case prose(String)
-    case code(String)
+    case code(language: String?, source: String)
 }
 
 struct ProseMarkdownView: View {
@@ -452,6 +460,57 @@ struct InlineMarkdownText: View {
     }
 }
 
+struct MarkdownCodeBlockView: View {
+    let source: String
+    let textColor: Color
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            Text(source)
+                .font(.neoMono)
+                .foregroundStyle(textColor)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+        }
+    }
+}
+
+enum MarkdownFenceParser {
+    static func parseBlocks(from markdown: String) -> [MarkdownBlock] {
+        var result: [MarkdownBlock] = []
+        let pieces = markdown.components(separatedBy: "```")
+
+        for (index, piece) in pieces.enumerated() {
+            guard !piece.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+            if index.isMultiple(of: 2) {
+                result.append(.prose(piece))
+            } else {
+                let fence = parseFenceContent(piece)
+                result.append(.code(language: fence.language, source: fence.source))
+            }
+        }
+
+        return result
+    }
+
+    private static func parseFenceContent(_ piece: String) -> (language: String?, source: String) {
+        let normalized = piece.replacingOccurrences(of: "\r\n", with: "\n")
+        if normalized.hasPrefix("\n") {
+            return (nil, normalized.trimmingCharacters(in: .newlines))
+        }
+
+        let lines = normalized.components(separatedBy: "\n")
+        guard let firstLine = lines.first else {
+            return (nil, "")
+        }
+
+        let language = firstLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        let source = lines.dropFirst().joined(separator: "\n").trimmingCharacters(in: .newlines)
+        return (language, source)
+    }
+}
+
 private final class CachedMarkdownBlocks: NSObject {
     let value: [MarkdownBlock]
 
@@ -554,21 +613,7 @@ private enum MarkdownRenderCache {
     }
 
     private static func parseBlocks(from markdown: String) -> [MarkdownBlock] {
-        var result: [MarkdownBlock] = []
-        let pieces = markdown.components(separatedBy: "```")
-
-        for (index, piece) in pieces.enumerated() {
-            guard !piece.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
-            if index.isMultiple(of: 2) {
-                result.append(.prose(piece))
-            } else {
-                let code = piece.replacingOccurrences(of: "^\\w+\n", with: "", options: .regularExpression)
-                    .trimmingCharacters(in: .newlines)
-                result.append(.code(code))
-            }
-        }
-
-        return result
+        MarkdownFenceParser.parseBlocks(from: markdown)
     }
 
     private static func parseElements(from markdown: String) -> [MarkdownElement] {

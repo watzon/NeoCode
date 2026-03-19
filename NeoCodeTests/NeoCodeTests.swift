@@ -5003,6 +5003,41 @@ struct NeoCodeMainActorTests {
         #expect(payload.answers == [["Yes"], ["Type your own answer"]])
     }
 
+    @MainActor
+    @Test func markdownFenceParserPreservesMermaidLanguage() {
+        let blocks = MarkdownFenceParser.parseBlocks(from: """
+        Before
+
+        ```mermaid
+        graph TD
+            A[Start] --> B[Done]
+        ```
+
+        After
+        """)
+
+        #expect(blocks.count == 3)
+        #expect(blocks[0] == .prose("Before\n"))
+        #expect(
+            blocks[1] == .code(
+                language: "mermaid",
+                source: "graph TD\n    A[Start] --> B[Done]"
+            )
+        )
+        #expect(blocks[2] == .prose("\nAfter"))
+    }
+
+    @MainActor
+    @Test func markdownFenceParserKeepsUnlabeledCodeBlocks() {
+        let blocks = MarkdownFenceParser.parseBlocks(from: """
+        ```
+        let value = 1
+        ```
+        """)
+
+        #expect(blocks == [.code(language: nil, source: "let value = 1")])
+    }
+
 }
 
 private func decode<T: Decodable>(_ json: String) throws -> T {
