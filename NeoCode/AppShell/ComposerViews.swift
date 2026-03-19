@@ -168,15 +168,16 @@ struct ComposerView: View {
                     measuredHeight: $textViewHeight,
                     selectionRequest: $selectionRequest,
                     placeholder: localized("Build me a $1M SaaS. Make no mistakes.", locale: locale),
-                projectPath: store.selectedProject?.path,
-                sendKeyBehavior: store.appSettings.general.sendKeyBehavior,
-                onPrimaryAction: handlePrimaryAction,
-                onConfirmAuxiliarySelection: onConfirmAuxiliarySelection,
-                onMoveAuxiliarySelection: onMoveAuxiliarySelection,
-                onCancelAuxiliaryUI: onCancelAuxiliaryUI,
-                allowsEmptyPrimaryAction: isStopMode,
-                onImportAttachments: importAttachments
-            )
+                    projectPath: store.selectedProject?.path,
+                    sendKeyBehavior: store.appSettings.general.sendKeyBehavior,
+                    onPrimaryAction: handlePrimaryAction,
+                    onConfirmAuxiliarySelection: onConfirmAuxiliarySelection,
+                    onMoveAuxiliarySelection: onMoveAuxiliarySelection,
+                    onCancelAuxiliaryUI: onCancelAuxiliaryUI,
+                    allowsEmptyPrimaryAction: isStopMode,
+                    hasAttachments: !store.attachedFiles.isEmpty,
+                    onImportAttachments: importAttachments
+                )
             .frame(height: textViewHeight)
             .padding(.trailing, store.selectedTodos.isEmpty ? 0 : 60)
 
@@ -876,10 +877,21 @@ struct GrowingTextView: NSViewRepresentable {
     let onMoveAuxiliarySelection: (Int) -> Bool
     let onCancelAuxiliaryUI: () -> Bool
     let allowsEmptyPrimaryAction: Bool
+    let hasAttachments: Bool
     let onImportAttachments: ([ComposerAttachmentImportItem]) -> Void
 
     private let minimumHeight: CGFloat = ComposerLayout.minimumTextViewHeight
     private let maximumHeight: CGFloat = 140
+
+    static func canTriggerPrimaryAction(
+        text: String,
+        allowsEmptyPrimaryAction: Bool,
+        hasAttachments: Bool
+    ) -> Bool {
+        allowsEmptyPrimaryAction
+            || !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || hasAttachments
+    }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -935,13 +947,6 @@ struct GrowingTextView: NSViewRepresentable {
         if textView.string != text {
             textView.string = text
             needsHighlightRefresh = true
-            textView.updatePlaceholderVisibility()
-
-            if text.isEmpty {
-                textView.scheduleFileMentionHighlightUpdate()
-                context.coordinator.updateMeasuredHeight(minimumHeight)
-                return
-            }
         }
         textView.placeholder = placeholder
         textView.applyTheme()
@@ -954,6 +959,7 @@ struct GrowingTextView: NSViewRepresentable {
         textView.onMoveAuxiliarySelection = onMoveAuxiliarySelection
         textView.onCancelAuxiliaryUI = onCancelAuxiliaryUI
         textView.projectPath = projectPath
+        textView.updatePlaceholderVisibility()
 
         if let selectionRequest, context.coordinator.lastSelectionRequestID != selectionRequest.id {
             context.coordinator.lastSelectionRequestID = selectionRequest.id
@@ -1033,8 +1039,11 @@ struct GrowingTextView: NSViewRepresentable {
                 return true
             }
 
-            let trimmed = textView.string.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard parent.allowsEmptyPrimaryAction || !trimmed.isEmpty else { return true }
+            guard GrowingTextView.canTriggerPrimaryAction(
+                text: textView.string,
+                allowsEmptyPrimaryAction: parent.allowsEmptyPrimaryAction,
+                hasAttachments: parent.hasAttachments
+            ) else { return true }
 
             parent.onPrimaryAction()
             return true
@@ -1308,406 +1317,7 @@ private final class ComposerPlaceholderLabel: NSTextField {
     }
 }
 
-private struct HeightPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
-struct TranscriptScrollMetrics: Equatable {
-    let contentOffsetY: CGFloat
-    let contentHeight: CGFloat
-    let visibleMaxY: CGFloat
-}
-
-extension View {
-    func readHeight(_ onChange: @escaping (CGFloat) -> Void) -> some View {
-        background(
-            GeometryReader { proxy in
-                Color.clear.preference(key: HeightPreferenceKey.self, value: proxy.size.height)
-            }
-        )
-        .onPreferenceChange(HeightPreferenceKey.self, perform: onChange)
-    }
-}
-
 struct ComposerDropdownOption: Identifiable, Hashable {
     let id: String
     let title: String
-}
-
-struct ComposerAttachmentChip: View {
-    let attachment: ComposerAttachment
-    let onRemove: () -> Void
-
-    var body: some View {
-        Group {
-            if attachment.isImage {
-                ComposerImageAttachmentChip(attachment: attachment, onRemove: onRemove)
-            } else {
-                ComposerFileAttachmentChip(attachment: attachment, onRemove: onRemove)
-            }
-        }
-    }
-}
-
-private struct ComposerFileAttachmentChip: View {
-    let attachment: ComposerAttachment
-    let onRemove: () -> Void
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "paperclip")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(NeoCodeTheme.textMuted)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(attachment.name)
-                    .font(.neoMonoSmall)
-                    .foregroundStyle(NeoCodeTheme.textSecondary)
-                    .lineLimit(1)
-
-                Text(attachment.mimeType)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(NeoCodeTheme.textMuted)
-                    .lineLimit(1)
-            }
-
-            Button(action: onRemove) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(NeoCodeTheme.textMuted)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(
-            Capsule()
-                .fill(NeoCodeTheme.panelSoft)
-                .overlay(Capsule().stroke(NeoCodeTheme.line, lineWidth: 1))
-        )
-    }
-}
-
-private struct ComposerImageAttachmentChip: View {
-    let attachment: ComposerAttachment
-    let onRemove: () -> Void
-    @State private var isHovering = false
-    @Environment(\.locale) private var locale
-
-    private let previewWidth: CGFloat = 80
-    private let previewHeight: CGFloat = 64
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ZStack {
-                Group {
-                    if let image = composerAttachmentImage(for: attachment) {
-                        Image(nsImage: image)
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                    } else {
-                        Rectangle()
-                            .fill(NeoCodeTheme.panelSoft)
-                            .overlay {
-                                Image(systemName: "photo")
-                                    .foregroundStyle(NeoCodeTheme.textMuted)
-                            }
-                    }
-                }
-                .frame(width: previewWidth, height: previewHeight)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-
-                if isHovering {
-                    Button(action: onRemove) {
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color.red.opacity(0.88))
-                            .overlay {
-                                VStack(spacing: 6) {
-                                    Image(systemName: "trash")
-                                        .font(.system(size: 18, weight: .semibold))
-                                Text(localized("Remove", locale: locale))
-                                        .font(.system(size: 11, weight: .semibold))
-                                }
-                                .foregroundStyle(Color.white)
-                            }
-                    }
-                    .buttonStyle(.plain)
-                    .frame(width: previewWidth, height: previewHeight)
-                    .neoTooltip(localized("Remove attachment", locale: locale))
-                    .accessibilityLabel(localized("Remove attachment", locale: locale))
-                    .transition(.opacity)
-                }
-            }
-            .onHover { isHovering = $0 }
-            .animation(.easeOut(duration: 0.14), value: isHovering)
-
-            Text(attachment.name)
-                .font(.neoMonoSmall)
-                .foregroundStyle(NeoCodeTheme.textSecondary)
-                .lineLimit(1)
-                .frame(width: previewWidth, alignment: .leading)
-        }
-        .padding(7)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(NeoCodeTheme.panelSoft)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(NeoCodeTheme.line, lineWidth: 1)
-                )
-        )
-    }
-}
-
-private func composerAttachmentImage(for attachment: ComposerAttachment) -> NSImage? {
-    ComposerAttachmentImageCache.image(for: attachment) {
-        switch attachment.content {
-        case .file(let path):
-            return NSImage(contentsOfFile: path)
-        case .dataURL(let dataURL):
-            guard let data = data(fromDataURL: dataURL) else { return nil }
-            return NSImage(data: data)
-        }
-    }
-}
-
-private func data(fromDataURL dataURL: String) -> Data? {
-    guard let commaIndex = dataURL.firstIndex(of: ",") else { return nil }
-    let encoded = String(dataURL[dataURL.index(after: commaIndex)...])
-    return Data(base64Encoded: encoded)
-}
-
-private enum ComposerAttachmentImageCache {
-    private static let imageCache: NSCache<NSString, NSImage> = {
-        let cache = NSCache<NSString, NSImage>()
-        cache.countLimit = 32
-        return cache
-    }()
-
-    private static let failedLookupCache: NSCache<NSString, NSNumber> = {
-        let cache = NSCache<NSString, NSNumber>()
-        cache.countLimit = 128
-        return cache
-    }()
-
-    static func image(for attachment: ComposerAttachment, loader: () -> NSImage?) -> NSImage? {
-        let key = cacheKey(for: attachment)
-
-        if let cached = imageCache.object(forKey: key) {
-            return cached
-        }
-
-        if failedLookupCache.object(forKey: key) != nil {
-            return nil
-        }
-
-        guard let image = loader() else {
-            failedLookupCache.setObject(NSNumber(value: true), forKey: key)
-            return nil
-        }
-
-        imageCache.setObject(image, forKey: key)
-        return image
-    }
-
-    private static func cacheKey(for attachment: ComposerAttachment) -> NSString {
-        var hasher = Hasher()
-        hasher.combine(attachment.name)
-        hasher.combine(attachment.mimeType)
-        hasher.combine(attachment.deduplicationKey)
-        return NSString(string: String(hasher.finalize()))
-    }
-}
-
-struct InlineStatusView: View {
-    enum Tone {
-        case neutral
-        case warning
-    }
-
-    let text: String
-    let tone: Tone
-
-    var body: some View {
-        Text(text)
-            .font(.neoMonoSmall)
-            .foregroundStyle(foreground)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(background)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(NeoCodeTheme.line, lineWidth: 1)
-                    )
-            )
-    }
-
-    private var foreground: Color {
-        switch tone {
-        case .neutral: NeoCodeTheme.textSecondary
-        case .warning: NeoCodeTheme.warning
-        }
-    }
-
-    private var background: Color {
-        switch tone {
-        case .neutral: NeoCodeTheme.panel
-        case .warning: NeoCodeTheme.warning.opacity(0.12)
-        }
-    }
-}
-
-struct EmptyConversationView: View {
-    @Environment(AppStore.self) private var store
-    @Environment(\.locale) private var locale
-
-    var body: some View {
-        ZStack(alignment: .top) {
-            VStack(spacing: 20) {
-                DraftReactiveMetaballOrb(
-                    size: 88,
-                    text: store.draft,
-                    renderScale: 1.0,
-                    internalResolutionScale: 1.15,
-                    animationInterval: 1.0 / 20.0
-                )
-                .frame(width: 106, height: 100)
-
-                VStack(spacing: 10) {
-                    Text(store.projects.isEmpty ? localized("Add your first project", locale: locale) : localized("Start a thread", locale: locale))
-                        .font(.system(size: 22, weight: .semibold, design: .default))
-                        .foregroundStyle(NeoCodeTheme.textPrimary)
-
-                    Text(store.projects.isEmpty
-                         ? localized("Use the project button in the Threads sidebar to add a folder. NeoCode will only show threads for projects you explicitly add.", locale: locale)
-                         : localized("Create a new thread or select one from the sidebar to begin chatting with the OpenCode runtime.", locale: locale))
-                        .font(.neoBody)
-                        .foregroundStyle(NeoCodeTheme.textSecondary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: 420)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-
-            WindowDragRegion()
-                .frame(height: 52)
-        }
-    }
-}
-
-struct HeaderStatusView: View {
-    @Environment(AppStore.self) private var store
-    @Environment(OpenCodeRuntime.self) private var runtime
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(statusColor)
-                .frame(width: 6, height: 6)
-
-            Text(runtime.statusLabel(for: store.selectedProject?.path))
-                .font(.neoMonoSmall)
-                .foregroundStyle(NeoCodeTheme.textMuted)
-        }
-    }
-
-    private var statusColor: Color {
-        switch runtime.state(for: store.selectedProject?.path) {
-        case .idle:
-            NeoCodeTheme.textMuted
-        case .starting, .stopping:
-            NeoCodeTheme.accent
-        case .running:
-            NeoCodeTheme.success
-        case .failed:
-            NeoCodeTheme.warning
-        }
-    }
-}
-
-struct ErrorToast: View {
-    let message: String
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(NeoCodeTheme.warning)
-
-            Text(message)
-                .font(.neoBody)
-                .foregroundStyle(NeoCodeTheme.textPrimary)
-                .lineLimit(2)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(NeoCodeTheme.panelRaised)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(NeoCodeTheme.warning.opacity(0.45), lineWidth: 1)
-                )
-        )
-        .frame(maxWidth: 360, alignment: .trailing)
-        .shadow(color: Color.black.opacity(0.25), radius: 18, x: 0, y: 6)
-    }
-}
-
-struct WindowDragRegion: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        DragRegionView()
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {}
-}
-
-struct WindowDragSpacer: View {
-    var minLength: CGFloat = 0
-
-    var body: some View {
-        WindowDragRegion()
-            .frame(minWidth: minLength, maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
-
-private final class DragRegionView: NSView {
-    override var mouseDownCanMoveWindow: Bool { true }
-
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        guard bounds.contains(point) else { return nil }
-        return self
-    }
-}
-
-struct WindowChromeConfigurator: NSViewRepresentable {
-    let updateService: AppUpdateService
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async {
-            configureWindow(for: view)
-        }
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async {
-            configureWindow(for: nsView)
-        }
-    }
-
-    private func configureWindow(for view: NSView) {
-        guard let window = view.window else { return }
-        window.titleVisibility = .hidden
-        window.titlebarAppearsTransparent = true
-        window.isMovableByWindowBackground = false
-        window.styleMask.insert(.fullSizeContentView)
-        window.minSize = NSSize(width: 980, height: 600)
-        updateService.attach(to: window)
-    }
 }

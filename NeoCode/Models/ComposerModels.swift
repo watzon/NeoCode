@@ -216,7 +216,6 @@ struct ComposerQueuedMessage: Identifiable, Hashable {
 
 struct SessionComposerState: Codable, Hashable {
     var selectedModelID: String?
-    var selectedModelVariant: String?
     var selectedAgent: String?
     var selectedThinkingLevel: String?
     var ephemeralAgentModels: [String: String]
@@ -224,14 +223,12 @@ struct SessionComposerState: Codable, Hashable {
 
     init(
         selectedModelID: String? = nil,
-        selectedModelVariant: String? = nil,
         selectedAgent: String? = nil,
         selectedThinkingLevel: String? = nil,
         ephemeralAgentModels: [String: String] = [:],
         preferredFallbackModelID: String? = nil
     ) {
         self.selectedModelID = selectedModelID
-        self.selectedModelVariant = selectedModelVariant
         self.selectedAgent = selectedAgent
         self.selectedThinkingLevel = selectedThinkingLevel
         self.ephemeralAgentModels = ephemeralAgentModels

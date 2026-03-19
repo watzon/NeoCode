@@ -29,6 +29,9 @@ struct GitBranchService: Sendable {
         do {
             _ = try await Self.runGit(["switch", trimmed], in: projectPath)
         } catch {
+            guard Self.shouldFallbackFromSwitchCommand(for: error) else {
+                throw error
+            }
             _ = try await Self.runGit(["checkout", trimmed], in: projectPath)
         }
     }
@@ -40,8 +43,20 @@ struct GitBranchService: Sendable {
         do {
             _ = try await Self.runGit(["switch", "-c", trimmed], in: projectPath)
         } catch {
+            guard Self.shouldFallbackFromSwitchCommand(for: error) else {
+                throw error
+            }
             _ = try await Self.runGit(["checkout", "-b", trimmed], in: projectPath)
         }
+    }
+
+    private nonisolated static func shouldFallbackFromSwitchCommand(for error: Error) -> Bool {
+        let message = error.localizedDescription.lowercased()
+        return message.contains("unknown subcommand")
+            || message.contains("unknown option")
+            || message.contains("invalid option")
+            || message.contains("not a git command")
+            || message.contains("usage: git switch")
     }
 
     private nonisolated static func currentBranch(in projectPath: String) async throws -> String {

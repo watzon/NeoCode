@@ -1,70 +1,6 @@
 import AppKit
 import SwiftUI
 
-func buildDisplayMessageGroups(from visibleMessages: [ChatMessage]) -> [DisplayMessageGroup] {
-    var groups: [DisplayMessageGroup] = []
-    var currentUserTurn: [ChatMessage] = []
-    var currentAssistantTurn: [ChatMessage] = []
-
-    func flushUserTurn() {
-        guard !currentUserTurn.isEmpty else { return }
-        groups.append(.userTurn(currentUserTurn))
-        currentUserTurn.removeAll(keepingCapacity: true)
-    }
-
-    func flushAssistantTurn() {
-        guard !currentAssistantTurn.isEmpty else { return }
-        groups.append(.assistantTurn(currentAssistantTurn))
-        currentAssistantTurn.removeAll(keepingCapacity: true)
-    }
-
-    var index = 0
-    while index < visibleMessages.count {
-        let message = visibleMessages[index]
-
-        if message.kind.isCompactionMarker {
-            flushUserTurn()
-            flushAssistantTurn()
-
-            var compactionMessages = [message]
-            index += 1
-
-            while index < visibleMessages.count {
-                let nextMessage = visibleMessages[index]
-                guard nextMessage.role == .assistant || nextMessage.role == .tool else { break }
-                compactionMessages.append(nextMessage)
-                index += 1
-            }
-
-            groups.append(.compaction(compactionMessages))
-            continue
-        }
-
-        if message.role == .assistant || message.role == .tool {
-            flushUserTurn()
-            currentAssistantTurn.append(message)
-        } else if message.role == .user {
-            flushAssistantTurn()
-            if let previous = currentUserTurn.last,
-               previous.turnGroupID != message.turnGroupID {
-                flushUserTurn()
-            }
-            currentUserTurn.append(message)
-        } else {
-            flushUserTurn()
-            flushAssistantTurn()
-            groups.append(.message(message))
-        }
-
-        index += 1
-    }
-
-    flushUserTurn()
-    flushAssistantTurn()
-
-    return groups
-}
-
 struct ConversationScreen: View {
     @Environment(AppStore.self) private var store
 
@@ -127,6 +63,10 @@ struct ConversationView: View {
     @State private var composerSelectionRequest: ComposerTextSelectionRequest?
     @State private var fileMentionResults: [ProjectFileSearchResult] = []
     @State private var fileSearchTask: Task<Void, Never>?
+    @State private var scrollFollowUpTask: Task<Void, Never>?
+    @State private var pinnedPositionResetTask: Task<Void, Never>?
+    @State private var initialPresentationTask: Task<Void, Never>?
+    @State private var olderMessagesTask: Task<Void, Never>?
     @State private var isTodoListPresented = false
     @State private var renderedGroups: [DisplayMessageGroup] = []
 
@@ -268,6 +208,10 @@ struct ConversationView: View {
             }
             .onDisappear {
                 fileSearchTask?.cancel()
+                scrollFollowUpTask?.cancel()
+                pinnedPositionResetTask?.cancel()
+                initialPresentationTask?.cancel()
+                olderMessagesTask?.cancel()
             }
             .sheet(item: $pendingRevertPreview) { preview in
                 RevertHistorySheet(
@@ -882,24 +826,12 @@ struct ConversationView: View {
     }
 
     private func scrollToBottom(using proxy: ScrollViewProxy, animated: Bool) {
-        DispatchQueue.main.async {
-            if animated {
-                withAnimation(.easeOut(duration: 0.18)) {
-                    proxy.scrollTo(bottomAnchorID, anchor: .bottom)
-                }
-            } else {
-                proxy.scrollTo(bottomAnchorID, anchor: .bottom)
-            }
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-                if animated {
-                    withAnimation(.easeOut(duration: 0.18)) {
-                        proxy.scrollTo(bottomAnchorID, anchor: .bottom)
-                    }
-                } else {
-                    proxy.scrollTo(bottomAnchorID, anchor: .bottom)
-                }
-            }
+        scrollFollowUpTask?.cancel()
+        performScrollToBottom(using: proxy, animated: animated)
+        scrollFollowUpTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(80))
+            guard !Task.isCancelled else { return }
+            performScrollToBottom(using: proxy, animated: animated)
         }
     }
 
@@ -907,7 +839,10 @@ struct ConversationView: View {
         isMaintainingPinnedPosition = true
         scrollToBottom(using: proxy, animated: animated)
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+        pinnedPositionResetTask?.cancel()
+        pinnedPositionResetTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(220))
+            guard !Task.isCancelled else { return }
             isMaintainingPinnedPosition = false
         }
     }
@@ -924,7 +859,9 @@ struct ConversationView: View {
         lastObservedTranscriptContentOffsetY = metrics.contentOffsetY
 
         if metrics.contentOffsetY <= olderMessagesLoadThreshold {
-            DispatchQueue.main.async {
+            olderMessagesTask?.cancel()
+            olderMessagesTask = Task { @MainActor in
+                guard !Task.isCancelled else { return }
                 loadOlderMessages(using: proxy)
             }
         }
@@ -936,7 +873,7 @@ struct ConversationView: View {
             autoScrollThreshold: autoScrollThreshold
         )
 
-        DispatchQueue.main.async {
+        Task { @MainActor in
             schedulePinnedStateUpdate(nextPinnedState)
         }
     }
@@ -948,13 +885,11 @@ struct ConversationView: View {
         let anchorID = renderedGroups.first?.id
         loadedMessageCount = min(transcriptCount, loadedMessageCount + transcriptPageSize)
 
-        DispatchQueue.main.async {
+        Task { @MainActor in
             if let anchorID {
                 proxy.scrollTo(anchorID, anchor: .top)
             }
-            DispatchQueue.main.async {
-                isLoadingOlderMessages = false
-            }
+            isLoadingOlderMessages = false
         }
     }
 
@@ -991,8 +926,21 @@ struct ConversationView: View {
         guard isAwaitingInitialScroll else { return }
         maintainPinnedPosition(using: proxy, animated: false)
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+        initialPresentationTask?.cancel()
+        initialPresentationTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(200))
+            guard !Task.isCancelled else { return }
             finishInitialPresentation()
+        }
+    }
+
+    private func performScrollToBottom(using proxy: ScrollViewProxy, animated: Bool) {
+        if animated {
+            withAnimation(.easeOut(duration: 0.18)) {
+                proxy.scrollTo(bottomAnchorID, anchor: .bottom)
+            }
+        } else {
+            proxy.scrollTo(bottomAnchorID, anchor: .bottom)
         }
     }
 
@@ -1213,190 +1161,4 @@ enum ConversationLayout {
         for: .regular,
         scrollerStyle: NSScroller.preferredScrollerStyle
     )
-}
-
-struct TranscriptScrollPinning {
-    static let upwardScrollTolerance: CGFloat = 8
-
-    static func nextPinnedState(
-        for metrics: TranscriptScrollMetrics,
-        previousOffsetY: CGFloat?,
-        isMaintainingPinnedPosition: Bool,
-        autoScrollThreshold: CGFloat
-    ) -> Bool {
-        if isMaintainingPinnedPosition {
-            return true
-        }
-
-        if let previousOffsetY,
-           metrics.contentOffsetY < previousOffsetY - upwardScrollTolerance {
-            return false
-        }
-
-        let distanceToBottom = max(0, metrics.contentHeight - metrics.visibleMaxY)
-        return distanceToBottom <= autoScrollThreshold
-    }
-}
-
-private struct TranscriptScrollObserver: NSViewRepresentable {
-    let onMetricsChange: (TranscriptScrollMetrics) -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onMetricsChange: onMetricsChange)
-    }
-
-    func makeNSView(context: Context) -> ObserverView {
-        let view = ObserverView()
-        view.coordinator = context.coordinator
-        return view
-    }
-
-    func updateNSView(_ nsView: ObserverView, context: Context) {
-        context.coordinator.onMetricsChange = onMetricsChange
-        nsView.attachToEnclosingScrollViewIfNeeded()
-        context.coordinator.reportMetricsIfPossible()
-    }
-
-    final class Coordinator: NSObject {
-        var onMetricsChange: (TranscriptScrollMetrics) -> Void
-        weak var clipView: NSClipView?
-        weak var documentView: NSView?
-
-        init(onMetricsChange: @escaping (TranscriptScrollMetrics) -> Void) {
-            self.onMetricsChange = onMetricsChange
-        }
-
-        func attach(to scrollView: NSScrollView) {
-            guard clipView !== scrollView.contentView else { return }
-
-            detach()
-
-            let clipView = scrollView.contentView
-            let documentView = scrollView.documentView
-
-            self.clipView = clipView
-            self.documentView = documentView
-
-            clipView.postsBoundsChangedNotifications = true
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(clipViewBoundsDidChange),
-                name: NSView.boundsDidChangeNotification,
-                object: clipView
-            )
-
-            documentView?.postsFrameChangedNotifications = true
-            if let documentView {
-                NotificationCenter.default.addObserver(
-                    self,
-                    selector: #selector(documentViewFrameDidChange),
-                    name: NSView.frameDidChangeNotification,
-                    object: documentView
-                )
-            }
-
-        }
-
-        func detach() {
-            NotificationCenter.default.removeObserver(self)
-            clipView = nil
-            documentView = nil
-        }
-
-        @objc
-        func clipViewBoundsDidChange() {
-            reportMetricsIfPossible()
-        }
-
-        @objc
-        func documentViewFrameDidChange() {
-            reportMetricsIfPossible()
-        }
-
-        func reportMetricsIfPossible() {
-            guard let clipView, let documentView else { return }
-
-            let visibleRect = clipView.documentVisibleRect
-            let contentHeight = max(documentView.bounds.height, visibleRect.height)
-            let contentOffsetY: CGFloat
-
-            if documentView.isFlipped {
-                contentOffsetY = max(0, visibleRect.minY)
-            } else {
-                contentOffsetY = max(0, contentHeight - visibleRect.maxY)
-            }
-
-            let metrics = TranscriptScrollMetrics(
-                contentOffsetY: contentOffsetY,
-                contentHeight: contentHeight,
-                visibleMaxY: min(contentHeight, contentOffsetY + visibleRect.height)
-            )
-
-            onMetricsChange(metrics)
-        }
-
-        deinit {
-            NotificationCenter.default.removeObserver(self)
-        }
-    }
-
-    final class ObserverView: NSView {
-        weak var coordinator: Coordinator?
-
-        override func viewDidMoveToSuperview() {
-            super.viewDidMoveToSuperview()
-            attachToEnclosingScrollViewIfNeeded()
-        }
-
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            attachToEnclosingScrollViewIfNeeded()
-        }
-
-        func attachToEnclosingScrollViewIfNeeded() {
-            guard let coordinator else { return }
-            guard let scrollView = locateScrollView() else { return }
-            coordinator.attach(to: scrollView)
-            coordinator.reportMetricsIfPossible()
-        }
-
-        private func locateScrollView() -> NSScrollView? {
-            if let direct = observedEnclosingScrollView {
-                return direct
-            }
-
-            // SwiftUI can insert additional hosting/container views between this
-            // probe view and the actual transcript scroll view, so fall back to a
-            // broader ancestor-subtree search before giving up.
-            var ancestor = superview
-            while let current = ancestor {
-                if let discovered = findScrollView(in: current) {
-                    return discovered
-                }
-                ancestor = current.superview
-            }
-
-            return window?.contentView.flatMap(findScrollView(in:))
-        }
-
-        private var observedEnclosingScrollView: NSScrollView? {
-            sequence(first: superview, next: { $0?.superview }).first {
-                $0 is NSScrollView
-            } as? NSScrollView
-        }
-
-        private func findScrollView(in view: NSView) -> NSScrollView? {
-            if let scrollView = view as? NSScrollView {
-                return scrollView
-            }
-
-            for subview in view.subviews {
-                if let match = findScrollView(in: subview) {
-                    return match
-                }
-            }
-
-            return nil
-        }
-    }
 }

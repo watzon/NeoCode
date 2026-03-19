@@ -1486,7 +1486,7 @@ struct NeoCodeMainActorTests {
     }
 
     @MainActor
-    @Test func appStoreIgnoresExternalBusyStatusWithoutLocalActivity() {
+    @Test func appStoreUsesExternalBusyStatusWithoutLocalActivity() {
         let store = AppStore(projects: [
             ProjectSummary(
                 name: "NeoCode",
@@ -1500,12 +1500,12 @@ struct NeoCodeMainActorTests {
 
         store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .busy))
 
-        #expect(store.selectedSession?.status == .idle)
-        #expect(store.selectedSessionActivity == nil)
+        #expect(store.selectedSession?.status == .running)
+        #expect(store.selectedSessionActivity == .busy)
     }
 
     @MainActor
-    @Test func appStoreIgnoresExternalBusyStatusForSnapshotInProgressTranscript() {
+    @Test func appStoreUsesExternalBusyStatusForSnapshotInProgressTranscript() {
         let store = AppStore(projects: [
             ProjectSummary(
                 name: "NeoCode",
@@ -1533,8 +1533,8 @@ struct NeoCodeMainActorTests {
 
         store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .busy))
 
-        #expect(store.selectedSession?.status == .idle)
-        #expect(store.selectedSessionActivity == nil)
+        #expect(store.selectedSession?.status == .running)
+        #expect(store.selectedSessionActivity == .busy)
     }
 
     @MainActor
@@ -1568,6 +1568,7 @@ struct NeoCodeMainActorTests {
         )
 
         store.apply(event: completed)
+        store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .idle))
 
         let background = try #require(store.projects[0].sessions.first(where: { $0.id == "ses_1" }))
         #expect(background.status == .idle)
@@ -1637,6 +1638,7 @@ struct NeoCodeMainActorTests {
         )
 
         store.apply(event: completed)
+        store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .idle))
 
         #expect(store.projects[0].sessions.first(where: { $0.id == "ses_1" })?.status == .idle)
         #expect(store.showsFinishedIndicator(for: "ses_1") == true)
@@ -1676,6 +1678,7 @@ struct NeoCodeMainActorTests {
         )
 
         store.apply(event: completed)
+        store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .idle))
 
         #expect(store.selectedSession?.status == .idle)
         #expect(store.showsFinishedIndicator(for: "ses_1") == false)
@@ -4609,6 +4612,65 @@ struct NeoCodeMainActorTests {
 
         store.selectSession("ses_1")
         #expect(store.selectedModelID == preferredModel.id)
+    }
+
+    @Test func growingTextViewAllowsAttachmentOnlyPrimaryAction() {
+        #expect(
+            GrowingTextView.canTriggerPrimaryAction(
+                text: "   ",
+                allowsEmptyPrimaryAction: false,
+                hasAttachments: true
+            ) == true
+        )
+        #expect(
+            GrowingTextView.canTriggerPrimaryAction(
+                text: "   ",
+                allowsEmptyPrimaryAction: false,
+                hasAttachments: false
+            ) == false
+        )
+    }
+
+    @MainActor
+    @Test func appStoreRefreshGitCommitPreviewForBackgroundProjectDoesNotOverwriteVisibleProject() async throws {
+        let firstRepoURL = try createTemporaryGitRepository()
+        let secondRepoURL = try createTemporaryGitRepository()
+        defer {
+            try? FileManager.default.removeItem(at: firstRepoURL)
+            try? FileManager.default.removeItem(at: secondRepoURL)
+        }
+
+        try write("first\n", to: firstRepoURL.appendingPathComponent("first.txt"))
+        try runGit(["add", "first.txt"], in: firstRepoURL)
+        try runGit(["commit", "-m", "Initial first commit"], in: firstRepoURL)
+        try write("first changed\n", to: firstRepoURL.appendingPathComponent("first.txt"))
+
+        try write("second\n", to: secondRepoURL.appendingPathComponent("second.txt"))
+        try runGit(["add", "second.txt"], in: secondRepoURL)
+        try runGit(["commit", "-m", "Initial second commit"], in: secondRepoURL)
+        try write("second changed\n", to: secondRepoURL.appendingPathComponent("second.txt"))
+
+        let store = AppStore(projects: [
+            ProjectSummary(name: "First", path: firstRepoURL.path),
+            ProjectSummary(name: "Second", path: secondRepoURL.path),
+        ])
+        store.selectedProjectID = try #require(store.projects.first?.id)
+
+        await store.refreshGitStatus()
+        await store.refreshGitCommitPreview(showLoadingIndicator: false)
+
+        let visiblePreview = try #require(store.gitCommitPreview)
+        #expect(visiblePreview.changedFiles.contains(where: { $0.path == "first.txt" }))
+
+        await store.refreshGitCommitPreview(
+            showLoadingIndicator: false,
+            projectPathOverride: secondRepoURL.path
+        )
+
+        let finalPreview = try #require(store.gitCommitPreview)
+        #expect(finalPreview == visiblePreview)
+        #expect(finalPreview.changedFiles.contains(where: { $0.path == "first.txt" }))
+        #expect(finalPreview.changedFiles.contains(where: { $0.path == "second.txt" }) == false)
     }
 
     @Test func appStoreComposerOptionCaptureResultTreatsCancellationSeparately() async {

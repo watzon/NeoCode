@@ -221,6 +221,10 @@ struct GitRepositoryService: Sendable {
         do {
             _ = try await Self.runGit(["push"], in: projectPath)
         } catch {
+            guard Self.shouldRetryPushWithUpstream(for: error) else {
+                throw error
+            }
+
             let remotes = try await Self.runGit(["remote"], in: projectPath)
                 .components(separatedBy: .newlines)
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -232,6 +236,14 @@ struct GitRepositoryService: Sendable {
             let branch = try await Self.currentBranch(in: projectPath)
             _ = try await Self.runGit(["push", "-u", "origin", branch], in: projectPath)
         }
+    }
+
+    private nonisolated static func shouldRetryPushWithUpstream(for error: Error) -> Bool {
+        let message = error.localizedDescription.lowercased()
+        return message.contains("has no upstream branch")
+            || message.contains("set the remote as upstream")
+            || message.contains("--set-upstream")
+            || message.contains("no upstream configured")
     }
 
     private nonisolated static func parseHasChanges(_ output: String) -> Bool {

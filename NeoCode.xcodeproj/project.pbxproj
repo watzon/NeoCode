@@ -594,14 +594,6 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		B5A1F2033A11000100C0D001 /* XCRemoteSwiftPackageReference "beautiful-mermaid-swift" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/lukilabs/beautiful-mermaid-swift";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 0.1.0;
-			};
-		};
 		A14E0A6B2F70000300D1F001 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/sparkle-project/Sparkle";
@@ -610,18 +602,26 @@
 				minimumVersion = 2.6.4;
 			};
 		};
+		B5A1F2033A11000100C0D001 /* XCRemoteSwiftPackageReference "beautiful-mermaid-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/lukilabs/beautiful-mermaid-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.1.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		B5A1F2023A11000100C0D001 /* BeautifulMermaid */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = B5A1F2033A11000100C0D001 /* XCRemoteSwiftPackageReference "beautiful-mermaid-swift" */;
-			productName = BeautifulMermaid;
-		};
 		A14E0A6B2F70000200D1F001 /* Sparkle */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = A14E0A6B2F70000300D1F001 /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
+		};
+		B5A1F2023A11000100C0D001 /* BeautifulMermaid */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B5A1F2033A11000100C0D001 /* XCRemoteSwiftPackageReference "beautiful-mermaid-swift" */;
+			productName = BeautifulMermaid;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
