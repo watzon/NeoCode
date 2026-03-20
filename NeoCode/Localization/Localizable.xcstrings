@@ -11933,6 +11933,12 @@
         }
       }
     },
+    "UI Scroll Fixture Back To Bottom Visible" : {
+
+    },
+    "UI Scroll Fixture Ready" : {
+
+    },
     "Unavailable" : {
       "extractionState" : "stale",
       "localizations" : {
