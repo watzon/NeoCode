@@ -12,9 +12,9 @@ if [ -z "${VERSION}" ]; then
 fi
 
 mkdir -p "${OUTPUT_DIR}"
-rm -f "${OUTPUT_DIR}/neocoded-v${VERSION}-darwin-arm64.tar.gz" \
-      "${OUTPUT_DIR}/neocoded-v${VERSION}-darwin-amd64.tar.gz" \
-      "${OUTPUT_DIR}/neocoded-v${VERSION}-checksums.txt"
+rm -f "${OUTPUT_DIR}"/neocoded-v*-darwin-arm64.tar.gz \
+      "${OUTPUT_DIR}"/neocoded-v*-darwin-amd64.tar.gz \
+      "${OUTPUT_DIR}"/neocoded-v*-checksums.txt
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "${WORK_DIR}"' EXIT
 

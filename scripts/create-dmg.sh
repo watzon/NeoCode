@@ -26,6 +26,7 @@ fi
 
 mkdir -p "${DMG_DIR}"
 rm -f "${DMG_PATH}"
+rm -f "${DMG_DIR}"/rw.*."${APP_NAME}".dmg
 mkdir -p "$(dirname "${BACKGROUND_PATH}")"
 
 python3 "${BACKGROUND_GENERATOR}" "${BACKGROUND_PATH}"
