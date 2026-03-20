@@ -48,6 +48,15 @@ test:
         -destination 'platform=macOS'
     @just server-test
 
+test-release:
+	@echo "Running release validation tests..."
+	xcodebuild test \
+		-project {{xcode_project}} \
+		-scheme {{scheme}} \
+		-destination 'platform=macOS' \
+		-only-testing:NeoCodeTests
+	@just server-test
+
 server-test:
 	@echo "Running Go server tests..."
 	cd server && go test ./...
@@ -296,7 +305,7 @@ release version: sparkle-tools
         git commit -m "chore: bump version to ${VERSION} (build ${NEXT_BUILD})"
     fi
 
-    just test
+    just test-release
     just daemon-artifacts "${VERSION}"
     just dmg
     just notarize "${DMG_PATH}"
