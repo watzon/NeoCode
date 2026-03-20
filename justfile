@@ -15,6 +15,7 @@ archive_path := build_dir / app_name + ".xcarchive"
 app_bundle := release_dir / app_name + ".app"
 dmg_dir := "dist"
 dmg_path := dmg_dir / app_name + ".dmg"
+daemon_dir := dmg_dir / "daemon"
 
 clean:
     @echo "Cleaning build artifacts..."
@@ -45,6 +46,23 @@ test:
         -project {{xcode_project}} \
         -scheme {{scheme}} \
         -destination 'platform=macOS'
+    @just server-test
+
+server-test:
+	@echo "Running Go server tests..."
+	cd server && go test ./...
+
+server-run:
+	@echo "Starting NeoCode Go server..."
+	cd server && go run -ldflags "-X main.version=$$(../scripts/read-version.sh)" ./cmd/neocoded
+
+server-install:
+	@echo "Building and linking neocoded into ~/.local/bin..."
+	./scripts/install-neocoded.sh
+
+daemon-artifacts version:
+	@echo "Building daemon release artifacts for {{version}}..."
+	./scripts/build-daemon-artifacts.sh "{{version}}" "{{daemon_dir}}"
 
 archive: sparkle-tools
     @PUBLIC_KEY="$(./bin/generate_keys --account {{sparkle_key_account}} -p 2>/dev/null || true)"; \
@@ -205,7 +223,7 @@ release-notes version:
 
 release-local: clean test dmg
     @echo "Release build complete: {{dmg_path}}"
-    @echo "Next: just notarize {{dmg_path}} && just staple {{dmg_path}} && just appcast {{dmg_path}}"
+    @echo "Next: just daemon-artifacts X.Y.Z && just notarize {{dmg_path}} && just staple {{dmg_path}} && just appcast {{dmg_path}}"
 
 release version: sparkle-tools
     #!/usr/bin/env bash
@@ -279,6 +297,7 @@ release version: sparkle-tools
     fi
 
     just test
+    just daemon-artifacts "${VERSION}"
     just dmg
     just notarize "${DMG_PATH}"
     just staple "${DMG_PATH}"
@@ -288,7 +307,7 @@ release version: sparkle-tools
         git tag -a "${TAG}" -m "Release ${TAG}"
     fi
 
-    gh release create "${TAG}" "${DMG_PATH}" "${APPCAST_PATH}" \
+    gh release create "${TAG}" "${DMG_PATH}" "${APPCAST_PATH}" {{daemon_dir}}/* \
         --repo "{{github_repo}}" \
         --title "${RELEASE_TITLE}" \
         --notes-file "${NOTES_PATH}" \

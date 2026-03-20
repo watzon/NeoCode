@@ -30,6 +30,11 @@ protocol AppStoreDashboardStatsServing: AnyObject {
         range: DashboardTimeRange,
         projectPath: String?
     ) async -> DashboardSnapshot
+    func ingestSummaries(
+        _ ingestions: [DashboardSessionSummaryIngress],
+        range: DashboardTimeRange,
+        projectPath: String?
+    ) async -> DashboardSnapshot
 }
 
 protocol AppStoreWorkspaceToolServing {

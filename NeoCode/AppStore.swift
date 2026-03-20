@@ -59,7 +59,7 @@ final class AppStore {
     }
 
     private struct DashboardRuntimeService {
-        let service: any OpenCodeServicing
+        let service: any NeoCodeServicing
         let shouldStopAfterUse: Bool
     }
 
@@ -201,7 +201,7 @@ final class AppStore {
     var isRefreshingGitCommitPreview = false
     var refreshingGitStatusProjectPath: String?
     var refreshingGitCommitPreviewProjectPath: String?
-    private var liveServices: [ProjectSummary.ID: any OpenCodeServicing] = [:]
+    private var liveServices: [ProjectSummary.ID: any NeoCodeServicing] = [:]
     private var serviceConnectionIdentifiers: [ProjectSummary.ID: String] = [:]
     private var eventTasks: [ProjectSummary.ID: Task<Void, Never>] = [:]
     private var eventSubscriptionTokens: [ProjectSummary.ID: UUID] = [:]
@@ -255,7 +255,9 @@ final class AppStore {
     init() {
         let persistence = AppStorePersistence()
         let services = AppStoreServices()
-        let normalizedProjects = Self.normalizedProjects(persistence.projects.loadProjects())
+        let normalizedProjects = Self.normalizedProjects(
+            Self.removingPersistedTranscripts(from: persistence.projects.loadProjects())
+        )
         let extractedState = Self.extractTranscriptState(from: normalizedProjects)
         let loadedAppSettings = persistence.appSettings.loadSettings()
         let restoredWorkspaceSelection = persistence.workspaceSelection.loadSelection()
@@ -487,6 +489,19 @@ final class AppStore {
             refreshCommitPreviewIfLoaded: gitCommitPreview != nil,
             delay: .milliseconds(100)
         )
+
+        refreshSelectedSessionStats()
+
+        guard let selectedSessionID,
+              let projectID = selectedProject?.id,
+              let service = liveServices[projectID]
+        else {
+            return
+        }
+
+        Task { [weak self] in
+            await self?.loadMessages(for: selectedSessionID, using: service, projectID: projectID, allowCachedFallback: true)
+        }
     }
 
     var selectedSessionIsActivelyResponding: Bool {
@@ -795,6 +810,7 @@ final class AppStore {
 
         primePromptState(for: sessionID)
         scheduleGitRefreshLoop(for: selectedProject?.path)
+        refreshSelectedSessionStats()
     }
 
     func addProject(directoryURL: URL) {
@@ -977,7 +993,7 @@ final class AppStore {
     }
 
     @discardableResult
-    func createSession(in projectID: ProjectSummary.ID, using service: any OpenCodeServicing) async -> String? {
+    func createSession(in projectID: ProjectSummary.ID, using service: any NeoCodeServicing) async -> String? {
         selectedProjectID = projectID
         let pendingSessionID = stagePendingSession(in: projectID)
         return await ensureServerSession(for: pendingSessionID, in: projectID, using: service)
@@ -1209,7 +1225,7 @@ final class AppStore {
             return
         }
 
-        let batchSize = hasCachedSnapshot ? 2 : 4
+        let batchSize = hasCachedSnapshot ? 8 : 12
         var processedSessions = 0
         var cursor = 0
 
@@ -1218,41 +1234,50 @@ final class AppStore {
             let batch = Array(refreshWork[cursor..<nextCursor])
             cursor = nextCursor
 
-            var ingestions: [DashboardSessionIngress] = []
-            for item in batch {
-                guard let runtimeService = runtimeServices[item.project.id] else { continue }
+            let groupedBatch = Dictionary(grouping: batch, by: { $0.project.id })
+            var summaryIngresses: [DashboardSessionSummaryIngress] = []
+
+            for (projectID, items) in groupedBatch {
+                guard let runtimeService = runtimeServices[projectID],
+                      let firstItem = items.first else { continue }
+
                 dashboardStatus = DashboardRefreshStatus(
                     phase: initialPhase,
                     title: hasCachedSnapshot ? "Refreshing usage cache" : "Building usage cache",
                     detail: hasCachedSnapshot
                         ? "Updating only the sessions that changed since the cached snapshot was written."
-                        : "Reading historical session data and caching it so future launches can load instantly.",
+                        : "Reading lightweight session usage summaries so future launches stay fast.",
                     processedSessions: processedSessions,
                     totalSessions: refreshWork.count,
-                    currentProjectName: item.project.name,
-                    currentSessionTitle: item.session.title,
+                    currentProjectName: firstItem.project.name,
+                    currentSessionTitle: items.first?.session.title,
                     lastUpdatedAt: dashboardSnapshot?.generatedAt
                 )
 
                 do {
-                    let messages = try await runtimeService.service.listMessages(sessionID: item.session.id)
-                    ingestions.append(DashboardSessionIngress(project: item.descriptor, session: item.session, messages: messages))
+                    let summaries = try await runtimeService.service.listDashboardSessionSummaries(sessionIDs: items.map { $0.session.id })
+                    let byID = Dictionary(uniqueKeysWithValues: summaries.map { ($0.id, $0) })
+                    for item in items {
+                        if let summary = byID[item.session.id] {
+                            summaryIngresses.append(DashboardSessionSummaryIngress(project: item.descriptor, summary: summary))
+                        }
+                    }
                 } catch {
                     guard !Task.isCancelled, !(error is CancellationError) else {
                         stopDashboardOnlyRuntimes(runtimeServices, runtime: runtime)
                         return
                     }
-                    logger.error("Failed to fetch dashboard messages for session \(item.session.id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                    logger.error("Failed to fetch dashboard summaries for project \(firstItem.project.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
                 }
             }
 
-            if !ingestions.isEmpty {
-                dashboardSnapshot = await self.services.dashboardStats.ingest(
-                    ingestions,
+            if !summaryIngresses.isEmpty {
+                dashboardSnapshot = await self.services.dashboardStats.ingestSummaries(
+                    summaryIngresses,
                     range: selectedDashboardRange,
                     projectPath: selectedDashboardProject?.path
                 )
-                processedSessions += ingestions.count
+                processedSessions += summaryIngresses.count
             }
 
             await Task.yield()
@@ -1299,7 +1324,7 @@ final class AppStore {
 
         runtime.markUsed(for: project.path)
         let shouldStopAfterUse = !hadConnection && liveServices[project.id] == nil
-        return DashboardRuntimeService(service: OpenCodeClient(connection: connection), shouldStopAfterUse: shouldStopAfterUse)
+        return DashboardRuntimeService(service: NeoCodeClient(connection: connection), shouldStopAfterUse: shouldStopAfterUse)
     }
 
     func syncSelectedSession(using runtime: OpenCodeRuntime) async {
@@ -1434,7 +1459,7 @@ final class AppStore {
         return true
     }
 
-    private func liveService(for projectID: ProjectSummary.ID, runtime: OpenCodeRuntime) async -> (any OpenCodeServicing)? {
+    private func liveService(for projectID: ProjectSummary.ID, runtime: OpenCodeRuntime) async -> (any NeoCodeServicing)? {
         guard let project = projects.first(where: { $0.id == projectID }) else {
             logger.error("Could not resolve project for id: \(projectID.uuidString, privacy: .public)")
             lastError = "Could not find the selected project."
@@ -1451,8 +1476,8 @@ final class AppStore {
         }
 
         if let connection = runtime.connection(for: project.path) {
-            logger.debug("Creating fallback OpenCode client from runtime connection for project: \(project.path, privacy: .public)")
-            let liveClient = OpenCodeClient(connection: connection)
+            logger.debug("Creating fallback daemon client from runtime connection for project: \(project.path, privacy: .public)")
+            let liveClient = NeoCodeClient(connection: connection)
             liveServices[projectID] = liveClient
             serviceConnectionIdentifiers[projectID] = Self.connectionIdentifier(for: connection)
             reevaluateRuntimeRetention(using: runtime)
@@ -1658,7 +1683,7 @@ final class AppStore {
 
     @discardableResult
     func sendDraft(
-        using service: any OpenCodeServicing,
+        using service: any NeoCodeServicing,
         projectID: ProjectSummary.ID,
         sessionID: String,
         originatingSessionID: String? = nil,
@@ -1712,7 +1737,7 @@ final class AppStore {
         attachments: [ComposerAttachment],
         fileReferences: [ComposerPromptFileReference],
         options: OpenCodePromptOptions,
-        using service: any OpenCodeServicing,
+        using service: any NeoCodeServicing,
         projectID: ProjectSummary.ID,
         sessionID: String,
         originatingSessionID: String? = nil,
@@ -1842,7 +1867,7 @@ final class AppStore {
         messageID: String,
         in sessionID: String,
         projectID: ProjectSummary.ID,
-        using service: any OpenCodeServicing
+        using service: any NeoCodeServicing
     ) async -> Bool {
         let currentTranscript = transcript(for: sessionID)
         guard let preview = revertPreview(for: messageID, in: sessionID),
@@ -1925,7 +1950,7 @@ final class AppStore {
         newText: String,
         in sessionID: String,
         projectID: ProjectSummary.ID,
-        using service: any OpenCodeServicing
+        using service: any NeoCodeServicing
     ) async -> Bool {
         let trimmed = newText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty,
@@ -2033,7 +2058,7 @@ final class AppStore {
     func stopSession(
         sessionID: String,
         projectID: ProjectSummary.ID,
-        using service: any OpenCodeServicing
+        using service: any NeoCodeServicing
     ) async -> Bool {
         guard isSessionActivelyResponding(sessionID) else { return false }
 
@@ -2154,7 +2179,12 @@ final class AppStore {
         }
 
         do {
-            try await GitRepositoryService().push(in: projectPath)
+            guard let projectID = projects.first(where: { $0.path == projectPath })?.id,
+                  let service = liveServices[projectID] else {
+                lastError = GitClientUnavailableError().errorDescription
+                return false
+            }
+            try await service.pushGitChanges()
             lastError = nil
             await refreshGitStatus()
             return true
@@ -2242,7 +2272,7 @@ final class AppStore {
         using runtime: OpenCodeRuntime,
         includeComposerOptions: Bool,
         allowCachedFallback: Bool = true
-    ) async -> (any OpenCodeServicing)? {
+    ) async -> (any NeoCodeServicing)? {
         guard let project = projects.first(where: { $0.id == projectID }) else {
             logger.error("Could not resolve project for id: \(projectID.uuidString, privacy: .public)")
             lastError = "Could not find the selected project."
@@ -2259,7 +2289,7 @@ final class AppStore {
         }
 
         logger.info("Connecting store to runtime for project: \(project.path, privacy: .public)")
-        let service = OpenCodeClient(connection: connection)
+        let service = NeoCodeClient(connection: connection)
         let connectionIdentifier = Self.connectionIdentifier(for: connection)
         let connectionChanged = serviceConnectionIdentifiers[projectID] != connectionIdentifier || liveServices[projectID] == nil
 
@@ -2325,6 +2355,14 @@ final class AppStore {
         refreshThinkingLevels()
     }
 
+    func connectedService(forProjectPath projectPath: String) -> (ProjectSummary.ID, any NeoCodeServicing)? {
+        guard let project = projects.first(where: { $0.path == projectPath }),
+              let service = liveServices[project.id] else {
+            return nil
+        }
+        return (project.id, service)
+    }
+
     func disconnectLiveState() {
         cancelGitRefreshLoop()
 
@@ -2384,7 +2422,7 @@ final class AppStore {
         }
     }
 
-    private func loadComposerOptions(using service: any OpenCodeServicing, projectPath: String) async {
+    private func loadComposerOptions(using service: any NeoCodeServicing, projectPath: String) async {
         async let providersTask = Self.captureResult { try await service.listProviders() }
         async let agentsTask = Self.captureResult { try await service.listAgents() }
         async let commandsTask = Self.captureResult { try await service.listCommands() }
@@ -2510,7 +2548,7 @@ final class AppStore {
         }
     }
 
-    private func loadPendingPermissions(using service: any OpenCodeServicing, for projectID: ProjectSummary.ID) async {
+    private func loadPendingPermissions(using service: any NeoCodeServicing, for projectID: ProjectSummary.ID) async {
         do {
             let requests = try await service.listPermissions()
             var pendingRequests: [OpenCodePermissionRequest] = []
@@ -2527,7 +2565,7 @@ final class AppStore {
         }
     }
 
-    private func loadPendingQuestions(using service: any OpenCodeServicing, for projectID: ProjectSummary.ID) async {
+    private func loadPendingQuestions(using service: any NeoCodeServicing, for projectID: ProjectSummary.ID) async {
         do {
             let requests = try await service.listQuestions()
             replacePendingQuestions(requests, in: projectID)
@@ -2929,7 +2967,7 @@ final class AppStore {
     func compactSession(
         _ sessionID: String,
         projectID: ProjectSummary.ID,
-        using service: any OpenCodeServicing
+        using service: any NeoCodeServicing
     ) async -> Bool {
         guard let session = sessionSummary(for: sessionID, projectID: projectID) else {
             return false
@@ -3042,7 +3080,7 @@ final class AppStore {
         selectedBranch = "main"
     }
 
-    private func loadSessions(using service: any OpenCodeServicing, for projectID: ProjectSummary.ID, allowCachedFallback: Bool = false) async {
+    private func loadSessions(using service: any NeoCodeServicing, for projectID: ProjectSummary.ID, allowCachedFallback: Bool = false) async {
         beginSessionLoad(for: projectID)
         defer { endSessionLoad(for: projectID) }
 
@@ -3080,7 +3118,7 @@ final class AppStore {
         }
     }
 
-    private func loadSessionStatuses(using service: any OpenCodeServicing, for projectID: ProjectSummary.ID) async {
+    private func loadSessionStatuses(using service: any NeoCodeServicing, for projectID: ProjectSummary.ID) async {
         do {
             let remoteStatuses = try await service.listSessionStatuses()
             applyLiveSessionStatuses(remoteStatuses, projectID: projectID)
@@ -3141,7 +3179,7 @@ final class AppStore {
         }
     }
 
-    private func loadMessages(for sessionID: String, using service: any OpenCodeServicing, projectID: ProjectSummary.ID, allowCachedFallback: Bool = false) async {
+    private func loadMessages(for sessionID: String, using service: any NeoCodeServicing, projectID: ProjectSummary.ID, allowCachedFallback: Bool = false) async {
         let loadKey = "\(projectID.uuidString)|\(sessionID)"
         guard activeTranscriptLoadKeys.insert(loadKey).inserted else { return }
 
@@ -3212,7 +3250,7 @@ final class AppStore {
     }
 
     private func subscribeToEvents(
-        using service: any OpenCodeServicing,
+        using service: any NeoCodeServicing,
         projectID: ProjectSummary.ID,
         connectionIdentifier: String,
         runtime: OpenCodeRuntime
@@ -3459,6 +3497,7 @@ final class AppStore {
         upsertMessage(message, in: sessionID, projectID: projectID)
         reconcileLocalSessionActivityIfSettled(sessionID: sessionID)
         touchSession(sessionID: sessionID, projectID: projectID, updatedAt: message.timestamp)
+        refreshSessionStats(sessionID: sessionID, projectID: projectID)
         refreshSessionStatus(sessionID: sessionID, projectID: projectID)
 
         if partTriggersGitRefresh(part, projectID: projectID),
@@ -4170,7 +4209,7 @@ final class AppStore {
         in sessionID: String,
         projectID: ProjectSummary.ID,
         projectPath: String,
-        using service: any OpenCodeServicing
+        using service: any NeoCodeServicing
     ) async -> Bool {
         guard canDispatchQueuedMessages(for: sessionID),
               pendingPermission(for: sessionID) == nil,
@@ -4217,7 +4256,7 @@ final class AppStore {
         in sessionID: String,
         projectID: ProjectSummary.ID,
         projectPath: String,
-        using service: any OpenCodeServicing
+        using service: any NeoCodeServicing
     ) async -> Bool {
         guard pendingPermission(for: sessionID) == nil,
               pendingQuestion(for: sessionID) == nil,
@@ -4486,7 +4525,7 @@ final class AppStore {
         return autoRespondedPermissionIDs[request.id] == nil
     }
 
-    private func autoRespondToPermission(_ request: OpenCodePermissionRequest, projectID: ProjectSummary.ID, service: any OpenCodeServicing) async {
+    private func autoRespondToPermission(_ request: OpenCodePermissionRequest, projectID: ProjectSummary.ID, service: any NeoCodeServicing) async {
         pruneAutoRespondedPermissions()
         guard autoRespondedPermissionIDs[request.id] == nil else { return }
 
@@ -4872,6 +4911,15 @@ final class AppStore {
         )
     }
 
+    func refreshSelectedSessionStats() {
+        guard let selectedSessionID,
+              let projectID = selectedProject?.id else {
+            return
+        }
+
+        refreshSessionStats(sessionID: selectedSessionID, projectID: projectID)
+    }
+
     private func indices(for sessionID: String, projectID: ProjectSummary.ID) -> (project: Int, session: Int)? {
         guard let projectIndex = projects.firstIndex(where: { $0.id == projectID }),
               let sessionIndex = projects[projectIndex].sessions.firstIndex(where: { $0.id == sessionID })
@@ -4919,7 +4967,7 @@ final class AppStore {
     }
 
     private func isNotFoundError(_ error: Error) -> Bool {
-        guard case OpenCodeClientError.httpStatus(404) = error else {
+        guard case NeoCodeClientError.httpStatus(404) = error else {
             return false
         }
 
@@ -4991,7 +5039,7 @@ final class AppStore {
     private func ensureServerSession(
         for sessionID: String,
         in projectID: ProjectSummary.ID,
-        using service: any OpenCodeServicing
+        using service: any NeoCodeServicing
     ) async -> String? {
         guard let session = self.session(for: sessionID) else {
             return nil
@@ -5236,7 +5284,7 @@ final class AppStore {
         return true
     }
 
-    private func resolveSessionForSend(projectID: ProjectSummary.ID, service: any OpenCodeServicing) async -> String? {
+    private func resolveSessionForSend(projectID: ProjectSummary.ID, service: any NeoCodeServicing) async -> String? {
         guard let currentSessionID = selectedSessionID,
               let session = self.session(for: currentSessionID)
         else {
@@ -5341,6 +5389,18 @@ final class AppStore {
         }
 
         return (sanitizedProjects, transcripts)
+    }
+
+    private static func removingPersistedTranscripts(from projects: [ProjectSummary]) -> [ProjectSummary] {
+        projects.map { project in
+            var sanitizedProject = project
+            sanitizedProject.sessions = project.sessions.map { session in
+                var sanitizedSession = session
+                sanitizedSession.transcript = []
+                return sanitizedSession
+            }
+            return sanitizedProject
+        }
     }
 
     private static func deduplicatedSessions(_ sessions: [SessionSummary]) -> [SessionSummary] {
@@ -5577,6 +5637,7 @@ final class AppStore {
                 transcript: transcript,
                 fallback: projects[indices.project].sessions[indices.session].status
             )
+            refreshSessionStats(sessionID: components[1], projectID: projectID)
         }
 
         if sessionID == nil && projectID == nil {

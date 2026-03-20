@@ -727,7 +727,7 @@ struct AppStoreSessionTests {
                     ]
                 ),
             ])
-            let service = MockOpenCodeService()
+            let service = MockNeoCodeService()
     
             store.selectSession("ses_1")
     
@@ -1440,7 +1440,7 @@ struct AppStoreSessionTests {
         @Test func appStoreEagerlyCreatesServerBackedSessionsWhenServiceIsAvailable() async throws {
             let store = AppStore(projects: [ProjectSummary(name: "NeoCode", path: "/tmp/NeoCode")])
             let now = Date()
-            let service = MockOpenCodeService(
+            let service = MockNeoCodeService(
                 createdSession: OpenCodeSession(
                     id: "ses_created",
                     title: nil,
@@ -1514,7 +1514,7 @@ struct AppStoreSessionTests {
                     ]
                 ),
             ])
-            let service = MockOpenCodeService()
+            let service = MockNeoCodeService()
     
             store.selectSession("ses_1")
             store.draft = "Queued follow-up"
@@ -1571,7 +1571,7 @@ struct AppStoreSessionTests {
                     ]
                 ),
             ])
-            let service = MockOpenCodeService(sendPromptError: TestFailure.failed("send failed"))
+            let service = MockNeoCodeService(sendPromptError: TestFailure.failed("send failed"))
     
             store.selectSession("ses_1")
             let didSend = await store.resendEditedMessage(

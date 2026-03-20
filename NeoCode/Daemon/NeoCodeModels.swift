@@ -231,6 +231,22 @@ struct OpenCodeTokenUsage: Decodable, Equatable, Sendable {
 struct OpenCodeMessageEnvelope: Decodable, Equatable, Sendable {
     let info: OpenCodeMessageInfo
     let parts: [OpenCodePart]
+
+    init(info: OpenCodeMessageInfo, parts: [OpenCodePart]) {
+        self.info = info
+        self.parts = parts
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        info = try container.decode(OpenCodeMessageInfo.self, forKey: .info)
+        parts = try container.decodeIfPresent([OpenCodePart].self, forKey: .parts) ?? []
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case info
+        case parts
+    }
 }
 
 struct OpenCodeMessageInfo: Decodable, Equatable, Sendable {
@@ -244,6 +260,72 @@ struct OpenCodeMessageInfo: Decodable, Equatable, Sendable {
     let cost: Double?
     let tokens: OpenCodeTokenUsage?
     let time: OpenCodeTimeContainer?
+
+    init(
+        id: String,
+        sessionID: String?,
+        role: String,
+        summary: JSONValue?,
+        agent: String?,
+        providerID: String?,
+        modelID: String?,
+        cost: Double?,
+        tokens: OpenCodeTokenUsage?,
+        time: OpenCodeTimeContainer?
+    ) {
+        self.id = id
+        self.sessionID = sessionID
+        self.role = role
+        self.summary = summary
+        self.agent = agent
+        self.providerID = providerID
+        self.modelID = modelID
+        self.cost = cost
+        self.tokens = tokens
+        self.time = time
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        sessionID = try container.decodeIfPresent(String.self, forKey: .sessionID)
+        role = try container.decode(String.self, forKey: .role)
+        summary = try container.decodeIfPresent(JSONValue.self, forKey: .summary)
+        agent = try container.decodeIfPresent(String.self, forKey: .agent)
+        if let provider = try container.decodeIfPresent(String.self, forKey: .providerID),
+           let model = try container.decodeIfPresent(String.self, forKey: .modelID) {
+            providerID = provider
+            modelID = model
+        } else if let nestedModel = try container.decodeIfPresent(NestedModel.self, forKey: .model) {
+            providerID = nestedModel.providerID
+            modelID = nestedModel.modelID
+        } else {
+            providerID = try container.decodeIfPresent(String.self, forKey: .providerID)
+            modelID = try container.decodeIfPresent(String.self, forKey: .modelID)
+        }
+        cost = try container.decodeIfPresent(Double.self, forKey: .cost)
+        tokens = try container.decodeIfPresent(OpenCodeTokenUsage.self, forKey: .tokens)
+        time = try container.decodeIfPresent(OpenCodeTimeContainer.self, forKey: .time)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case sessionID
+        case role
+        case summary
+        case agent
+        case providerID
+        case modelID
+        case model
+        case cost
+        case tokens
+        case time
+    }
+
+    private struct NestedModel: Decodable, Equatable, Sendable {
+        let providerID: String
+        let modelID: String
+    }
 
     nonisolated var createdAt: Date? { time?.created }
     nonisolated var completedAt: Date? { time?.completed }
@@ -391,6 +473,71 @@ struct OpenCodePart: Decodable, Equatable, Sendable {
     let state: OpenCodeToolState?
     let time: OpenCodeTimeContainer?
 
+    init(
+        id: String,
+        sessionID: String?,
+        messageID: String?,
+        type: Kind,
+        text: String?,
+        tool: String?,
+        mime: String?,
+        filename: String?,
+        url: String?,
+        source: OpenCodeFileSource?,
+        state: OpenCodeToolState?,
+        time: OpenCodeTimeContainer?
+    ) {
+        self.id = id
+        self.sessionID = sessionID
+        self.messageID = messageID
+        self.type = type
+        self.text = text
+        self.tool = tool
+        self.mime = mime
+        self.filename = filename
+        self.url = url
+        self.source = source
+        self.state = state
+        self.time = time
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
+        sessionID = try container.decodeIfPresent(String.self, forKey: .sessionID)
+        messageID = try container.decodeIfPresent(String.self, forKey: .messageID)
+        type = try container.decodeIfPresent(Kind.self, forKey: .type) ?? .unknown
+        if let string = try container.decodeIfPresent(String.self, forKey: .text) {
+            text = string
+        } else if let object = try container.decodeIfPresent(OpenCodeFileSourceText.self, forKey: .text) {
+            text = object.value
+        } else {
+            text = nil
+        }
+        tool = try container.decodeIfPresent(String.self, forKey: .tool)
+        mime = try container.decodeIfPresent(String.self, forKey: .mime)
+        filename = try container.decodeIfPresent(String.self, forKey: .filename)
+        url = try container.decodeIfPresent(String.self, forKey: .url)
+        source = try container.decodeIfPresent(OpenCodeFileSource.self, forKey: .source)
+        state = try container.decodeIfPresent(OpenCodeToolState.self, forKey: .state)
+        time = try container.decodeIfPresent(OpenCodeTimeContainer.self, forKey: .time)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case sessionID
+        case messageID
+        case type
+        case text
+        case tool
+        case mime
+        case filename
+        case url
+        case source
+        case state
+        case time
+    }
+
     nonisolated var updatedAt: Date? { time?.completed ?? time?.updated ?? time?.created }
     nonisolated var toolStatus: OpenCodeToolState.Status? { state?.status }
     nonisolated var trimmedText: String { (text ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -439,7 +586,7 @@ struct OpenCodePart: Decodable, Equatable, Sendable {
             switch toolStatus {
             case .completed, .error:
                 return false
-            case .pending, .running, .none:
+            case .pending, .running, .unknown, .none:
                 return true
             }
         case .text, .reasoning, .file, .diff, .compaction, .unknown:
@@ -483,7 +630,7 @@ struct OpenCodePart: Decodable, Equatable, Sendable {
                 return "\(name) completed\n\(state?.output?.displayString ?? "")".trimmingCharacters(in: .whitespacesAndNewlines)
             case .error:
                 return "\(name) failed\n\(state?.error ?? "Unknown error")"
-            case .running, .pending, .none:
+            case .running, .pending, .unknown, .none:
                 return "\(name) running\n\(state?.input?.displayString ?? "")".trimmingCharacters(in: .whitespacesAndNewlines)
             }
         case .file:
@@ -576,6 +723,12 @@ struct OpenCodeToolState: Decodable, Equatable, Sendable {
         case running
         case completed
         case error
+        case unknown
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            self = Status(rawValue: (try? container.decode(String.self)) ?? "") ?? .unknown
+        }
     }
 
     let status: Status?

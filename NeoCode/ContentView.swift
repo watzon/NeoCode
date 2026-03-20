@@ -38,7 +38,11 @@ struct ContentView: View {
         )
         .background(WindowChromeConfigurator(updateService: updateService))
         .overlay(alignment: .topTrailing) {
-            if let toastMessage {
+            if let runtimeStartupMessage {
+                StatusToast(message: runtimeStartupMessage)
+                    .padding(.top, 18)
+                    .padding(.trailing, 18)
+            } else if let toastMessage {
                 ErrorToast(message: toastMessage)
                     .padding(.top, 18)
                     .padding(.trailing, 18)
@@ -61,6 +65,17 @@ struct ContentView: View {
 
     private var selectedRuntimeFailureMessage: String? {
         runtime.failureMessage(for: store.selectedProject?.path)
+    }
+
+    private var runtimeStartupMessage: String? {
+        guard let projectPath = store.selectedProject?.path,
+              case .starting = runtime.state(for: projectPath) else {
+            return nil
+        }
+
+        let detail = runtime.detailLabel(for: projectPath)
+        let projectName = URL(fileURLWithPath: projectPath).lastPathComponent
+        return detail == projectName ? nil : detail
     }
 
     private func showToast(_ message: String?) {

@@ -195,16 +195,16 @@ enum OpenCodeEventDecoder {
     }
 }
 
-enum OpenCodeClientError: LocalizedError {
+enum NeoCodeClientError: LocalizedError {
     case invalidResponse
     case httpStatus(Int)
 
     var errorDescription: String? {
         switch self {
         case .invalidResponse:
-            return "OpenCode returned an invalid response."
+            return "NeoCode server returned an invalid response."
         case .httpStatus(let statusCode):
-            return "OpenCode request failed with status \(statusCode)."
+            return "NeoCode server request failed with status \(statusCode)."
         }
     }
 }

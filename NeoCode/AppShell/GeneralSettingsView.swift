@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct GeneralSettingsView: View {
     @Environment(AppStore.self) private var store
+    @Environment(OpenCodeRuntime.self) private var runtime
     @Environment(\.locale) private var locale
     @State private var workspaceToolOptions: [WorkspaceToolSettingsOption] = [.autoDetect]
 
@@ -99,12 +100,12 @@ struct GeneralSettingsView: View {
                     SettingsDivider()
 
                     SettingsControlRow(
-                        title: localized("OpenCode executable", locale: locale),
-                        detail: localized("Optionally set the full path to the OpenCode CLI if NeoCode cannot find it automatically on PATH.", locale: locale),
+                        title: localized("NeoCode server executable", locale: locale),
+                        detail: localized("Optionally set the full path to the `neocoded` binary if you want to override NeoCode's managed daemon install. By default NeoCode prefers its app-managed daemon, then falls back to PATH when the versions match.", locale: locale),
                         accessory: {
                             HStack(spacing: 8) {
                                 TextField(
-                                    "/opt/homebrew/bin/opencode",
+                                    "/Users/you/.local/bin/neocoded",
                                     text: opencodeExecutablePathBinding
                                 )
                                 .neoWritingToolsDisabled()
@@ -139,6 +140,23 @@ struct GeneralSettingsView: View {
                                     .foregroundStyle(NeoCodeTheme.textMuted)
                                 }
                             }
+                        }
+                    )
+
+                    SettingsDivider()
+
+                    SettingsControlRow(
+                        title: localized("Managed daemon", locale: locale),
+                        detail: runtime.daemonInstallStatus ?? localized("NeoCode automatically downloads the exact matching daemon version when needed. Use this to retry the install manually.", locale: locale),
+                        accessory: {
+                            Button(localized("Install matching daemon", locale: locale)) {
+                                Task {
+                                    await runtime.installMatchingDaemon()
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .font(.neoAction)
+                            .foregroundStyle(NeoCodeTheme.textSecondary)
                         }
                     )
                 }
@@ -287,7 +305,7 @@ struct GeneralSettingsView: View {
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = [.unixExecutable, .data]
         panel.prompt = localized("Choose", locale: locale)
-        panel.message = localized("Select the OpenCode executable NeoCode should launch.", locale: locale)
+        panel.message = localized("Select the `neocoded` executable NeoCode should launch.", locale: locale)
 
         if let currentPath = store.appSettings.general.opencodeExecutablePath {
             panel.directoryURL = URL(fileURLWithPath: currentPath).deletingLastPathComponent()

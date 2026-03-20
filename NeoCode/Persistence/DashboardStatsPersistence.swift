@@ -11,22 +11,27 @@ actor PersistedDashboardStatsStore {
         self.baseDirectoryURL = baseDirectoryURL
     }
 
-    func loadCache() -> DashboardStatsCache? {
+    func loadCache() async -> DashboardStatsCache? {
         guard let cacheURL,
               let data = try? Data(contentsOf: cacheURL)
         else {
             return nil
         }
 
-        return try? JSONDecoder().decode(DashboardStatsCache.self, from: data)
+        return await MainActor.run {
+            try? JSONDecoder().decode(DashboardStatsCache.self, from: data)
+        }
     }
 
-    func saveCache(_ cache: DashboardStatsCache) {
-        guard let cacheURL,
-              let data = try? JSONEncoder().encode(cache)
-        else {
+    func saveCache(_ cache: DashboardStatsCache) async {
+        guard let cacheURL else {
             return
         }
+
+        let data = await MainActor.run {
+            try? JSONEncoder().encode(cache)
+        }
+        guard let data else { return }
 
         do {
             try fileManager.createDirectory(

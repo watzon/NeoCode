@@ -63,7 +63,7 @@ struct EmptyConversationView: View {
 
                     Text(store.projects.isEmpty
                          ? localized("Use the project button in the Threads sidebar to add a folder. NeoCode will only show threads for projects you explicitly add.", locale: locale)
-                         : localized("Create a new thread or select one from the sidebar to begin chatting with the OpenCode runtime.", locale: locale))
+                         : localized("Create a new thread or select one from the sidebar to begin chatting with the NeoCode daemon.", locale: locale))
                         .font(.neoBody)
                         .foregroundStyle(NeoCodeTheme.textSecondary)
                         .multilineTextAlignment(.center)
@@ -99,6 +99,34 @@ struct ErrorToast: View {
                 .overlay(
                     RoundedRectangle(cornerRadius: 14)
                         .stroke(NeoCodeTheme.warning.opacity(0.45), lineWidth: 1)
+                )
+        )
+        .frame(maxWidth: 360, alignment: .trailing)
+        .shadow(color: Color.black.opacity(0.25), radius: 18, x: 0, y: 6)
+    }
+}
+
+struct StatusToast: View {
+    let message: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.small)
+
+            Text(message)
+                .font(.neoBody)
+                .foregroundStyle(NeoCodeTheme.textPrimary)
+                .lineLimit(2)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(NeoCodeTheme.panelRaised)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(NeoCodeTheme.lineStrong.opacity(0.45), lineWidth: 1)
                 )
         )
         .frame(maxWidth: 360, alignment: .trailing)

@@ -169,7 +169,7 @@ struct AppStoreComposerTests {
                     ]
                 ),
             ])
-            let service = MockOpenCodeService()
+            let service = MockNeoCodeService()
     
             store.selectSession("ses_1")
             let didSend = await store.resendEditedMessage(
@@ -358,7 +358,7 @@ struct AppStoreComposerTests {
                     ]
                 ),
             ])
-            let service = MockOpenCodeService()
+            let service = MockNeoCodeService()
     
             store.selectSession("ses_1")
             store.draft = "Current draft"
@@ -395,7 +395,7 @@ struct AppStoreComposerTests {
                     ]
                 ),
             ])
-            let service = MockOpenCodeService()
+            let service = MockNeoCodeService()
     
             store.selectSession("ses_1")
             store.availableCommands = [
@@ -446,7 +446,7 @@ struct AppStoreComposerTests {
                     ]
                 ),
             ])
-            let service = MockOpenCodeService()
+            let service = MockNeoCodeService()
     
             store.availableModels = [model]
             store.selectedModelID = model.id
@@ -477,7 +477,7 @@ struct AppStoreComposerTests {
                     ]
                 ),
             ])
-            let service = MockOpenCodeService()
+            let service = MockNeoCodeService()
     
             store.selectSession("ses_1")
             store.availableCommands = []
@@ -504,7 +504,7 @@ struct AppStoreComposerTests {
                     ]
                 ),
             ])
-            let service = MockOpenCodeService()
+            let service = MockNeoCodeService()
             let firstAttachment = ComposerAttachment(
                 name: "first.png",
                 mimeType: "image/png",
@@ -733,7 +733,7 @@ struct AppStoreComposerTests {
                     ]
                 ),
             ])
-            let service = MockOpenCodeService()
+            let service = MockNeoCodeService()
     
             store.selectSession("ses_1")
     
@@ -815,7 +815,7 @@ struct AppStoreComposerTests {
                     ]
                 ),
             ])
-            let service = MockOpenCodeService()
+            let service = MockNeoCodeService()
     
             store.selectSession("ses_1")
             store.draft = "Queued follow-up"
@@ -848,7 +848,7 @@ struct AppStoreComposerTests {
                     ]
                 ),
             ])
-            let service = MockOpenCodeService()
+            let service = MockNeoCodeService()
     
             store.selectSession("ses_1")
             store.draft = "Queued follow-up"
@@ -889,7 +889,7 @@ struct AppStoreComposerTests {
                     ]
                 ),
             ])
-            let service = MockOpenCodeService()
+            let service = MockNeoCodeService()
     
             store.selectSession("ses_1")
             store.draft = "Queued follow-up"
@@ -928,7 +928,7 @@ struct AppStoreComposerTests {
                     ]
                 ),
             ])
-            let service = MockOpenCodeService()
+            let service = MockNeoCodeService()
     
             store.selectSession("ses_1")
             store.draft = "Queued follow-up"
@@ -988,7 +988,7 @@ struct AppStoreComposerTests {
                     ]
                 ),
             ])
-            let service = MockOpenCodeService()
+            let service = MockNeoCodeService()
     
             store.selectSession("ses_1")
             store.availableCommands = [
@@ -1028,7 +1028,7 @@ struct AppStoreComposerTests {
                     ]
                 ),
             ])
-            let service = MockOpenCodeService(sendPromptError: TestFailure.failed("command failed"))
+            let service = MockNeoCodeService(sendPromptError: TestFailure.failed("command failed"))
     
             store.selectSession("ses_1")
             store.availableCommands = [

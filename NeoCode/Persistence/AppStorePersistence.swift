@@ -258,7 +258,7 @@ private extension SessionSummary {
     func cacheSnapshot(transcript: [ChatMessage]) -> SessionSummary {
         var session = self
         session.status = .idle
-        session.transcript = transcript.map(\.cacheSnapshot)
+        session.transcript = []
         session.isEphemeral = false
         return session
     }
@@ -266,7 +266,7 @@ private extension SessionSummary {
     var cacheSnapshot: SessionSummary {
         var session = self
         session.status = .idle
-        session.transcript = transcript.map(\.cacheSnapshot)
+        session.transcript = []
         session.isEphemeral = false
         return session
     }
@@ -274,7 +274,7 @@ private extension SessionSummary {
     var restoredFromCache: SessionSummary {
         var session = self
         session.status = .idle
-        session.transcript = transcript.map(\.restoredFromCache)
+        session.transcript = []
         session.isEphemeral = false
         return session
     }

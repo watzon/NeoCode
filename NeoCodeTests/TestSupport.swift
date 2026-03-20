@@ -209,7 +209,7 @@ final class MockURLProtocol: URLProtocol {
     override func stopLoading() {}
 }
 
-final class MockOpenCodeService: OpenCodeServicing {
+final class MockNeoCodeService: NeoCodeServicing {
     struct SentPrompt {
         let sessionID: String
         let text: String
@@ -304,6 +304,15 @@ final class MockOpenCodeService: OpenCodeServicing {
     func listProviders() async throws -> OpenCodeProviderResponse { fatalError("Unused in test") }
     func listAgents() async throws -> [OpenCodeAgent] { [] }
     func listMessages(sessionID: String) async throws -> [OpenCodeMessageEnvelope] { [] }
+    func listDashboardSessionSummaries(sessionIDs: [String]) async throws -> [DashboardRemoteSessionSummary] { [] }
+    func gitStatus() async throws -> GitRepositoryStatus { .notRepository }
+    func gitCommitPreview() async throws -> GitCommitPreview { fatalError("Unused in test") }
+    func initializeGitRepository() async throws {}
+    func switchGitBranch(named name: String) async throws {}
+    func createGitBranch(named name: String) async throws {}
+    func commitGitChanges(message: String, includeUnstaged: Bool) async throws {}
+    func pushGitChanges() async throws {}
+    func listGitBranches() async throws -> (branches: [String], current: String) { ([], "main") }
 
     func sendPromptAsync(
         sessionID: String,

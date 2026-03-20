@@ -1,6 +1,6 @@
 # Releasing NeoCode
 
-This document describes the full local release flow for NeoCode: Sparkle signing, Developer ID export, notarization, appcast generation, and GitHub release publishing.
+This document describes the full local release flow for NeoCode: Sparkle signing, Developer ID export, notarization, daemon packaging, appcast generation, and GitHub release publishing.
 
 The goal is simple: when it is time to ship, the expected command is:
 
@@ -23,15 +23,18 @@ NeoCode ships outside the Mac App Store and uses:
 - Sparkle for in-app updates
 - Developer ID signing for distribution
 - Apple notarization for DMG delivery
-- GitHub Releases for hosting both the DMG and `appcast.xml`
+- GitHub Releases for hosting the DMG, `appcast.xml`, and version-matched `neocoded` daemon artifacts
 
 Beta releases use the same signed/notarized pipeline, but are published to GitHub as prereleases.
 
 Important:
 
 - keep `MARKETING_VERSION` numeric (for example `0.1.0`)
+- the app marketing version and daemon version must match exactly for now
 - do not use `1.0.0-beta.1` for the app bundle version; macOS bundle marketing versions are expected to remain numeric
 - use the GitHub prerelease flag to communicate beta status instead
+
+NeoCode downloads the daemon from the GitHub release matching the app version whenever it cannot find an exact matching local daemon. That makes the daemon asset names and checksums part of the public release contract.
 
 ## Sparkle Keys
 
@@ -140,14 +143,15 @@ What it does:
 5. Bumps `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` if needed
 6. Commits the version bump
 7. Runs the test suite
-8. Archives and exports a signed Developer ID build
-9. Creates `dist/NeoCode.dmg`
-10. Notarizes the DMG
-11. Staples the notarization ticket
-12. Generates `appcast.xml` from the final stapled DMG
-13. Creates the git tag if it does not exist
-14. Creates the GitHub release and uploads the DMG + appcast
-15. Marks the GitHub release as a prerelease when you use `just release-beta`
+8. Builds signed `neocoded` daemon archives for macOS arm64 and amd64 plus checksums
+9. Archives and exports a signed Developer ID build
+10. Creates `dist/NeoCode.dmg`
+11. Notarizes the DMG
+12. Staples the notarization ticket
+13. Generates `appcast.xml` from the final stapled DMG
+14. Creates the git tag if it does not exist
+15. Creates the GitHub release and uploads the DMG + appcast + daemon artifacts
+16. Marks the GitHub release as a prerelease when you use `just release-beta`
 
 ## Release Notes
 
@@ -174,11 +178,12 @@ If you do not want the all-in-one command, use this sequence:
 
 ```bash
 just test
+just daemon-artifacts X.Y.Z
 just dmg
 just notarize dist/NeoCode.dmg
 just staple dist/NeoCode.dmg
 just appcast dist/NeoCode.dmg
-gh release create vX.Y.Z dist/NeoCode.dmg appcast.xml \
+gh release create vX.Y.Z dist/NeoCode.dmg appcast.xml dist/daemon/* \
   --repo watzon/NeoCode \
   --title "NeoCode vX.Y.Z" \
   --notes-file release-notes/vX.Y.Z.md
@@ -198,6 +203,9 @@ That means every published GitHub release must include:
 
 - `dist/NeoCode.dmg`
 - `appcast.xml`
+- `dist/daemon/neocoded-vX.Y.Z-darwin-arm64.tar.gz`
+- `dist/daemon/neocoded-vX.Y.Z-darwin-amd64.tar.gz`
+- `dist/daemon/neocoded-vX.Y.Z-checksums.txt`
 
 ## Important Release Assumptions
 
@@ -208,6 +216,7 @@ These are part of the expected release contract:
 - the same Sparkle signing key must continue to be used unless there is an intentional key rotation
 - notarization must happen before appcast generation so the signed bytes in the appcast match the stapled DMG users will download
 - public releases must use Developer ID signing plus notarization; ad hoc or self-signed binaries are not valid release artifacts
+- daemon release archives must be built from the same version tag as the app and published in the same GitHub release
 
 ## Key Rotation
 
@@ -273,10 +282,12 @@ Before saying a release is done, verify:
 
 - tests passed
 - DMG exists in `dist/NeoCode.dmg`
+- daemon archives and checksums exist in `dist/daemon/`
 - DMG notarization succeeded
 - DMG was stapled
 - `appcast.xml` was generated from the stapled DMG
 - GitHub release exists with both release assets attached
+- GitHub release includes both daemon archives and the daemon checksums file
 - release notes are final and user-facing
 
 ## Short Version
