@@ -155,6 +155,7 @@ final class AppStore {
     var loadingTranscriptSessionID: String?
     private(set) var lifecycleRefreshToken = 0
     private(set) var sessionUIRevision = 0
+    private var newlyCreatedSessionIDs = Set<String>()
     var isSending = false
     var queuedMessagesBySessionID: [String: [ComposerQueuedMessage]] = [:]
     var activeTodosBySessionID: [String: SessionTodoSnapshot] = [:]
@@ -447,6 +448,12 @@ final class AppStore {
     func sessionSummary(for sessionID: String) -> SessionSummary? {
         let _ = sessionUIRevision
         return session(for: sessionID)
+    }
+
+    func showsNewSessionEmptyState(for sessionID: String?) -> Bool {
+        guard let sessionID else { return false }
+        let _ = sessionUIRevision
+        return newlyCreatedSessionIDs.contains(sessionID)
     }
 
     var selectedProject: ProjectSummary? {
@@ -3790,6 +3797,7 @@ final class AppStore {
     private func removeSession(_ sessionID: String, in projectID: ProjectSummary.ID) {
         guard let projectIndex = projects.firstIndex(where: { $0.id == projectID }) else { return }
         cancelPendingSessionCreation(for: sessionID)
+        clearNewlyCreatedSession(sessionID)
         discardBufferedTextDeltas(for: sessionID, projectID: projectID)
         clearLocalSessionActivity(sessionID)
         queuedMessagesBySessionID.removeValue(forKey: sessionID)
@@ -5002,6 +5010,9 @@ final class AppStore {
         state.messages = transcript
         state.revision &+= 1
         transcriptStateBySessionID[sessionID] = state
+        if !transcript.isEmpty {
+            clearNewlyCreatedSession(sessionID)
+        }
     }
 
     private func seedTranscript(_ transcript: [ChatMessage], for sessionID: String) {
@@ -5009,10 +5020,12 @@ final class AppStore {
 
         if let existingState = transcriptStateBySessionID[sessionID],
            existingState.messages.count >= transcript.count {
+            clearNewlyCreatedSession(sessionID)
             return
         }
 
         transcriptStateBySessionID[sessionID] = SessionTranscriptState(messages: transcript, revision: 0)
+        clearNewlyCreatedSession(sessionID)
     }
 
     private func removeTranscript(for sessionID: String) {
@@ -5031,6 +5044,27 @@ final class AppStore {
         if let infos = messageInfosBySessionID.removeValue(forKey: sourceSessionID) {
             messageInfosBySessionID[destinationSessionID] = infos
         }
+    }
+
+    private func trackNewlyCreatedSession(_ sessionID: String) {
+        guard newlyCreatedSessionIDs.insert(sessionID).inserted else { return }
+        bumpSessionUIRevision()
+    }
+
+    private func transferNewlyCreatedSession(from sourceSessionID: String, to destinationSessionID: String) {
+        guard sourceSessionID != destinationSessionID,
+              newlyCreatedSessionIDs.remove(sourceSessionID) != nil
+        else {
+            return
+        }
+
+        newlyCreatedSessionIDs.insert(destinationSessionID)
+        bumpSessionUIRevision()
+    }
+
+    private func clearNewlyCreatedSession(_ sessionID: String) {
+        guard newlyCreatedSessionIDs.remove(sessionID) != nil else { return }
+        bumpSessionUIRevision()
     }
 
     @discardableResult
@@ -5278,6 +5312,7 @@ final class AppStore {
             composerState: currentSessionComposerState
         )
         upsert(session: session, in: projectID, preferTopInsertion: true)
+        trackNewlyCreatedSession(session.id)
         selectedProjectID = projectID
         restoreComposerOptionsFromCache(for: projectPath(for: projectID))
         selectedSessionID = session.id
@@ -5341,6 +5376,7 @@ final class AppStore {
                 composerState: ephemeralSession.composerState
             )
         )
+        transferNewlyCreatedSession(from: ephemeralSessionID, to: created.id)
         selectedSessionID = created.id
 
         if wasYoloEnabled {
