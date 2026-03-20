@@ -316,7 +316,10 @@ release version: sparkle-tools
         git tag -a "${TAG}" -m "Release ${TAG}"
     fi
 
-    gh release create "${TAG}" "${DMG_PATH}" "${APPCAST_PATH}" {{daemon_dir}}/* \
+    gh release create "${TAG}" "${DMG_PATH}" "${APPCAST_PATH}" \
+        "{{daemon_dir}}/neocoded-v${VERSION}-darwin-arm64.tar.gz" \
+        "{{daemon_dir}}/neocoded-v${VERSION}-darwin-amd64.tar.gz" \
+        "{{daemon_dir}}/neocoded-v${VERSION}-checksums.txt" \
         --repo "{{github_repo}}" \
         --title "${RELEASE_TITLE}" \
         --notes-file "${NOTES_PATH}" \
