@@ -13,7 +13,7 @@ struct NeoCodeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(id: "main-window") {
             if AppTestMode.isUnitTestHost {
                 UnitTestHostView()
             } else {
@@ -33,7 +33,7 @@ struct NeoCodeApp: App {
             DeveloperPanelCommands()
         }
 
-        WindowGroup(id: DeveloperPanelView.windowID) {
+        Window("Developer Panel", id: DeveloperPanelView.windowID) {
             if AppTestMode.isUnitTestHost {
                 UnitTestHostView()
             } else {

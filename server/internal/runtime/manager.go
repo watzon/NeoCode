@@ -199,28 +199,44 @@ func (m *Manager) startEventBridge(workspace core.Workspace, entry *entry) {
 	ctx, cancel := context.WithCancel(context.Background())
 	entry.stopStream = cancel
 	go func() {
-		events, errs, err := entry.client.StreamEvents(ctx)
-		if err != nil {
-			log.Printf("runtime stream start failed workspace=%s error=%v", workspace.ID, err)
-			m.eventSink(core.ServerEvent{ID: "bridge_error", WorkspaceID: workspace.ID, Type: "runtime.stream.error", Payload: map[string]any{"error": err.Error()}, CreatedAt: time.Now().UTC()})
-			return
-		}
 		for {
+			events, errs, err := entry.client.StreamEvents(ctx)
+			if err != nil {
+				log.Printf("runtime stream start failed workspace=%s error=%v", workspace.ID, err)
+				m.eventSink(core.ServerEvent{ID: "bridge_error", WorkspaceID: workspace.ID, Type: "runtime.stream.error", Payload: map[string]any{"error": err.Error()}, CreatedAt: time.Now().UTC()})
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(time.Second):
+					continue
+				}
+			}
+
+			disconnected := false
+			for !disconnected {
+				select {
+				case <-ctx.Done():
+					return
+				case err, ok := <-errs:
+					if ok && err != nil {
+						log.Printf("runtime stream error workspace=%s error=%v", workspace.ID, err)
+						m.eventSink(core.ServerEvent{ID: "bridge_error", WorkspaceID: workspace.ID, Type: "runtime.stream.error", Payload: map[string]any{"error": err.Error()}, CreatedAt: time.Now().UTC()})
+					}
+					disconnected = true
+				case event, ok := <-events:
+					if !ok {
+						disconnected = true
+						continue
+					}
+					event.WorkspaceID = workspace.ID
+					m.eventSink(event)
+				}
+			}
+
 			select {
 			case <-ctx.Done():
 				return
-			case err, ok := <-errs:
-				if ok && err != nil {
-					log.Printf("runtime stream error workspace=%s error=%v", workspace.ID, err)
-					m.eventSink(core.ServerEvent{ID: "bridge_error", WorkspaceID: workspace.ID, Type: "runtime.stream.error", Payload: map[string]any{"error": err.Error()}, CreatedAt: time.Now().UTC()})
-				}
-				return
-			case event, ok := <-events:
-				if !ok {
-					return
-				}
-				event.WorkspaceID = workspace.ID
-				m.eventSink(event)
+			case <-time.After(time.Second):
 			}
 		}
 	}()

@@ -14,6 +14,35 @@ struct SessionDebugEvent: Identifiable, Equatable, Hashable, Sendable {
     }
 }
 
+struct SessionInProgressDiagnostic: Identifiable, Equatable, Hashable, Sendable {
+    enum Category: String, Equatable, Hashable, Sendable {
+        case assistantOutput = "Assistant output"
+        case toolCall = "Tool call"
+        case backgroundTool = "Background tool"
+    }
+
+    enum BlockingReason: String, Equatable, Hashable, Sendable {
+        case messageIncomplete = "message incomplete"
+        case partIncomplete = "part incomplete"
+        case detachedBackgroundTool = "detached background tool"
+        case foregroundToolRunning = "foreground tool still running"
+        case unexpectedUserProgress = "user message still marked active"
+        case orphanedAfterRefresh = "orphaned after refresh"
+        case unknown = "unknown"
+    }
+
+    let id: String
+    let messageID: String?
+    let title: String
+    let detail: String?
+    let category: Category
+    let isBlocking: Bool
+    let role: String
+    let blockingReason: BlockingReason
+    let parentMessageCompletedAt: Date?
+    let itemTimestamp: Date
+}
+
 struct SessionDebugSnapshot: Equatable, Sendable {
     let projectName: String
     let projectPath: String
@@ -24,6 +53,8 @@ struct SessionDebugSnapshot: Equatable, Sendable {
     let isActivelyResponding: Bool
     let hasLocalActivity: Bool
     let inProgressMessageCount: Int
+    let blockingInProgressMessageCount: Int
+    let nonBlockingInProgressMessageCount: Int
     let bufferedDeltaCount: Int
     let pendingPermissionCount: Int
     let pendingQuestionCount: Int
@@ -31,7 +62,12 @@ struct SessionDebugSnapshot: Equatable, Sendable {
     let transcriptMessageCount: Int
     let transcriptRevision: Int
     let lastUpdatedAt: Date
+    let lastLiveEventAt: Date?
+    let lastLiveEventLabel: String?
+    let lastTranscriptRefreshAt: Date?
+    let lastCompletedMessageAt: Date?
     let possibleStuckReason: String?
+    let inProgressDiagnostics: [SessionInProgressDiagnostic]
     let recentEvents: [SessionDebugEvent]
 
     var copySummary: String {
@@ -58,6 +94,8 @@ struct SessionDebugSnapshot: Equatable, Sendable {
             "Actively responding: \(isActivelyResponding)",
             "Local activity: \(hasLocalActivity)",
             "In-progress messages: \(inProgressMessageCount)",
+            "Blocking in-progress messages: \(blockingInProgressMessageCount)",
+            "Non-blocking in-progress messages: \(nonBlockingInProgressMessageCount)",
             "Buffered deltas: \(bufferedDeltaCount)",
             "Pending permissions: \(pendingPermissionCount)",
             "Pending questions: \(pendingQuestionCount)",
@@ -65,18 +103,43 @@ struct SessionDebugSnapshot: Equatable, Sendable {
             "Transcript messages: \(transcriptMessageCount)",
             "Transcript revision: \(transcriptRevision)",
             "Last updated: \(lastUpdatedAt.formatted(date: .abbreviated, time: .standard))",
+            "Last live event: \(formattedDate(lastLiveEventAt, fallback: lastLiveEventLabel.map { "\($0)" } ?? "none"))",
+            "Last transcript refresh: \(formattedDate(lastTranscriptRefreshAt))",
+            "Last completed message: \(formattedDate(lastCompletedMessageAt))",
             "Possible stuck reason: \(possibleStuckReason ?? "none")",
         ]
+
+        let progressLines = inProgressDiagnostics.map { diagnostic in
+            let blockingLabel = diagnostic.isBlocking ? "blocking" : "non-blocking"
+            let detailSuffix: String
+            if let detail = diagnostic.detail, !detail.isEmpty {
+                detailSuffix = " - \(detail)"
+            } else {
+                detailSuffix = ""
+            }
+
+            return "[\(diagnostic.category.rawValue)] [\(blockingLabel)] [reason=\(diagnostic.blockingReason.rawValue)] [role=\(diagnostic.role)] \(diagnostic.title)\(detailSuffix)"
+        }
 
         let eventLines = recentEvents.map {
             "[\($0.timestamp.formatted(date: .omitted, time: .standard))] [\($0.category)] \($0.message)"
         }
 
-        if eventLines.isEmpty {
-            return header.joined(separator: "\n")
+        var sections = header
+        if !progressLines.isEmpty {
+            sections += ["", "In-progress diagnostics:"] + progressLines
         }
 
-        return (header + ["", "Recent events:"] + eventLines).joined(separator: "\n")
+        if eventLines.isEmpty {
+            return sections.joined(separator: "\n")
+        }
+
+        return (sections + ["", "Recent events:"] + eventLines).joined(separator: "\n")
+    }
+
+    private func formattedDate(_ date: Date?, fallback: String = "none") -> String {
+        guard let date else { return fallback }
+        return date.formatted(date: .abbreviated, time: .standard)
     }
 }
 

@@ -242,7 +242,7 @@ struct ConversationView: View {
     }
 
     private var isStopMode: Bool {
-        store.selectedSession?.status.isActive == true
+        store.selectedSessionIsActivelyResponding
     }
 
     private var rawAuxiliaryTrigger: ComposerAuxiliaryTrigger? {

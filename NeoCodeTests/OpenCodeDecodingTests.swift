@@ -402,6 +402,86 @@ struct OpenCodeDecodingTests {
             #expect(resolved.cacheWriteTokens == 50)
         }
 
+        @Test func transcriptMarksCompletedToolPartsAsNotInProgress() throws {
+            let envelopes: [OpenCodeMessageEnvelope] = try decode(
+                """
+                [
+                  {
+                    "info": {
+                      "id": "msg_tool_done",
+                      "sessionID": "ses_done",
+                      "role": "tool",
+                      "time": {
+                        "created": "2026-03-20T12:00:00Z",
+                        "completed": "2026-03-20T12:00:05Z"
+                      }
+                    },
+                    "parts": [
+                      {
+                        "id": "part_tool_done",
+                        "sessionID": "ses_done",
+                        "messageID": "msg_tool_done",
+                        "type": "tool",
+                        "tool": "bash",
+                        "state": {
+                          "status": "running",
+                          "input": {
+                            "command": "npm test"
+                          }
+                        },
+                        "time": {
+                          "created": "2026-03-20T12:00:00Z"
+                        }
+                      }
+                    ]
+                  }
+                ]
+                """
+            )
+
+            let transcript = ChatMessage.makeTranscript(from: envelopes)
+
+            #expect(transcript.count == 1)
+            #expect(transcript[0].isInProgress == false)
+        }
+
+        @Test func transcriptMarksReloadedUserTextAsNotInProgress() throws {
+            let envelopes: [OpenCodeMessageEnvelope] = try decode(
+                """
+                [
+                  {
+                    "info": {
+                      "id": "msg_user",
+                      "sessionID": "ses_user",
+                      "role": "user",
+                      "time": {
+                        "created": "2026-03-20T12:00:00Z"
+                      }
+                    },
+                    "parts": [
+                      {
+                        "id": "part_user_text",
+                        "sessionID": "ses_user",
+                        "messageID": "msg_user",
+                        "type": "text",
+                        "text": "hello",
+                        "time": {
+                          "created": "2026-03-20T12:00:00Z"
+                        }
+                      }
+                    ]
+                  }
+                ]
+                """
+            )
+
+            let transcript = ChatMessage.makeTranscript(from: envelopes)
+
+            #expect(transcript.count == 1)
+            #expect(transcript[0].role == .user)
+            #expect(transcript[0].isInProgress == false)
+        }
+
         @Test func parsesMultiLineSSEPayloadsBeforeFlushing() throws {
             var parser = OpenCodeSSEParser()
     

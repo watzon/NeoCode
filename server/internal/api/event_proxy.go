@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 func (h *Handler) handleWorkspaceEventStream(w http.ResponseWriter, r *http.Request, workspaceID string) {
@@ -16,24 +17,57 @@ func (h *Handler) handleWorkspaceEventStream(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	defer resp.Body.Close()
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.WriteHeader(resp.StatusCode)
-	_ = streamEventProxyFrames(r.Context(), w, resp.Body)
+	w.WriteHeader(http.StatusOK)
+
+	state := eventProxyFilterState{userMessageIDs: map[string]struct{}{}}
+	current := resp
+	defer func() {
+		if current != nil && current.Body != nil {
+			current.Body.Close()
+		}
+	}()
+
+	for {
+		if err := writeSyntheticEventProxyFrame(w, "server.connected", []byte(`{"type":"server.connected","properties":{}}`)); err != nil {
+			return
+		}
+
+		if err := streamEventProxyFrames(r.Context(), w, current.Body, &state); err != nil {
+			return
+		}
+		current.Body.Close()
+
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(250 * time.Millisecond):
+		}
+
+		next, err := h.app.RawRuntimeEventStream(r.Context(), workspaceID)
+		if err != nil {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-time.After(500 * time.Millisecond):
+			}
+			continue
+		}
+		current = next
+	}
 }
 
 type eventProxyFilterState struct {
 	userMessageIDs map[string]struct{}
 }
 
-func streamEventProxyFrames(ctx context.Context, w http.ResponseWriter, body io.Reader) error {
+func streamEventProxyFrames(ctx context.Context, w http.ResponseWriter, body io.Reader, state *eventProxyFilterState) error {
 	flusher, _ := w.(http.Flusher)
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	state := eventProxyFilterState{userMessageIDs: map[string]struct{}{}}
 	dataLines := make([]string, 0, 1)
 	flushFrame := func() error {
 		if len(dataLines) == 0 {
@@ -42,7 +76,7 @@ func streamEventProxyFrames(ctx context.Context, w http.ResponseWriter, body io.
 
 		payload := strings.Join(dataLines, "\n")
 		dataLines = dataLines[:0]
-		if shouldSuppressEventProxyPayload(payload, &state) {
+		if shouldSuppressEventProxyPayload(payload, state) {
 			return nil
 		}
 
@@ -80,6 +114,19 @@ func streamEventProxyFrames(ctx context.Context, w http.ResponseWriter, body io.
 	}
 
 	return flushFrame()
+}
+
+func writeSyntheticEventProxyFrame(w http.ResponseWriter, event string, payload []byte) error {
+	if _, err := fmt.Fprintf(w, "event: %s\n", event); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "data: %s\n\n", payload); err != nil {
+		return err
+	}
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+	return nil
 }
 
 func shouldSuppressEventProxyPayload(payload string, state *eventProxyFilterState) bool {

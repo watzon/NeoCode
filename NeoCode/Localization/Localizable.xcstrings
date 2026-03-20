@@ -4496,6 +4496,9 @@
     "Developer" : {
 
     },
+    "Developer Panel" : {
+
+    },
     "Dismiss" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -7809,6 +7812,16 @@
         }
       }
     },
+    "part time: %@ | message completed: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "part time: %1$@ | message completed: %2$@"
+          }
+        }
+      }
+    },
     "Per-project activity summary" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -8835,6 +8848,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Pronta para instalar"
+          }
+        }
+      }
+    },
+    "reason: %@ | role: %@ | message: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "reason: %1$@ | role: %2$@ | message: %3$@"
           }
         }
       }

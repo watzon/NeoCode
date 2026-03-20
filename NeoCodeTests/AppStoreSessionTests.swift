@@ -356,6 +356,293 @@ struct AppStoreSessionTests {
         }
 
         @MainActor
+        @Test func appStoreIgnoresDetachedBackgroundToolWhenSessionGoesIdle() throws {
+            let store = AppStore(projects: [
+                ProjectSummary(
+                    name: "NeoCode",
+                    path: "/tmp/NeoCode",
+                    sessions: [
+                        SessionSummary(
+                            id: "ses_1",
+                            title: "Existing",
+                            lastUpdatedAt: .distantPast,
+                            status: .running,
+                            transcript: [
+                                ChatMessage(
+                                    id: "tool_1",
+                                    role: .tool,
+                                    text: "bash running",
+                                    timestamp: .now,
+                                    emphasis: .subtle,
+                                    kind: .toolCall(
+                                        ChatMessage.ToolCall(
+                                            name: "bash",
+                                            status: .running,
+                                            detail: "npm test > /tmp/test.log 2>&1 &",
+                                            input: .object(["command": .string("npm test > /tmp/test.log 2>&1 &")])
+                                        )
+                                    ),
+                                    isInProgress: true
+                                ),
+                            ]
+                        ),
+                    ]
+                ),
+            ])
+
+            store.selectSession("ses_1")
+            store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .idle))
+
+            let snapshot = try #require(store.selectedSessionDebugSnapshot)
+            #expect(store.selectedSession?.status == .idle)
+            #expect(snapshot.blockingInProgressMessageCount == 0)
+            #expect(snapshot.nonBlockingInProgressMessageCount == 1)
+            #expect(snapshot.inProgressDiagnostics.first?.isBlocking == false)
+        }
+
+        @MainActor
+        @Test func appStoreKeepsBlockingToolRunningWhenIdleEventArrivesEarly() throws {
+            let store = AppStore(projects: [
+                ProjectSummary(
+                    name: "NeoCode",
+                    path: "/tmp/NeoCode",
+                    sessions: [
+                        SessionSummary(
+                            id: "ses_1",
+                            title: "Existing",
+                            lastUpdatedAt: .distantPast,
+                            status: .running,
+                            transcript: [
+                                ChatMessage(
+                                    id: "tool_1",
+                                    role: .tool,
+                                    text: "bash running",
+                                    timestamp: .now,
+                                    emphasis: .subtle,
+                                    kind: .toolCall(
+                                        ChatMessage.ToolCall(
+                                            name: "bash",
+                                            status: .running,
+                                            detail: "npm test",
+                                            input: .object(["command": .string("npm test")])
+                                        )
+                                    ),
+                                    isInProgress: true
+                                ),
+                            ]
+                        ),
+                    ]
+                ),
+            ])
+
+            store.selectSession("ses_1")
+            store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .idle))
+
+            let snapshot = try #require(store.selectedSessionDebugSnapshot)
+            #expect(store.selectedSession?.status == .running)
+            #expect(snapshot.blockingInProgressMessageCount == 1)
+            #expect(snapshot.nonBlockingInProgressMessageCount == 0)
+            #expect(snapshot.inProgressDiagnostics.first?.isBlocking == true)
+        }
+
+        @Test func reconcileLoadedTranscriptDoesNotPreserveUserOnlyInProgressSuffix() {
+            let now = Date(timeIntervalSince1970: 1_700_000_000)
+            let existing = [
+                ChatMessage(
+                    id: "part_user_existing",
+                    messageID: "msg_user",
+                    role: .user,
+                    text: "hello",
+                    timestamp: now,
+                    emphasis: .normal,
+                    isInProgress: true
+                ),
+            ]
+            let incoming = [
+                ChatMessage(
+                    id: "part_assistant",
+                    messageID: "msg_assistant",
+                    role: .assistant,
+                    text: "done",
+                    timestamp: now.addingTimeInterval(1),
+                    emphasis: .normal,
+                    isInProgress: false
+                ),
+            ]
+
+            let reconciled = AppStore.reconcileLoadedTranscript(
+                existing: existing,
+                incoming: incoming,
+                preserveInProgressSuffix: true
+            )
+
+            #expect(reconciled.count == 1)
+            #expect(reconciled.contains(where: { $0.role == .user }) == false)
+        }
+
+        @Test func reconcileLoadedTranscriptPreservesNewerAssistantSuffixWhenIncomingLags() {
+            let now = Date(timeIntervalSince1970: 1_700_000_000)
+            let existing = [
+                ChatMessage(
+                    id: "part_user",
+                    messageID: "msg_user",
+                    role: .user,
+                    text: "hello",
+                    timestamp: now,
+                    emphasis: .normal,
+                    isInProgress: false
+                ),
+                ChatMessage(
+                    id: "part_assistant_local",
+                    messageID: "msg_assistant_local",
+                    role: .assistant,
+                    text: "newer local answer",
+                    timestamp: now.addingTimeInterval(10),
+                    emphasis: .normal,
+                    isInProgress: false
+                ),
+            ]
+            let incoming = [
+                ChatMessage(
+                    id: "part_user",
+                    messageID: "msg_user",
+                    role: .user,
+                    text: "hello",
+                    timestamp: now,
+                    emphasis: .normal,
+                    isInProgress: false
+                ),
+            ]
+
+            let reconciled = AppStore.reconcileLoadedTranscript(
+                existing: existing,
+                incoming: incoming,
+                preserveInProgressSuffix: false
+            )
+
+            #expect(reconciled.count == 2)
+            #expect(reconciled.last?.id == "part_assistant_local")
+        }
+
+        @MainActor
+        @Test func appStoreSelectedSessionRespondingUsesComputedStateNotStoredStatus() {
+            let store = AppStore(projects: [
+                ProjectSummary(
+                    name: "NeoCode",
+                    path: "/tmp/NeoCode",
+                    sessions: [
+                        SessionSummary(
+                            id: "ses_1",
+                            title: "Existing",
+                            lastUpdatedAt: .distantPast,
+                            status: .running,
+                            transcript: [
+                                ChatMessage(
+                                    id: "msg_1",
+                                    role: .assistant,
+                                    text: "Finished response",
+                                    timestamp: .now,
+                                    emphasis: .normal,
+                                    isInProgress: false
+                                ),
+                            ]
+                        ),
+                    ]
+                ),
+            ])
+
+            store.selectSession("ses_1")
+
+            #expect(store.selectedSessionStatus == .idle)
+            #expect(store.selectedSessionIsActivelyResponding == false)
+        }
+
+        @MainActor
+        @Test func appStoreIgnoresBusyStatusOnHistoricalUserTailWithoutObservedRun() {
+            let store = AppStore(projects: [
+                ProjectSummary(
+                    name: "NeoCode",
+                    path: "/tmp/NeoCode",
+                    sessions: [
+                        SessionSummary(
+                            id: "ses_1",
+                            title: "Existing",
+                            lastUpdatedAt: .distantPast,
+                            transcript: [
+                                ChatMessage(
+                                    id: "msg_user",
+                                    role: .user,
+                                    text: "hello",
+                                    timestamp: .now,
+                                    emphasis: .normal,
+                                    isInProgress: false
+                                ),
+                            ]
+                        ),
+                    ]
+                ),
+            ])
+
+            store.selectSession("ses_1")
+            store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .busy))
+
+            #expect(store.selectedSessionStatus == .idle)
+            #expect(store.selectedSessionIsActivelyResponding == false)
+        }
+
+        @Test func orphanedDiagnosticBecomesNonBlockingAfterIdleRefresh() {
+            let diagnostic = SessionInProgressDiagnostic(
+                id: "diag_1",
+                messageID: "msg_1",
+                title: "assistant response",
+                detail: nil,
+                category: .assistantOutput,
+                isBlocking: true,
+                role: "assistant",
+                blockingReason: .messageIncomplete,
+                parentMessageCompletedAt: nil,
+                itemTimestamp: Date(timeIntervalSince1970: 100)
+            )
+
+            let isOrphaned = AppStore.shouldTreatDiagnosticAsOrphaned(
+                diagnostic,
+                liveActivity: .idle,
+                hasLocalActivity: false,
+                hasBufferedTextDeltas: false,
+                hasPendingInput: false,
+                lastTranscriptRefreshAt: Date(timeIntervalSince1970: 110)
+            )
+
+            #expect(isOrphaned == true)
+        }
+
+        @Test func busyDiagnosticStaysBlockingWhenLiveActivityStillBusy() {
+            let diagnostic = SessionInProgressDiagnostic(
+                id: "diag_1",
+                messageID: "msg_1",
+                title: "task",
+                detail: nil,
+                category: .toolCall,
+                isBlocking: true,
+                role: "tool",
+                blockingReason: .foregroundToolRunning,
+                parentMessageCompletedAt: nil,
+                itemTimestamp: Date(timeIntervalSince1970: 100)
+            )
+
+            let isOrphaned = AppStore.shouldTreatDiagnosticAsOrphaned(
+                diagnostic,
+                liveActivity: .busy,
+                hasLocalActivity: false,
+                hasBufferedTextDeltas: false,
+                hasPendingInput: false,
+                lastTranscriptRefreshAt: Date(timeIntervalSince1970: 110)
+            )
+
+            #expect(isOrphaned == false)
+        }
+
+        @MainActor
         @Test func appStoreUsesExternalBusyStatusForSnapshotInProgressTranscript() {
             let store = AppStore(projects: [
                 ProjectSummary(
@@ -593,6 +880,53 @@ struct AppStoreSessionTests {
             store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .idle))
     
             #expect(store.selectedSession?.status == .idle)
+            #expect(store.showsFinishedIndicator(for: "ses_1") == false)
+        }
+
+        @MainActor
+        @Test func appStoreSelectingAlreadyVisibleSessionClearsFinishedIndicator() {
+            let store = AppStore(projects: [
+                ProjectSummary(
+                    name: "NeoCode",
+                    path: "/tmp/NeoCode",
+                    sessions: [
+                        SessionSummary(id: "ses_1", title: "Done", lastUpdatedAt: .distantPast),
+                    ]
+                ),
+            ])
+
+            store.selectSession("ses_1")
+            store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .busy))
+            store.selectDashboard()
+            store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .idle))
+
+            #expect(store.showsFinishedIndicator(for: "ses_1") == true)
+
+            store.selectSession("ses_1")
+            #expect(store.showsFinishedIndicator(for: "ses_1") == false)
+
+            store.selectDashboard()
+            store.selectSession("ses_1")
+            #expect(store.showsFinishedIndicator(for: "ses_1") == false)
+            #expect(store.selectedSessionStatus == .idle)
+        }
+
+        @MainActor
+        @Test func appStoreDoesNotShowFinishedIndicatorForSessionThatNeverRan() {
+            let store = AppStore(projects: [
+                ProjectSummary(
+                    name: "NeoCode",
+                    path: "/tmp/NeoCode",
+                    sessions: [
+                        SessionSummary(id: "ses_1", title: "Idle", lastUpdatedAt: .distantPast),
+                        SessionSummary(id: "ses_2", title: "Selected", lastUpdatedAt: .distantPast),
+                    ]
+                ),
+            ])
+
+            store.selectSession("ses_2")
+            store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .idle))
+
             #expect(store.showsFinishedIndicator(for: "ses_1") == false)
         }
 

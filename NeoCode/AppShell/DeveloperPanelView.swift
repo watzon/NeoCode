@@ -28,6 +28,7 @@ struct DeveloperPanelView: View {
             .padding(22)
         }
         .background(NeoCodeTheme.canvas.ignoresSafeArea())
+        .background(DeveloperPanelWindowConfigurator())
         .frame(minWidth: 920, minHeight: 720)
         .task {
             appLogStore.start()
@@ -104,14 +105,21 @@ struct DeveloperPanelView: View {
                     debugMetric(title: localized("Actively responding", locale: locale), value: yesNo(snapshot.isActivelyResponding))
                     debugMetric(title: localized("Local activity", locale: locale), value: yesNo(snapshot.hasLocalActivity))
                     debugMetric(title: localized("In-progress parts", locale: locale), value: String(snapshot.inProgressMessageCount))
+                    debugMetric(title: localized("Blocking in-progress", locale: locale), value: String(snapshot.blockingInProgressMessageCount))
+                    debugMetric(title: localized("Background in-progress", locale: locale), value: String(snapshot.nonBlockingInProgressMessageCount))
                     debugMetric(title: localized("Buffered deltas", locale: locale), value: String(snapshot.bufferedDeltaCount))
                     debugMetric(title: localized("Pending permissions", locale: locale), value: String(snapshot.pendingPermissionCount))
                     debugMetric(title: localized("Pending questions", locale: locale), value: String(snapshot.pendingQuestionCount))
                     debugMetric(title: localized("Queued messages", locale: locale), value: String(snapshot.queuedMessageCount))
                     debugMetric(title: localized("Transcript messages", locale: locale), value: String(snapshot.transcriptMessageCount))
                     debugMetric(title: localized("Transcript revision", locale: locale), value: String(snapshot.transcriptRevision))
+                    debugMetric(title: localized("Last live event", locale: locale), value: formattedDiagnosticDate(snapshot.lastLiveEventAt, fallback: snapshot.lastLiveEventLabel ?? localized("None", locale: locale)))
+                    debugMetric(title: localized("Last transcript refresh", locale: locale), value: formattedDiagnosticDate(snapshot.lastTranscriptRefreshAt))
+                    debugMetric(title: localized("Last message completion", locale: locale), value: formattedDiagnosticDate(snapshot.lastCompletedMessageAt))
                     debugMetric(title: localized("Last updated", locale: locale), value: snapshot.lastUpdatedAt.formatted(date: .abbreviated, time: .standard))
                 }
+
+                inProgressDiagnosticsCard(snapshot)
 
                 HStack(spacing: 10) {
                     Button(localized("Refresh selected session", locale: locale)) {
@@ -166,6 +174,58 @@ struct DeveloperPanelView: View {
                         Divider()
                             .overlay(NeoCodeTheme.line)
                     }
+                }
+            }
+        }
+    }
+
+    private func inProgressDiagnosticsCard(_ snapshot: SessionDebugSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if snapshot.inProgressDiagnostics.isEmpty {
+                Text(localized("No in-progress transcript items are currently being tracked.", locale: locale))
+                    .font(.neoBody)
+                    .foregroundStyle(NeoCodeTheme.textMuted)
+            } else {
+                ForEach(snapshot.inProgressDiagnostics) { diagnostic in
+                    HStack(alignment: .top, spacing: 12) {
+                        Text(diagnostic.category.rawValue.uppercased())
+                            .font(.neoMonoSmall)
+                            .foregroundStyle(diagnostic.isBlocking ? NeoCodeTheme.warning : NeoCodeTheme.accent)
+                            .frame(width: 150, alignment: .leading)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(diagnostic.title)
+                                .font(.neoBody)
+                                .foregroundStyle(NeoCodeTheme.textPrimary)
+
+                            Text(diagnostic.isBlocking ? localized("Blocking", locale: locale) : localized("Non-blocking background work", locale: locale))
+                                .font(.neoMeta)
+                                .foregroundStyle(NeoCodeTheme.textMuted)
+
+                            Text("reason: \(diagnostic.blockingReason.rawValue) | role: \(diagnostic.role) | message: \(diagnostic.messageID ?? "none")")
+                                .font(.neoMonoSmall)
+                                .foregroundStyle(NeoCodeTheme.textMuted)
+                                .textSelection(.enabled)
+
+                            Text("part time: \(diagnostic.itemTimestamp.formatted(date: .abbreviated, time: .standard)) | message completed: \(formattedDiagnosticDate(diagnostic.parentMessageCompletedAt))")
+                                .font(.neoMonoSmall)
+                                .foregroundStyle(NeoCodeTheme.textMuted)
+                                .textSelection(.enabled)
+
+                            if let detail = diagnostic.detail {
+                                Text(detail)
+                                    .font(.neoMonoSmall)
+                                    .foregroundStyle(NeoCodeTheme.textSecondary)
+                                    .textSelection(.enabled)
+                            }
+                        }
+
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.vertical, 6)
+
+                    Divider()
+                        .overlay(NeoCodeTheme.line)
                 }
             }
         }
@@ -269,6 +329,14 @@ struct DeveloperPanelView: View {
         value ? localized("Yes", locale: locale) : localized("No", locale: locale)
     }
 
+    private func formattedDiagnosticDate(_ date: Date?, fallback: String? = nil) -> String {
+        if let date {
+            return date.formatted(date: .abbreviated, time: .standard)
+        }
+
+        return fallback ?? localized("None", locale: locale)
+    }
+
     private func logTone(for level: String) -> Color {
         switch level {
         case "fault", "error":
@@ -295,6 +363,27 @@ struct DeveloperPanelView: View {
                 copiedSnapshot = false
             }
         }
+    }
+}
+
+private struct DeveloperPanelWindowConfigurator: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        DispatchQueue.main.async {
+            configureWindow(for: view)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            configureWindow(for: nsView)
+        }
+    }
+
+    private func configureWindow(for view: NSView) {
+        guard let window = view.window else { return }
+        window.isRestorable = false
     }
 }
 

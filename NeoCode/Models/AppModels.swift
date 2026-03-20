@@ -481,15 +481,17 @@ struct ChatMessage: Codable, Identifiable, Hashable {
                     return nil
                 }
 
+                let role = part.chatRole(defaultRole: message.info.chatRole)
+
                 return ChatMessage(
                     id: part.id,
                     messageID: message.info.id,
-                    role: part.chatRole(defaultRole: message.info.chatRole),
+                    role: role,
                     text: part.renderedText,
                     timestamp: part.updatedAt ?? timestamp,
                     emphasis: part.chatEmphasis,
                     kind: part.chatMessageKind,
-                    isInProgress: part.isInProgress,
+                    isInProgress: role == .user ? false : (message.info.isCompleted ? false : part.isInProgress),
                     attachment: part.attachment,
                     isSummaryMessage: message.info.isSummaryMessage
                 )
