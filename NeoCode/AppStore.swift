@@ -4967,7 +4967,7 @@ final class AppStore {
     }
 
     private func isNotFoundError(_ error: Error) -> Bool {
-        guard case NeoCodeClientError.httpStatus(404) = error else {
+        guard case NeoCodeClientError.httpStatus(404, _) = error else {
             return false
         }
 

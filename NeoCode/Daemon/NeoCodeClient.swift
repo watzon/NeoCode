@@ -388,7 +388,7 @@ final class NeoCodeClient: NeoCodeServicing {
 
         guard 200..<300 ~= httpResponse.statusCode else {
             logger.error("HTTP \(httpResponse.statusCode) for \(method, privacy: .public) \(path, privacy: .public)")
-            throw NeoCodeClientError.httpStatus(httpResponse.statusCode)
+            throw NeoCodeClientError.httpStatus(httpResponse.statusCode, serverErrorMessage(from: data))
         }
 
         return try decoder.decode(Response.self, from: data)
@@ -403,7 +403,7 @@ final class NeoCodeClient: NeoCodeServicing {
 
         guard 200..<300 ~= httpResponse.statusCode else {
             logger.error("HTTP \(httpResponse.statusCode) for \(method, privacy: .public) \(path, privacy: .public)")
-            throw NeoCodeClientError.httpStatus(httpResponse.statusCode)
+            throw NeoCodeClientError.httpStatus(httpResponse.statusCode, serverErrorMessage(from: data))
         }
 
         return try decoder.decode(Response.self, from: data)
@@ -436,6 +436,21 @@ final class NeoCodeClient: NeoCodeServicing {
 
     private func workspacePath(_ suffix: String) throws -> String {
         "/v1/workspaces/\(try workspaceID())/\(suffix)"
+    }
+
+    private func serverErrorMessage(from data: Data) -> String? {
+        guard !data.isEmpty else {
+            return nil
+        }
+
+        if let payload = try? JSONDecoder().decode(ServerErrorPayload.self, from: data),
+           let message = payload.error?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !message.isEmpty {
+            return message
+        }
+
+        let message = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return message?.isEmpty == false ? message : nil
     }
 
     private func nativeListSessions() async throws -> [OpenCodeSession] {
@@ -679,6 +694,10 @@ private struct NativeQuestionReplyBody: Encodable {
 
 private struct NativeBooleanResponse: Decodable {
     let ok: Bool
+}
+
+private struct ServerErrorPayload: Decodable {
+    let error: String?
 }
 
 private struct NativeSession: Decodable {
