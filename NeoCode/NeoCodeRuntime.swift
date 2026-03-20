@@ -225,6 +225,19 @@ final class OpenCodeRuntime {
         }
     }
 
+    func validatePreferredExecutablePath(_ path: String?) async throws {
+        guard let preferredPath = Self.normalizedExecutablePath(path) else { return }
+
+        let executableURL = try Self.resolveExecutableURL(at: preferredPath)
+        let actualVersion = try await daemonBinaryManager.daemonVersion(at: executableURL)
+        guard actualVersion == NeoCodeRelease.marketingVersion else {
+            throw NeoCodeDaemonBinaryError.explicitBinaryVersionMismatch(
+                expected: NeoCodeRelease.marketingVersion,
+                actual: actualVersion
+            )
+        }
+    }
+
     private var sharedEntry: RuntimeEntry {
         if let entry = entries[Self.sharedRuntimeKey] {
             return entry

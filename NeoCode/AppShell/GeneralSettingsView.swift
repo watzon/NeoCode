@@ -7,6 +7,9 @@ struct GeneralSettingsView: View {
     @Environment(OpenCodeRuntime.self) private var runtime
     @Environment(\.locale) private var locale
     @State private var workspaceToolOptions: [WorkspaceToolSettingsOption] = [.autoDetect]
+    @State private var opencodeExecutablePathDraft = ""
+    @State private var executablePathValidation: ExecutablePathValidation = .idle
+    @State private var executablePathValidationID = 0
 
     private let workspaceToolService = WorkspaceToolService()
     private static let autoDetectToolID = WorkspaceToolSettingsOption.autoDetectID
@@ -103,41 +106,40 @@ struct GeneralSettingsView: View {
                         title: localized("NeoCode server executable", locale: locale),
                         detail: localized("Optionally set the full path to the `neocoded` binary if you want to override NeoCode's managed daemon install. By default NeoCode prefers its app-managed daemon, then falls back to PATH when the versions match.", locale: locale),
                         accessory: {
-                            HStack(spacing: 8) {
-                                TextField(
-                                    "/Users/you/.local/bin/neocoded",
-                                    text: opencodeExecutablePathBinding
-                                )
-                                .neoWritingToolsDisabled()
-                                .textFieldStyle(.plain)
-                                .font(.neoMonoSmall)
-                                .foregroundStyle(NeoCodeTheme.textPrimary)
-                                .frame(width: 240)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .fill(NeoCodeTheme.panelSoft)
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                                .stroke(NeoCodeTheme.line, lineWidth: 1)
-                                        )
-                                )
+                            VStack(alignment: .trailing, spacing: 6) {
+                                HStack(spacing: 8) {
+                                    TextField(
+                                        "/Users/you/.local/bin/neocoded",
+                                        text: opencodeExecutablePathBinding
+                                    )
+                                    .neoWritingToolsDisabled()
+                                    .textFieldStyle(.plain)
+                                    .font(.neoMonoSmall)
+                                    .foregroundStyle(NeoCodeTheme.textPrimary)
+                                    .frame(width: 240)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .fill(NeoCodeTheme.panelSoft)
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                    .stroke(executablePathValidation.borderColor, lineWidth: 1)
+                                            )
+                                    )
 
-                                Button(localized("Browse", locale: locale), action: selectOpenCodeExecutable)
-                                    .buttonStyle(.plain)
-                                    .font(.neoAction)
-                                    .foregroundStyle(NeoCodeTheme.textSecondary)
+                                    Button(localized("Browse", locale: locale), action: selectOpenCodeExecutable)
+                                        .buttonStyle(.plain)
+                                        .font(.neoAction)
+                                        .foregroundStyle(NeoCodeTheme.textSecondary)
+                                }
 
-                                if store.appSettings.general.opencodeExecutablePath != nil {
-                                    Button(localized("Clear", locale: locale)) {
-                                        store.updateGeneral { general in
-                                            general.opencodeExecutablePath = nil
-                                        }
-                                    }
-                                    .buttonStyle(.plain)
-                                    .font(.neoAction)
-                                    .foregroundStyle(NeoCodeTheme.textMuted)
+                                if let message = executablePathValidation.message(locale: locale) {
+                                    Text(message)
+                                        .font(.neoMonoSmall)
+                                        .foregroundStyle(executablePathValidation.textColor)
+                                        .multilineTextAlignment(.trailing)
+                                        .frame(width: 320, alignment: .trailing)
                                 }
                             }
                         }
@@ -256,6 +258,7 @@ struct GeneralSettingsView: View {
         .frame(maxWidth: 720, alignment: .leading)
         .frame(maxWidth: .infinity, alignment: .center)
         .task {
+            opencodeExecutablePathDraft = store.appSettings.general.opencodeExecutablePath ?? ""
             refreshWorkspaceToolOptions()
         }
     }
@@ -270,11 +273,10 @@ struct GeneralSettingsView: View {
 
     private var opencodeExecutablePathBinding: Binding<String> {
         Binding(
-            get: { store.appSettings.general.opencodeExecutablePath ?? "" },
+            get: { opencodeExecutablePathDraft },
             set: { newValue in
-                store.updateGeneral { general in
-                    general.opencodeExecutablePath = OpenCodeRuntime.normalizedExecutablePath(newValue)
-                }
+                opencodeExecutablePathDraft = newValue
+                validateExecutablePathDraft(newValue)
             }
         )
     }
@@ -314,8 +316,82 @@ struct GeneralSettingsView: View {
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
-        store.updateGeneral { general in
-            general.opencodeExecutablePath = url.path
+        opencodeExecutablePathDraft = url.path
+        validateExecutablePathDraft(url.path)
+    }
+
+    private func validateExecutablePathDraft(_ rawValue: String) {
+        let normalized = OpenCodeRuntime.normalizedExecutablePath(rawValue)
+        let previousValue = store.appSettings.general.opencodeExecutablePath
+
+        executablePathValidationID += 1
+        let validationID = executablePathValidationID
+
+        guard let normalized else {
+            store.updateGeneral { general in
+                general.opencodeExecutablePath = nil
+            }
+            executablePathValidation = previousValue == nil ? .idle : .restartRequired
+            return
+        }
+
+        executablePathValidation = .validating
+
+        Task {
+            do {
+                try await runtime.validatePreferredExecutablePath(normalized)
+                guard validationID == executablePathValidationID else { return }
+
+                store.updateGeneral { general in
+                    general.opencodeExecutablePath = normalized
+                }
+                executablePathValidation = previousValue == normalized ? .idle : .restartRequired
+            } catch {
+                guard validationID == executablePathValidationID else { return }
+                executablePathValidation = .error(error.localizedDescription)
+            }
+        }
+    }
+}
+
+private enum ExecutablePathValidation: Equatable {
+    case idle
+    case validating
+    case restartRequired
+    case error(String)
+
+    var borderColor: Color {
+        switch self {
+        case .idle, .validating:
+            NeoCodeTheme.line
+        case .restartRequired:
+            NeoCodeTheme.accent.opacity(0.7)
+        case .error:
+            NeoCodeTheme.warning.opacity(0.8)
+        }
+    }
+
+    var textColor: Color {
+        switch self {
+        case .idle, .validating:
+            NeoCodeTheme.textSecondary
+        case .restartRequired:
+            NeoCodeTheme.accent
+        case .error:
+            NeoCodeTheme.warning
+        }
+    }
+
+    func message(locale: Locale) -> String? {
+        switch self {
+        case .idle:
+            nil
+        case .validating:
+            localized("Validating daemon binary...", locale: locale)
+        case .restartRequired:
+            localized("Restart NeoCode to apply this daemon path change.", locale: locale)
+        case .error(let message):
+            message
         }
     }
 }
