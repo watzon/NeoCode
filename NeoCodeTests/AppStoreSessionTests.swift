@@ -1629,6 +1629,49 @@ struct AppStoreSessionTests {
         }
 
         @MainActor
+        @Test func appStoreTracksNewSessionEmptyStateAcrossPromotionUntilTranscriptArrives() async throws {
+            let store = AppStore(projects: [ProjectSummary(name: "NeoCode", path: "/tmp/NeoCode")])
+            let runtime = OpenCodeRuntime()
+            let now = Date()
+
+            await store.createSession(using: runtime)
+            let ephemeralID = try #require(store.selectedSessionID)
+            let projectID = try #require(store.selectedProjectID)
+
+            #expect(store.showsNewSessionEmptyState(for: ephemeralID) == true)
+
+            await store.promoteEphemeralSession(
+                ephemeralID,
+                in: projectID,
+                to: OpenCodeSession(
+                    id: "ses_created",
+                    title: nil,
+                    parentID: nil,
+                    time: OpenCodeTimeContainer(created: now, updated: now, completed: nil)
+                )
+            )
+
+            #expect(store.showsNewSessionEmptyState(for: "ses_created") == true)
+
+            store.apply(event: .messagePartUpdated(OpenCodePart(
+                id: "part_1",
+                sessionID: "ses_created",
+                messageID: "msg_1",
+                type: .text,
+                text: "Hello",
+                tool: nil,
+                mime: nil,
+                filename: nil,
+                url: nil,
+                source: nil,
+                state: nil,
+                time: OpenCodeTimeContainer(created: now, updated: now, completed: nil)
+            )))
+
+            #expect(store.showsNewSessionEmptyState(for: "ses_created") == false)
+        }
+
+        @MainActor
         @Test func promotedSessionAliasesKeepSidebarActionsAddressable() async throws {
             let store = AppStore(projects: [ProjectSummary(name: "NeoCode", path: "/tmp/NeoCode")])
             let runtime = OpenCodeRuntime()

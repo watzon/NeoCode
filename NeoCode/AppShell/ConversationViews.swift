@@ -815,13 +815,13 @@ struct ConversationView: View {
     private var showsNewSessionEmptyState: Bool {
         transcriptCount == 0
             && store.lastError == nil
-            && (session?.isEphemeral == true || !store.isLoadingSessions)
+            && store.showsNewSessionEmptyState(for: sessionID)
     }
 
     private var shouldShowTranscriptLoadingState: Bool {
-        session?.isEphemeral != true
+        !showsNewSessionEmptyState
             && transcriptCount == 0
-            && isAwaitingInitialScroll
+            && store.lastError == nil
             && store.loadingTranscriptSessionID == sessionID
     }
 

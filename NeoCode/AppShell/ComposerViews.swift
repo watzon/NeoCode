@@ -433,19 +433,21 @@ struct QueuedMessagesView: View {
 
     @State private var isHovering = false
 
-    private let collapsedBaseHeight: CGFloat = 100
-    private let collapsedOverlap: CGFloat = 20
-    private let expandedSpacing: CGFloat = 8
+    private let collapsedBaseHeight: CGFloat = 118
+    private let collapsedPeekOffset: CGFloat = 16
+    private let collapsedHorizontalInset: CGFloat = 10
+    private let expandedSpacing: CGFloat = 10
+    private let maxCollapsedPreviewCards = 3
 
     var body: some View {
-        let layout = isHovering || messages.count <= 1
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: expandedSpacing))
-            : AnyLayout(ZStackLayout(alignment: .top))
-
-        layout {
-            queuedCards
+        Group {
+            if isExpanded {
+                expandedCards
+            } else {
+                collapsedCards
+            }
         }
-        .frame(height: isHovering || messages.count <= 1 ? nil : collapsedHeight, alignment: .top)
+        .frame(height: isExpanded ? nil : collapsedHeight, alignment: .top)
         .contentShape(Rectangle())
         .onHover { hovering in
             withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
@@ -454,50 +456,66 @@ struct QueuedMessagesView: View {
         }
     }
 
-    private var collapsedHeight: CGFloat {
-        collapsedBaseHeight + CGFloat(max(messages.count - 1, 0)) * collapsedOverlap
+    private var isExpanded: Bool {
+        isHovering || messages.count <= 1
     }
 
-    private var queuedCards: some View {
-        ForEach(Array(messages.enumerated()), id: \.element.id) { entry in
-            queuedCard(for: entry)
-                .offset(y: collapsedYOffset(for: entry.offset))
-                .scaleEffect(collapsedScale(for: entry.offset), anchor: .top)
-                .opacity(collapsedOpacity(for: entry.offset))
-                .zIndex(collapsedZIndex(for: entry.offset))
+    private var collapsedHeight: CGFloat {
+        collapsedBaseHeight + CGFloat(max(collapsedDepthCount - 1, 0)) * collapsedPeekOffset
+    }
+
+    private var collapsedDepthCount: Int {
+        min(messages.count, maxCollapsedPreviewCards)
+    }
+
+    private var expandedCards: some View {
+        VStack(alignment: .leading, spacing: expandedSpacing) {
+            ForEach(Array(messages.enumerated()), id: \.element.id) { entry in
+                queuedCard(for: entry, presentation: .full)
+            }
         }
     }
 
-    private func queuedCard(for entry: (offset: Int, element: ComposerQueuedMessage)) -> some View {
+    private var collapsedCards: some View {
+        ZStack(alignment: .top) {
+            ForEach(Array(messages.prefix(collapsedDepthCount).enumerated().dropFirst()).reversed(), id: \.element.id) { entry in
+                queuedCard(for: entry, presentation: .stackedPreview)
+                    .padding(.horizontal, CGFloat(entry.offset) * collapsedHorizontalInset)
+                    .offset(y: CGFloat(entry.offset) * collapsedPeekOffset)
+                    .scaleEffect(1 - CGFloat(entry.offset) * 0.02, anchor: .top)
+                    .opacity(max(0.58, 0.9 - Double(entry.offset) * 0.12))
+                    .zIndex(Double(collapsedDepthCount - entry.offset))
+            }
+
+            if let first = messages.first {
+                QueuedMessageCard(
+                    message: first,
+                    position: 1,
+                    totalCount: messages.count,
+                    allowsSteer: true,
+                    presentation: .stackedFront,
+                    remainingCount: max(messages.count - maxCollapsedPreviewCards, 0),
+                    onEdit: { onEdit(first.id) },
+                    onRemove: { onRemove(first.id) },
+                    onDeliveryModeChange: { onDeliveryModeChange(first.id, $0) }
+                )
+                .zIndex(Double(collapsedDepthCount + 1))
+            }
+        }
+    }
+
+    private func queuedCard(for entry: (offset: Int, element: ComposerQueuedMessage), presentation: QueuedMessageCard.Presentation) -> some View {
         QueuedMessageCard(
             message: entry.element,
             position: entry.offset + 1,
             totalCount: messages.count,
-            allowsSteer: entry.offset == 0,
+            allowsSteer: entry.offset == 0 && presentation != .stackedPreview,
+            presentation: presentation,
+            remainingCount: 0,
             onEdit: { onEdit(entry.element.id) },
             onRemove: { onRemove(entry.element.id) },
             onDeliveryModeChange: { onDeliveryModeChange(entry.element.id, $0) }
         )
-    }
-
-    private func collapsedYOffset(for index: Int) -> CGFloat {
-        guard !(isHovering || messages.count <= 1) else { return 0 }
-        return CGFloat(messages.count - index - 1) * collapsedOverlap
-    }
-
-    private func collapsedScale(for index: Int) -> CGFloat {
-        guard !(isHovering || messages.count <= 1) else { return 1 }
-        let depth = CGFloat(messages.count - index - 1)
-        return 1 - min(depth, 3) * 0.015
-    }
-
-    private func collapsedOpacity(for index: Int) -> Double {
-        guard !(isHovering || messages.count <= 1) else { return 1 }
-        return index == 0 ? 0.94 : 1
-    }
-
-    private func collapsedZIndex(for index: Int) -> Double {
-        Double(index)
     }
 }
 
@@ -506,17 +524,25 @@ private enum ComposerLayout {
 }
 
 private struct QueuedMessageCard: View {
+    enum Presentation {
+        case full
+        case stackedFront
+        case stackedPreview
+    }
+
     let message: ComposerQueuedMessage
     let position: Int
     let totalCount: Int
     let allowsSteer: Bool
+    let presentation: Presentation
+    let remainingCount: Int
     let onEdit: () -> Void
     let onRemove: () -> Void
     let onDeliveryModeChange: (ComposerQueuedMessage.DeliveryMode) -> Void
     @Environment(\.locale) private var locale
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: contentSpacing) {
             HStack(alignment: .center, spacing: 10) {
                 Label {
                     Text(queuedLabel)
@@ -529,6 +555,19 @@ private struct QueuedMessageCard: View {
                 }
 
                 Spacer(minLength: 0)
+
+                if presentation != .stackedPreview, remainingCount > 0 {
+                    Text(String(format: localized("+%@ more", locale: locale), String(remainingCount)))
+                        .font(.neoMonoSmall)
+                        .foregroundStyle(NeoCodeTheme.textSecondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule()
+                                .fill(NeoCodeTheme.panelSoft)
+                                .overlay(Capsule().stroke(NeoCodeTheme.lineSoft, lineWidth: 1))
+                        )
+                }
 
                 if allowsSteer {
                     Button(localized(message.deliveryMode == .steer ? "Steer on" : "Steer", locale: locale)) {
@@ -550,27 +589,29 @@ private struct QueuedMessageCard: View {
                     )
                 }
 
-                Button(localized("Edit", locale: locale), action: onEdit)
-                    .buttonStyle(.plain)
-                    .font(.neoMonoSmall)
-                    .foregroundStyle(NeoCodeTheme.textPrimary)
+                if presentation != .stackedPreview {
+                    Button(localized("Edit", locale: locale), action: onEdit)
+                        .buttonStyle(.plain)
+                        .font(.neoMonoSmall)
+                        .foregroundStyle(NeoCodeTheme.textPrimary)
 
-                Button(localized("Remove", locale: locale), action: onRemove)
-                    .buttonStyle(.plain)
-                    .font(.neoMonoSmall)
-                    .foregroundStyle(NeoCodeTheme.warning)
+                    Button(localized("Remove", locale: locale), action: onRemove)
+                        .buttonStyle(.plain)
+                        .font(.neoMonoSmall)
+                        .foregroundStyle(NeoCodeTheme.warning)
+                }
             }
 
             if let previewText = message.text.nonEmptyTrimmed {
                 Text(previewText)
-                    .font(.neoBody)
+                    .font(previewTextFont)
                     .foregroundStyle(NeoCodeTheme.textPrimary)
-                    .lineLimit(4)
+                    .lineLimit(previewLineLimit)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            if !message.attachments.isEmpty {
+            if presentation == .full, !message.attachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
                         ForEach(message.attachments) { attachment in
@@ -580,24 +621,37 @@ private struct QueuedMessageCard: View {
                 }
             }
 
-            Text(message.deliveryMode == .steer
-                ? localized("Will steer the agent at the next possible moment.", locale: locale)
-                : localized("Waiting for the current response to finish before sending.", locale: locale)
-            )
+            if presentation != .full, !message.attachments.isEmpty {
+                Text(
+                    String(
+                        format: localized(message.attachments.count == 1 ? "%@ attachment" : "%@ attachments", locale: locale),
+                        String(message.attachments.count)
+                    )
+                )
                 .font(.neoMonoSmall)
-                .foregroundStyle(NeoCodeTheme.textMuted)
+                .foregroundStyle(NeoCodeTheme.textSecondary)
+            }
+
+            if presentation != .stackedPreview {
+                Text(message.deliveryMode == .steer
+                    ? localized("Will steer the agent at the next possible moment.", locale: locale)
+                    : localized("Waiting for the current response to finish before sending.", locale: locale)
+                )
+                    .font(.neoMonoSmall)
+                    .foregroundStyle(NeoCodeTheme.textMuted)
+            }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.horizontal, horizontalPadding)
+        .padding(.vertical, verticalPadding)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(NeoCodeTheme.panelRaised)
+                .fill(cardFill)
                 .overlay(
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(NeoCodeTheme.line, lineWidth: 1)
+                        .stroke(cardStroke, lineWidth: 1)
                 )
         )
-        .shadow(color: NeoCodeTheme.canvas.opacity(0.14), radius: 12, x: 0, y: 8)
+        .shadow(color: NeoCodeTheme.canvas.opacity(shadowOpacity), radius: shadowRadius, x: 0, y: shadowYOffset)
     }
 
     private var queuedLabel: String {
@@ -610,6 +664,63 @@ private struct QueuedMessageCard: View {
         }
 
         return localized("Queued", locale: locale)
+    }
+
+    private var contentSpacing: CGFloat {
+        presentation == .stackedPreview ? 6 : 10
+    }
+
+    private var horizontalPadding: CGFloat {
+        presentation == .stackedPreview ? 12 : 14
+    }
+
+    private var verticalPadding: CGFloat {
+        presentation == .stackedPreview ? 10 : 12
+    }
+
+    private var previewTextFont: Font {
+        presentation == .stackedPreview ? .neoMonoSmall : .neoBody
+    }
+
+    private var previewLineLimit: Int {
+        switch presentation {
+        case .full:
+            return 4
+        case .stackedFront:
+            return 2
+        case .stackedPreview:
+            return 1
+        }
+    }
+
+    private var cardFill: Color {
+        switch presentation {
+        case .full, .stackedFront:
+            return NeoCodeTheme.panelRaised
+        case .stackedPreview:
+            return NeoCodeTheme.panel
+        }
+    }
+
+    private var cardStroke: Color {
+        switch presentation {
+        case .full, .stackedFront:
+            return NeoCodeTheme.line
+        case .stackedPreview:
+            return NeoCodeTheme.lineSoft
+        }
+    }
+
+    private var shadowOpacity: Double {
+        presentation == .stackedPreview ? 0.08 : 0.14
+    }
+
+    private var shadowRadius: CGFloat {
+        presentation == .stackedPreview ? 8 : 12
+    }
+
+    private var shadowYOffset: CGFloat {
+        presentation == .stackedPreview ? 5 : 8
     }
 }
 

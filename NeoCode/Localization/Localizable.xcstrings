@@ -8664,6 +8664,36 @@
         }
       }
     },
+    "+%@ more" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "+%@ more"
+          }
+        }
+      }
+    },
+    "%@ attachment" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%@ attachment"
+          }
+        }
+      }
+    },
+    "%@ attachments" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%@ attachments"
+          }
+        }
+      }
+    },
     "Queued %@ of %@" : {
       "extractionState" : "stale",
       "localizations" : {
