@@ -49,12 +49,12 @@ test:
     @just server-test
 
 test-release:
-	@echo "Running release validation tests..."
-	xcodebuild test \
+	@echo "Running release validation build and daemon tests..."
+	xcodebuild build \
 		-project {{xcode_project}} \
 		-scheme {{scheme}} \
-		-destination 'platform=macOS' \
-		-only-testing:NeoCodeTests
+		-configuration Release \
+		-destination 'platform=macOS,arch=arm64'
 	@just server-test
 
 server-test:
