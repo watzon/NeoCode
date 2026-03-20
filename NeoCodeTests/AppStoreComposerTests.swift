@@ -916,6 +916,62 @@ struct AppStoreComposerTests {
         }
 
         @MainActor
+        @Test func appStoreSendsQueuedDraftAfterSettlingStaleStreamingState() async {
+            let projectID = UUID()
+            let now = Date(timeIntervalSince1970: 1_710_616_186)
+            let store = AppStore(projects: [
+                ProjectSummary(
+                    id: projectID,
+                    name: "NeoCode",
+                    path: "/tmp/NeoCode",
+                    sessions: [
+                        SessionSummary(
+                            id: "ses_1",
+                            title: "Existing",
+                            lastUpdatedAt: now,
+                            status: .running,
+                            transcript: [
+                                ChatMessage(
+                                    id: "part_1",
+                                    messageID: "msg_1",
+                                    role: .assistant,
+                                    text: "Partial response",
+                                    timestamp: now,
+                                    emphasis: .normal,
+                                    isInProgress: true
+                                )
+                            ]
+                        ),
+                    ]
+                ),
+            ])
+            let service = MockNeoCodeService()
+
+            store.selectSession("ses_1")
+            store.draft = "Queued follow-up"
+            _ = await store.sendDraft(
+                using: service,
+                projectID: projectID,
+                sessionID: "ses_1",
+                allowQueueIfRunning: true
+            )
+
+            let didSend = await store.sendNextQueuedMessageIfPossible(
+                in: "ses_1",
+                projectID: projectID,
+                projectPath: "/tmp/NeoCode",
+                using: service
+            )
+
+            #expect(didSend == true)
+            #expect(store.queuedMessages(for: "ses_1").isEmpty)
+            #expect(service.sentPrompts.count == 1)
+            #expect(service.sentPrompts[0].text == "Queued follow-up")
+            #expect(store.selectedTranscript.allSatisfy { !$0.isInProgress })
+            #expect(store.selectedSession?.status == .running)
+        }
+
+        @MainActor
         @Test func appStoreSendsQueuedDraftAfterSessionFallsIntoError() async {
             let projectID = UUID()
             let store = AppStore(projects: [

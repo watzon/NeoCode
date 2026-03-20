@@ -2050,7 +2050,10 @@ final class AppStore {
             return
         }
 
-        _ = await stopSession(sessionID: sessionID, projectID: projectID, using: service)
+        let didStop = await stopSession(sessionID: sessionID, projectID: projectID, using: service)
+        if didStop {
+            await sendQueuedMessagesIfPossible(for: sessionID, projectID: projectID, using: runtime)
+        }
         reevaluateRuntimeRetention(using: runtime)
     }
 
@@ -3455,6 +3458,7 @@ final class AppStore {
 
             if let service = await connectProject(projectID, using: runtime, includeComposerOptions: false) {
                 await loadMessages(for: sessionID, using: service, projectID: projectID, allowCachedFallback: true)
+                await sendQueuedMessagesIfPossible(for: sessionID, projectID: projectID, using: runtime)
             }
 
             scheduleStreamingRecoveryCheck(
@@ -4211,7 +4215,7 @@ final class AppStore {
         projectPath: String,
         using service: any NeoCodeServicing
     ) async -> Bool {
-        guard canDispatchQueuedMessages(for: sessionID),
+        guard canDispatchQueuedMessages(for: sessionID, projectID: projectID),
               pendingPermission(for: sessionID) == nil,
               pendingQuestion(for: sessionID) == nil,
               let queuedMessage = popFirstQueuedMessage(in: sessionID)
@@ -4242,12 +4246,31 @@ final class AppStore {
         return didSend
     }
 
-    private func canDispatchQueuedMessages(for sessionID: String) -> Bool {
-        guard let status = session(for: sessionID)?.status else {
+    private func canDispatchQueuedMessages(for sessionID: String, projectID: ProjectSummary.ID) -> Bool {
+        guard session(for: sessionID) != nil else {
             return false
         }
 
-        return !status.isActive
+        let transcript = transcript(for: sessionID)
+        if let activity = effectiveLiveSessionActivity(for: sessionID, transcript: transcript) {
+            switch activity {
+            case .busy, .retry:
+                return false
+            case .idle:
+                break
+            }
+        }
+
+        if hasBufferedTextDeltas(for: sessionID) {
+            return false
+        }
+
+        if transcript.contains(where: \.isInProgress) || isSessionLocallyActive(sessionID) {
+            settleSessionActivity(sessionID: sessionID, projectID: projectID)
+            refreshSessionStatus(sessionID: sessionID, projectID: projectID)
+        }
+
+        return !(session(for: sessionID)?.status.isActive ?? true)
     }
 
     @discardableResult
