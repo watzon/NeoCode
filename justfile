@@ -15,7 +15,6 @@ archive_path := build_dir / app_name + ".xcarchive"
 app_bundle := release_dir / app_name + ".app"
 dmg_dir := "dist"
 dmg_path := dmg_dir / app_name + ".dmg"
-daemon_dir := dmg_dir / "daemon"
 
 clean:
     @echo "Cleaning build artifacts..."
@@ -46,32 +45,6 @@ test:
         -project {{xcode_project}} \
         -scheme {{scheme}} \
         -destination 'platform=macOS'
-    @just server-test
-
-test-release:
-	@echo "Running release validation build and daemon tests..."
-	xcodebuild build \
-		-project {{xcode_project}} \
-		-scheme {{scheme}} \
-		-configuration Release \
-		-destination 'platform=macOS,arch=arm64'
-	@just server-test
-
-server-test:
-	@echo "Running Go server tests..."
-	cd server && go test ./...
-
-server-run:
-	@echo "Starting NeoCode Go server..."
-	cd server && go run -ldflags "-X main.version=$$(../scripts/read-version.sh)" ./cmd/neocoded
-
-server-install:
-	@echo "Building and linking neocoded into ~/.local/bin..."
-	./scripts/install-neocoded.sh
-
-daemon-artifacts version:
-	@echo "Building daemon release artifacts for {{version}}..."
-	./scripts/build-daemon-artifacts.sh "{{version}}" "{{daemon_dir}}"
 
 archive: sparkle-tools
     @PUBLIC_KEY="$(./bin/generate_keys --account {{sparkle_key_account}} -p 2>/dev/null || true)"; \
@@ -232,33 +205,7 @@ release-notes version:
 
 release-local: clean test dmg
     @echo "Release build complete: {{dmg_path}}"
-    @echo "Next: just daemon-artifacts X.Y.Z && just notarize {{dmg_path}} && just staple {{dmg_path}} && just appcast {{dmg_path}}"
-
-release-dry-run version: sparkle-tools
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    VERSION="{{version}}"
-    if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        echo "Invalid version format: $VERSION"
-        exit 1
-    fi
-
-    just clean
-    just test-release
-    just daemon-artifacts "$VERSION"
-    just dmg
-    just notarize "{{dmg_path}}"
-    just staple "{{dmg_path}}"
-    just appcast "{{dmg_path}}"
-
-    echo "Release dry run complete for v${VERSION}."
-    echo "Artifacts:" \
-      && echo "  - {{dmg_path}}" \
-      && echo "  - appcast.xml" \
-      && echo "  - {{daemon_dir}}/neocoded-v${VERSION}-darwin-arm64.tar.gz" \
-      && echo "  - {{daemon_dir}}/neocoded-v${VERSION}-darwin-amd64.tar.gz" \
-      && echo "  - {{daemon_dir}}/neocoded-v${VERSION}-checksums.txt"
+    @echo "Next: just notarize {{dmg_path}} && just staple {{dmg_path}} && just appcast {{dmg_path}}"
 
 release version: sparkle-tools
     #!/usr/bin/env bash
@@ -331,8 +278,7 @@ release version: sparkle-tools
         git commit -m "chore: bump version to ${VERSION} (build ${NEXT_BUILD})"
     fi
 
-    just test-release
-    just daemon-artifacts "${VERSION}"
+    just test
     just dmg
     just notarize "${DMG_PATH}"
     just staple "${DMG_PATH}"
@@ -343,9 +289,6 @@ release version: sparkle-tools
     fi
 
     gh release create "${TAG}" "${DMG_PATH}" "${APPCAST_PATH}" \
-        "{{daemon_dir}}/neocoded-v${VERSION}-darwin-arm64.tar.gz" \
-        "{{daemon_dir}}/neocoded-v${VERSION}-darwin-amd64.tar.gz" \
-        "{{daemon_dir}}/neocoded-v${VERSION}-checksums.txt" \
         --repo "{{github_repo}}" \
         --title "${RELEASE_TITLE}" \
         --notes-file "${NOTES_PATH}" \

@@ -169,7 +169,7 @@ struct AppStoreComposerTests {
                     ]
                 ),
             ])
-            let service = MockNeoCodeService()
+            let service = MockOpenCodeService()
     
             store.selectSession("ses_1")
             let didSend = await store.resendEditedMessage(
@@ -358,7 +358,7 @@ struct AppStoreComposerTests {
                     ]
                 ),
             ])
-            let service = MockNeoCodeService()
+            let service = MockOpenCodeService()
     
             store.selectSession("ses_1")
             store.draft = "Current draft"
@@ -395,7 +395,7 @@ struct AppStoreComposerTests {
                     ]
                 ),
             ])
-            let service = MockNeoCodeService()
+            let service = MockOpenCodeService()
     
             store.selectSession("ses_1")
             store.availableCommands = [
@@ -421,9 +421,7 @@ struct AppStoreComposerTests {
             #expect(service.sentCommands[0].command == "review")
             #expect(service.sentCommands[0].arguments == "current diff")
             #expect(store.draft.isEmpty)
-            #expect(store.selectedTranscript.count == 1)
-            #expect(store.selectedTranscript.first?.text == "/review current diff")
-            #expect(store.selectedTranscript.first?.id.hasPrefix("optimistic-user-") == true)
+            #expect(store.selectedTranscript.isEmpty == true)
             #expect(store.selectedSession?.status == .running)
         }
 
@@ -448,7 +446,7 @@ struct AppStoreComposerTests {
                     ]
                 ),
             ])
-            let service = MockNeoCodeService()
+            let service = MockOpenCodeService()
     
             store.availableModels = [model]
             store.selectedModelID = model.id
@@ -479,7 +477,7 @@ struct AppStoreComposerTests {
                     ]
                 ),
             ])
-            let service = MockNeoCodeService()
+            let service = MockOpenCodeService()
     
             store.selectSession("ses_1")
             store.availableCommands = []
@@ -506,7 +504,7 @@ struct AppStoreComposerTests {
                     ]
                 ),
             ])
-            let service = MockNeoCodeService()
+            let service = MockOpenCodeService()
             let firstAttachment = ComposerAttachment(
                 name: "first.png",
                 mimeType: "image/png",
@@ -735,7 +733,7 @@ struct AppStoreComposerTests {
                     ]
                 ),
             ])
-            let service = MockNeoCodeService()
+            let service = MockOpenCodeService()
     
             store.selectSession("ses_1")
     
@@ -817,7 +815,7 @@ struct AppStoreComposerTests {
                     ]
                 ),
             ])
-            let service = MockNeoCodeService()
+            let service = MockOpenCodeService()
     
             store.selectSession("ses_1")
             store.draft = "Queued follow-up"
@@ -850,7 +848,7 @@ struct AppStoreComposerTests {
                     ]
                 ),
             ])
-            let service = MockNeoCodeService()
+            let service = MockOpenCodeService()
     
             store.selectSession("ses_1")
             store.draft = "Queued follow-up"
@@ -891,7 +889,7 @@ struct AppStoreComposerTests {
                     ]
                 ),
             ])
-            let service = MockNeoCodeService()
+            let service = MockOpenCodeService()
     
             store.selectSession("ses_1")
             store.draft = "Queued follow-up"
@@ -918,62 +916,6 @@ struct AppStoreComposerTests {
         }
 
         @MainActor
-        @Test func appStoreSendsQueuedDraftAfterSettlingStaleStreamingState() async {
-            let projectID = UUID()
-            let now = Date(timeIntervalSince1970: 1_710_616_186)
-            let store = AppStore(projects: [
-                ProjectSummary(
-                    id: projectID,
-                    name: "NeoCode",
-                    path: "/tmp/NeoCode",
-                    sessions: [
-                        SessionSummary(
-                            id: "ses_1",
-                            title: "Existing",
-                            lastUpdatedAt: now,
-                            status: .running,
-                            transcript: [
-                                ChatMessage(
-                                    id: "part_1",
-                                    messageID: "msg_1",
-                                    role: .assistant,
-                                    text: "Partial response",
-                                    timestamp: now,
-                                    emphasis: .normal,
-                                    isInProgress: true
-                                )
-                            ]
-                        ),
-                    ]
-                ),
-            ])
-            let service = MockNeoCodeService()
-
-            store.selectSession("ses_1")
-            store.draft = "Queued follow-up"
-            _ = await store.sendDraft(
-                using: service,
-                projectID: projectID,
-                sessionID: "ses_1",
-                allowQueueIfRunning: true
-            )
-
-            let didSend = await store.sendNextQueuedMessageIfPossible(
-                in: "ses_1",
-                projectID: projectID,
-                projectPath: "/tmp/NeoCode",
-                using: service
-            )
-
-            #expect(didSend == true)
-            #expect(store.queuedMessages(for: "ses_1").isEmpty)
-            #expect(service.sentPrompts.count == 1)
-            #expect(service.sentPrompts[0].text == "Queued follow-up")
-            #expect(store.selectedTranscript.allSatisfy { !$0.isInProgress })
-            #expect(store.selectedSession?.status == .running)
-        }
-
-        @MainActor
         @Test func appStoreSendsQueuedDraftAfterSessionFallsIntoError() async {
             let projectID = UUID()
             let store = AppStore(projects: [
@@ -986,7 +928,7 @@ struct AppStoreComposerTests {
                     ]
                 ),
             ])
-            let service = MockNeoCodeService()
+            let service = MockOpenCodeService()
     
             store.selectSession("ses_1")
             store.draft = "Queued follow-up"
@@ -1046,7 +988,7 @@ struct AppStoreComposerTests {
                     ]
                 ),
             ])
-            let service = MockNeoCodeService()
+            let service = MockOpenCodeService()
     
             store.selectSession("ses_1")
             store.availableCommands = [
@@ -1086,7 +1028,7 @@ struct AppStoreComposerTests {
                     ]
                 ),
             ])
-            let service = MockNeoCodeService(sendPromptError: TestFailure.failed("command failed"))
+            let service = MockOpenCodeService(sendPromptError: TestFailure.failed("command failed"))
     
             store.selectSession("ses_1")
             store.availableCommands = [
@@ -1109,7 +1051,6 @@ struct AppStoreComposerTests {
             #expect(store.draft == "/review current diff")
             #expect(store.lastError == "command failed")
             #expect(store.selectedSession?.status == .error)
-            #expect(store.selectedTranscript.isEmpty == true)
             #expect(service.sentCommands.isEmpty)
         }
 

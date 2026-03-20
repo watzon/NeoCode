@@ -1,7 +1,7 @@
 import Foundation
 import OSLog
 
-protocol NeoCodeServicing {
+protocol OpenCodeServicing {
     func listSessions() async throws -> [OpenCodeSession]
     func listSessionStatuses() async throws -> [String: OpenCodeSessionActivity]
     func listPermissions() async throws -> [OpenCodePermissionRequest]
@@ -20,15 +20,6 @@ protocol NeoCodeServicing {
     func listProviders() async throws -> OpenCodeProviderResponse
     func listAgents() async throws -> [OpenCodeAgent]
     func listMessages(sessionID: String) async throws -> [OpenCodeMessageEnvelope]
-    func listDashboardSessionSummaries(sessionIDs: [String]) async throws -> [DashboardRemoteSessionSummary]
-    func gitStatus() async throws -> GitRepositoryStatus
-    func gitCommitPreview() async throws -> GitCommitPreview
-    func initializeGitRepository() async throws
-    func switchGitBranch(named name: String) async throws
-    func createGitBranch(named name: String) async throws
-    func commitGitChanges(message: String, includeUnstaged: Bool) async throws
-    func pushGitChanges() async throws
-    func listGitBranches() async throws -> (branches: [String], current: String)
     func sendPromptAsync(
         sessionID: String,
         text: String,
@@ -48,8 +39,8 @@ protocol NeoCodeServicing {
 }
 
 
-final class NeoCodeClient: NeoCodeServicing {
-    private let logger = Logger(subsystem: "tech.watzon.NeoCode", category: "NeoCodeClient")
+final class OpenCodeClient: OpenCodeServicing {
+    private let logger = Logger(subsystem: "tech.watzon.NeoCode", category: "OpenCodeClient")
     private let connection: OpenCodeRuntime.Connection
     private let session: URLSession
     private let decoder: JSONDecoder
@@ -61,44 +52,40 @@ final class NeoCodeClient: NeoCodeServicing {
     }
 
     func listSessions() async throws -> [OpenCodeSession] {
-        try await nativeListSessions()
+        try await request(path: "/session", method: "GET")
     }
 
     func listSessionStatuses() async throws -> [String: OpenCodeSessionActivity] {
-        try await request(path: workspacePath("session-status"), method: "GET")
+        try await request(path: "/session/status", method: "GET")
     }
 
     func listPermissions() async throws -> [OpenCodePermissionRequest] {
-        let response: [NativePermissionRequest] = try await request(path: workspacePath("permissions"), method: "GET")
-        return response.map(\.openCode)
+        try await request(path: "/permission", method: "GET")
     }
 
     func listQuestions() async throws -> [OpenCodeQuestionRequest] {
-        let response: [NativeQuestionRequest] = try await request(path: workspacePath("questions"), method: "GET")
-        return response.map(\.openCode)
+        try await request(path: "/question", method: "GET")
     }
 
     func listCommands() async throws -> [OpenCodeCommand] {
-        try await request(path: workspacePath("commands"), method: "GET")
+        try await request(path: "/command", method: "GET")
     }
 
     func createSession(title: String?) async throws -> OpenCodeSession {
         logger.info("POST /session for project: \(self.connection.projectPath, privacy: .public)")
         let body = CreateSessionBody(title: title)
-        let session: NativeSession = try await request(path: workspacePath("sessions"), method: "POST", body: body)
-        return session.openCode
+        let session: OpenCodeSession = try await request(path: "/session", method: "POST", body: body)
+        return session
     }
 
     func updateSession(sessionID: String, title: String) async throws -> OpenCodeSession {
         logger.info("PATCH /session/\(sessionID, privacy: .public)")
-        let session: NativeSession = try await request(path: "/v1/sessions/\(sessionID)", method: "PATCH", body: UpdateSessionBody(title: title))
-        return session.openCode
+        return try await request(path: "/session/\(sessionID)", method: "PATCH", body: UpdateSessionBody(title: title))
     }
 
     func deleteSession(sessionID: String) async throws -> Bool {
         logger.info("DELETE /session/\(sessionID, privacy: .public)")
-        let response: NativeBooleanResponse = try await request(path: "/v1/sessions/\(sessionID)", method: "DELETE")
-        return response.ok
+        return try await request(path: "/session/\(sessionID)", method: "DELETE")
     }
 
     func summarizeSession(sessionID: String, providerID: String, modelID: String, auto: Bool = false) async throws {
@@ -106,7 +93,7 @@ final class NeoCodeClient: NeoCodeServicing {
             "POST /session/\(sessionID, privacy: .public)/summarize provider=\(providerID, privacy: .public) model=\(modelID, privacy: .public) auto=\(auto, privacy: .public)"
         )
         let _: Bool = try await request(
-            path: "/v1/sessions/\(sessionID)/summarize",
+            path: "/session/\(sessionID)/summarize",
             method: "POST",
             body: SummarizeSessionBody(providerID: providerID, modelID: modelID, auto: auto)
         )
@@ -114,111 +101,56 @@ final class NeoCodeClient: NeoCodeServicing {
 
     func revertSession(sessionID: String, messageID: String, partID: String? = nil) async throws -> OpenCodeSession {
         logger.info("POST /session/\(sessionID, privacy: .public)/revert messageID=\(messageID, privacy: .public)")
-        let session: NativeSession = try await request(
-            path: "/v1/sessions/\(sessionID)/revert",
+        return try await request(
+            path: "/session/\(sessionID)/revert",
             method: "POST",
             body: RevertSessionBody(messageID: messageID, partID: partID)
         )
-        return session.openCode
     }
 
     func unrevertSession(sessionID: String) async throws -> OpenCodeSession {
         logger.info("POST /session/\(sessionID, privacy: .public)/unrevert")
-        let session: NativeSession = try await request(path: "/v1/sessions/\(sessionID)/unrevert", method: "POST", body: Optional<EmptyRequest>.none)
-        return session.openCode
+        return try await request(path: "/session/\(sessionID)/unrevert", method: "POST", body: Optional<EmptyRequest>.none)
     }
 
     func abortSession(sessionID: String) async throws {
         logger.info("POST /session/\(sessionID, privacy: .public)/abort")
-        let _: NativeBooleanResponse = try await request(path: "/v1/sessions/\(sessionID)/abort", method: "POST", body: Optional<EmptyRequest>.none)
+        let _: EmptyResponse = try await request(path: "/session/\(sessionID)/abort", method: "POST", body: Optional<EmptyRequest>.none)
     }
 
     func replyToPermission(requestID: String, reply: OpenCodePermissionReply, message: String?) async throws {
         logger.info("POST /permission/\(requestID, privacy: .public)/reply type=\(reply.rawValue, privacy: .public)")
-        let _: NativeBooleanResponse = try await request(
-            path: "/v1/permissions/\(requestID)/reply",
+        let _: Bool = try await request(
+            path: "/permission/\(requestID)/reply",
             method: "POST",
-            body: NativePermissionReplyBody(workspaceId: try workspaceID(), reply: reply, message: message)
+            body: PermissionReplyBody(reply: reply, message: message)
         )
     }
 
     func replyToQuestion(requestID: String, answers: [OpenCodeQuestionAnswer]) async throws {
         logger.info("POST /question/\(requestID, privacy: .public)/reply answers=\(answers.count, privacy: .public)")
-        let _: NativeBooleanResponse = try await request(
-            path: "/v1/questions/\(requestID)/reply",
+        let _: Bool = try await request(
+            path: "/question/\(requestID)/reply",
             method: "POST",
-            body: NativeQuestionReplyBody(workspaceId: try workspaceID(), answers: answers)
+            body: QuestionReplyBody(answers: answers)
         )
     }
 
     func rejectQuestion(requestID: String) async throws {
         logger.info("POST /question/\(requestID, privacy: .public)/reject")
-        let _: NativeBooleanResponse = try await request(path: "/v1/questions/\(requestID)/reject", method: "POST", body: NativeWorkspaceBody(workspaceId: try workspaceID()))
+        let _: Bool = try await request(path: "/question/\(requestID)/reject", method: "POST", body: Optional<EmptyRequest>.none)
     }
 
     func listProviders() async throws -> OpenCodeProviderResponse {
-        let response: NativeProviderResponse = try await request(path: workspacePath("providers"), method: "GET")
-        return response.openCode
+        try await request(path: "/config/providers", method: "GET")
     }
 
     func listAgents() async throws -> [OpenCodeAgent] {
-        let response: [NativeAgent] = try await request(path: workspacePath("agents"), method: "GET")
-        return response.map(\.openCode)
+        try await request(path: "/agent", method: "GET")
     }
 
     func listMessages(sessionID: String) async throws -> [OpenCodeMessageEnvelope] {
-        try await request(path: "/v1/sessions/\(sessionID)/messages", method: "GET")
-    }
-
-    func listDashboardSessionSummaries(sessionIDs: [String]) async throws -> [DashboardRemoteSessionSummary] {
-        guard let workspaceID = connection.workspaceID else {
-            throw NeoCodeClientError.invalidResponse
-        }
-
-        struct Body: Encodable {
-            let sessionIDs: [String]
-        }
-
-        return try await request(
-            path: "/v1/workspaces/\(workspaceID)/dashboard/sessions",
-            method: "POST",
-            body: Body(sessionIDs: sessionIDs)
-        )
-    }
-
-    func gitStatus() async throws -> GitRepositoryStatus {
-        let response: NativeGitStatus = try await request(path: workspacePath("git/status"), method: "GET")
-        return response.appStatus
-    }
-
-    func gitCommitPreview() async throws -> GitCommitPreview {
-        let response: NativeGitCommitPreview = try await request(path: workspacePath("git/preview"), method: "GET")
-        return response.appPreview
-    }
-
-    func initializeGitRepository() async throws {
-        let _: NativeBooleanResponse = try await request(path: workspacePath("git/initialize"), method: "POST", body: Optional<EmptyRequest>.none)
-    }
-
-    func switchGitBranch(named name: String) async throws {
-        let _: NativeBooleanResponse = try await request(path: workspacePath("git/switch"), method: "POST", body: NativeGitBranchBody(branch: name))
-    }
-
-    func createGitBranch(named name: String) async throws {
-        let _: NativeBooleanResponse = try await request(path: workspacePath("git/create-branch"), method: "POST", body: NativeGitBranchBody(branch: name))
-    }
-
-    func commitGitChanges(message: String, includeUnstaged: Bool) async throws {
-        let _: NativeBooleanResponse = try await request(path: workspacePath("git/commit"), method: "POST", body: NativeGitCommitBody(message: message, includeUnstaged: includeUnstaged))
-    }
-
-    func pushGitChanges() async throws {
-        let _: NativeBooleanResponse = try await request(path: workspacePath("git/push"), method: "POST", body: Optional<EmptyRequest>.none)
-    }
-
-    func listGitBranches() async throws -> (branches: [String], current: String) {
-        let response: NativeGitBranchesResponse = try await request(path: workspacePath("git/branches"), method: "GET")
-        return (response.branches, response.current)
+        try await request(path: "/session/\(sessionID)/message", method: "GET")
     }
 
     func sendPromptAsync(
@@ -243,7 +175,7 @@ final class NeoCodeClient: NeoCodeServicing {
             agent: options?.agentName,
             variant: options?.variant
         )
-        let _: NativeBooleanResponse = try await request(path: "/v1/sessions/\(sessionID)/prompt", method: "POST", body: body.native)
+        let _: EmptyResponse = try await request(path: "/session/\(sessionID)/prompt_async", method: "POST", body: body)
         logger.info(
             "Prompt accepted for session \(sessionID, privacy: .public) after \(Date().timeIntervalSince(startedAt), privacy: .public)s"
         )
@@ -276,14 +208,14 @@ final class NeoCodeClient: NeoCodeServicing {
                 return parts.isEmpty ? nil : parts
             }()
         )
-        let _: NativeBooleanResponse = try await request(path: "/v1/sessions/\(sessionID)/command", method: "POST", body: body.native)
+        let _: SendCommandResponse = try await request(path: "/session/\(sessionID)/command", method: "POST", body: body)
         logger.info(
             "Command accepted for session \(sessionID, privacy: .public) after \(Date().timeIntervalSince(startedAt), privacy: .public)s"
         )
     }
 
     func eventStream() throws -> AsyncThrowingStream<OpenCodeEvent, Error> {
-        let request = try makeRequest(path: workspacePath("events"), method: "GET", body: Optional<EmptyRequest>.none, accept: "text/event-stream")
+        let request = try makeRequest(path: "/event", method: "GET", body: Optional<EmptyRequest>.none, accept: "text/event-stream")
         let session = self.session
         let decoder = self.decoder
         let logger = self.logger
@@ -297,7 +229,7 @@ final class NeoCodeClient: NeoCodeServicing {
                     guard let httpResponse = response as? HTTPURLResponse,
                           200..<300 ~= httpResponse.statusCode
                     else {
-                        throw NeoCodeClientError.invalidResponse
+                        throw OpenCodeClientError.invalidResponse
                     }
 
                     let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type") ?? "<missing>"
@@ -315,6 +247,12 @@ final class NeoCodeClient: NeoCodeServicing {
                         do {
                             let event = try await MainActor.run {
                                 try OpenCodeEventDecoder.decode(frame: frame, decoder: decoder)
+                            }
+                            if case .ignored = event {
+                            } else {
+                                logger.debug(
+                                    "\(final ? "Flushing final" : "Received") SSE event=\(event.debugName, privacy: .public)"
+                                )
                             }
                             continuation.yield(event)
                         } catch {
@@ -363,7 +301,7 @@ final class NeoCodeClient: NeoCodeServicing {
             }
 
             continuation.onTermination = { termination in
-                let _ = termination
+                logger.debug("SSE continuation terminated: \(String(describing: termination), privacy: .public)")
                 task.cancel()
             }
         }
@@ -373,7 +311,7 @@ final class NeoCodeClient: NeoCodeServicing {
         let request = try makeRequest(path: path, method: method, body: body)
         let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
-            throw NeoCodeClientError.invalidResponse
+            throw OpenCodeClientError.invalidResponse
         }
 
         if httpResponse.statusCode == 204, Response.self == EmptyResponse.self {
@@ -382,7 +320,7 @@ final class NeoCodeClient: NeoCodeServicing {
 
         guard 200..<300 ~= httpResponse.statusCode else {
             logger.error("HTTP \(httpResponse.statusCode) for \(method, privacy: .public) \(path, privacy: .public)")
-            throw NeoCodeClientError.httpStatus(httpResponse.statusCode, serverErrorMessage(from: data))
+            throw OpenCodeClientError.httpStatus(httpResponse.statusCode)
         }
 
         return try decoder.decode(Response.self, from: data)
@@ -392,12 +330,12 @@ final class NeoCodeClient: NeoCodeServicing {
         let request = try makeRequest(path: path, method: method, body: Optional<EmptyRequest>.none)
         let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
-            throw NeoCodeClientError.invalidResponse
+            throw OpenCodeClientError.invalidResponse
         }
 
         guard 200..<300 ~= httpResponse.statusCode else {
             logger.error("HTTP \(httpResponse.statusCode) for \(method, privacy: .public) \(path, privacy: .public)")
-            throw NeoCodeClientError.httpStatus(httpResponse.statusCode, serverErrorMessage(from: data))
+            throw OpenCodeClientError.httpStatus(httpResponse.statusCode)
         }
 
         return try decoder.decode(Response.self, from: data)
@@ -409,9 +347,6 @@ final class NeoCodeClient: NeoCodeServicing {
         request.httpMethod = method
         request.setValue(Self.authorizationHeader(username: connection.username, password: connection.password), forHTTPHeaderField: "Authorization")
         request.setValue(accept, forHTTPHeaderField: "Accept")
-        if let workspaceID = connection.workspaceID {
-            request.setValue(workspaceID, forHTTPHeaderField: "X-NeoCode-Workspace-ID")
-        }
 
         if let body {
             request.httpBody = try JSONEncoder().encode(body)
@@ -419,37 +354,6 @@ final class NeoCodeClient: NeoCodeServicing {
         }
 
         return request
-    }
-
-    private func workspaceID() throws -> String {
-        guard let workspaceID = connection.workspaceID else {
-            throw NeoCodeClientError.invalidResponse
-        }
-        return workspaceID
-    }
-
-    private func workspacePath(_ suffix: String) throws -> String {
-        "/v1/workspaces/\(try workspaceID())/\(suffix)"
-    }
-
-    private func serverErrorMessage(from data: Data) -> String? {
-        guard !data.isEmpty else {
-            return nil
-        }
-
-        if let payload = try? JSONDecoder().decode(ServerErrorPayload.self, from: data),
-           let message = payload.error?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !message.isEmpty {
-            return message
-        }
-
-        let message = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return message?.isEmpty == false ? message : nil
-    }
-
-    private func nativeListSessions() async throws -> [OpenCodeSession] {
-        let sessions: [NativeSession] = try await request(path: workspacePath("sessions"), method: "GET")
-        return sessions.map(\.openCode)
     }
 
     private static func authorizationHeader(username: String, password: String) -> String {
@@ -554,17 +458,6 @@ private struct SendPromptBody: Encodable {
     let model: Model?
     let agent: String?
     let variant: String?
-
-    var native: NativePromptBody {
-        NativePromptBody(
-            text: nil,
-            parts: parts.map(\.native),
-            providerID: model?.providerID,
-            modelID: model?.modelID,
-            agent: agent,
-            variant: variant
-        )
-    }
 }
 
 private struct SendCommandBody: Encodable {
@@ -574,339 +467,20 @@ private struct SendCommandBody: Encodable {
     let model: String?
     let variant: String?
     let parts: [SendPromptBody.Part]?
-
-    var native: NativeCommandBody {
-        NativeCommandBody(
-            command: command,
-            arguments: arguments,
-            parts: parts?.map(\.native) ?? [],
-            agent: agent,
-            model: model,
-            variant: variant
-        )
-    }
 }
 
-private struct NativeWorkspaceBody: Encodable {
-    let workspaceId: String
+private struct SendCommandResponse: Decodable {
+    let info: OpenCodeMessageInfo
+    let parts: [OpenCodePart]
 }
 
-private struct NativeGitStatus: Decodable {
-    let branch: String
-    let aheadCount: Int
-    let hasRemote: Bool
-    let hasChanges: Bool
-
-    var appStatus: GitRepositoryStatus {
-        GitRepositoryStatus(isRepository: true, hasChanges: hasChanges, aheadCount: aheadCount, hasRemote: hasRemote)
-    }
-}
-
-private struct NativeGitChange: Decodable {
-    let path: String
-    let status: String
-    let isTracked: Bool
-    let isStaged: Bool
-    let isUnstaged: Bool
-
-    var appChange: GitFileChange {
-        GitFileChange(path: path, stagedStatus: stagedCharacter, unstagedStatus: unstagedCharacter)
-    }
-
-    private var stagedCharacter: Character {
-        guard isStaged else { return " " }
-        switch status {
-        case "new", "added": return "A"
-        case "deleted": return "D"
-        case "renamed": return "R"
-        case "modified": return "M"
-        default: return isTracked ? "M" : "?"
-        }
-    }
-
-    private var unstagedCharacter: Character {
-        if !isTracked { return "?" }
-        guard isUnstaged else { return " " }
-        switch status {
-        case "added": return "A"
-        case "deleted": return "D"
-        case "renamed": return "R"
-        case "modified", "changed": return "M"
-        default: return "M"
-        }
-    }
-}
-
-private struct NativeGitCommitPreview: Decodable {
-    let branch: String
-    let changedFiles: [NativeGitChange]
-    let stagedAdditions: Int
-    let stagedDeletions: Int
-    let unstagedAdditions: Int
-    let unstagedDeletions: Int
-    let totalAdditions: Int
-    let totalDeletions: Int
-
-    var appPreview: GitCommitPreview {
-        GitCommitPreview(
-            branch: branch,
-            changedFiles: changedFiles.map(\.appChange),
-            stagedAdditions: stagedAdditions,
-            stagedDeletions: stagedDeletions,
-            unstagedAdditions: unstagedAdditions,
-            unstagedDeletions: unstagedDeletions,
-            totalAdditions: totalAdditions,
-            totalDeletions: totalDeletions
-        )
-    }
-}
-
-private struct NativeGitBranchBody: Encodable {
-    let branch: String
-}
-
-private struct NativeGitCommitBody: Encodable {
-    let message: String
-    let includeUnstaged: Bool
-}
-
-private struct NativeGitBranchesResponse: Decodable {
-    let branches: [String]
-    let current: String
-}
-
-private struct NativePermissionReplyBody: Encodable {
-    let workspaceId: String
-    let reply: OpenCodePermissionReply
-    let message: String?
-}
-
-private struct NativeQuestionReplyBody: Encodable {
-    let workspaceId: String
+private struct QuestionReplyBody: Encodable {
     let answers: [OpenCodeQuestionAnswer]
 }
 
-private struct NativeBooleanResponse: Decodable {
-    let ok: Bool
-}
-
-private struct ServerErrorPayload: Decodable {
-    let error: String?
-}
-
-private struct NativeSession: Decodable {
-    let id: String
-    let title: String
-    let parentId: String?
-    let summary: OpenCodeSessionSummary?
-    let revert: NativeSessionRevert?
-    let createdAt: Date
-    let updatedAt: Date
-
-    var openCode: OpenCodeSession {
-        OpenCodeSession(
-            id: id,
-            title: title,
-            parentID: parentId,
-            summary: summary,
-            revert: revert?.openCode,
-            time: OpenCodeTimeContainer(created: createdAt, updated: updatedAt, completed: nil)
-        )
-    }
-}
-
-private struct NativeSessionRevert: Decodable {
-    let messageId: String
-    let partId: String?
-    let snapshot: String?
-    let diff: String?
-
-    var openCode: OpenCodeSessionRevert {
-        .init(messageID: messageId, partID: partId, snapshot: snapshot, diff: diff)
-    }
-}
-
-private struct NativePermissionRequest: Decodable {
-    let id: String
-    let sessionId: String
-    let permission: String
-    let patterns: [String]
-    let metadata: [String: JSONValue]
-    let always: [String]
-    let tool: NativeToolReference?
-
-    var openCode: OpenCodePermissionRequest {
-        .init(id: id, sessionID: sessionId, permission: permission, patterns: patterns, metadata: metadata, always: always, tool: tool?.permissionTool)
-    }
-}
-
-private struct NativeQuestionRequest: Decodable {
-    let id: String
-    let sessionId: String
-    let questions: [OpenCodeQuestionInfo]
-    let tool: NativeToolReference?
-
-    var openCode: OpenCodeQuestionRequest {
-        .init(id: id, sessionID: sessionId, questions: questions, tool: tool?.questionTool)
-    }
-}
-
-private struct NativeToolReference: Decodable {
-    let messageId: String
-    let callId: String
-
-    var permissionTool: OpenCodePermissionRequest.ToolReference {
-        .init(messageID: messageId, callID: callId)
-    }
-
-    var questionTool: OpenCodeQuestionRequest.ToolReference {
-        .init(messageID: messageId, callID: callId)
-    }
-}
-
-private struct NativeProviderResponse: Decodable {
-    let providers: [NativeProvider]
-    let `default`: [String: String]?
-
-    var openCode: OpenCodeProviderResponse {
-        .init(providers: providers.map(\.openCode), default: `default`)
-    }
-}
-
-private struct NativeProvider: Decodable {
-    let id: String
-    let name: String
-    let models: [String: NativeModel]
-
-    var openCode: OpenCodeProvider {
-        .init(id: id, name: name, models: models.mapValues(\.openCode))
-    }
-}
-
-private struct NativeModel: Decodable {
-    let id: String
-    let providerId: String
-    let name: String
-    let limits: OpenCodeModel.Limits?
-    let variants: [String: JSONValue]?
-
-    var openCode: OpenCodeModel {
-        .init(id: id, providerID: providerId, name: name, limit: limits, variants: variants)
-    }
-}
-
-private struct NativeAgent: Decodable {
-    let name: String
-    let description: String?
-    let hidden: Bool?
-    let mode: String?
-    let model: NativeAgentModel?
-
-    var openCode: OpenCodeAgent {
-        .init(name: name, description: description, hidden: hidden, mode: mode, model: model?.openCode)
-    }
-}
-
-private struct NativeAgentModel: Decodable {
-    let providerId: String
-    let modelId: String
-
-    var openCode: OpenCodeAgentModel {
-        .init(providerID: providerId, modelID: modelId)
-    }
-}
-
-private struct NativeMessage: Decodable {
-    let id: String
-    let role: String
-    let text: String
-    let summary: JSONValue?
-    let createdAt: Date
-
-    var openCode: OpenCodeMessageEnvelope {
-        .init(
-            info: OpenCodeMessageInfo(
-                id: id,
-                sessionID: nil,
-                role: role,
-                summary: summary,
-                agent: nil,
-                providerID: nil,
-                modelID: nil,
-                cost: nil,
-                tokens: nil,
-                time: OpenCodeTimeContainer(created: createdAt, updated: createdAt, completed: createdAt)
-            ),
-            parts: [OpenCodePart(id: "\(id):text", sessionID: nil, messageID: id, type: .text, text: text, tool: nil, mime: nil, filename: nil, url: nil, source: nil, state: nil, time: OpenCodeTimeContainer(created: createdAt, updated: createdAt, completed: createdAt))]
-        )
-    }
-}
-
-private struct NativePromptBody: Encodable {
-    let text: String?
-    let parts: [NativePromptPart]
-    let providerID: String?
-    let modelID: String?
-    let agent: String?
-    let variant: String?
-
-    enum CodingKeys: String, CodingKey {
-        case text, parts, providerID = "providerId", modelID = "modelId", agent, variant
-    }
-}
-
-private struct NativeCommandBody: Encodable {
-    let command: String
-    let arguments: String
-    let parts: [NativePromptPart]
-    let agent: String?
-    let model: String?
-    let variant: String?
-}
-
-private struct NativePromptPart: Encodable {
-    let type: String
-    let text: String?
-    let mime: String?
-    let filename: String?
-    let url: String?
-    let source: NativePromptSource?
-}
-
-private struct NativePromptSource: Encodable {
-    let type: String
-    let text: NativePromptSourceText
-    let path: String
-}
-
-private struct NativePromptSourceText: Encodable {
-    let value: String
-    let start: Int
-    let end: Int
-}
-
-private extension SendPromptBody.Part {
-    var native: NativePromptPart {
-        switch self {
-        case .text(let text):
-            return NativePromptPart(type: "text", text: text, mime: nil, filename: nil, url: nil, source: nil)
-        case .file(let mime, let filename, let url):
-            return NativePromptPart(type: "file", text: nil, mime: mime, filename: filename, url: url, source: nil)
-        case .fileReference(let fileReference):
-            return NativePromptPart(
-                type: "file",
-                text: nil,
-                mime: "text/plain",
-                filename: fileReference.relativePath,
-                url: fileReference.requestURL,
-                source: NativePromptSource(
-                    type: "file",
-                    text: NativePromptSourceText(value: fileReference.sourceText.value, start: fileReference.sourceText.start, end: fileReference.sourceText.end),
-                    path: fileReference.absolutePath
-                )
-            )
-        }
-    }
+private struct PermissionReplyBody: Encodable {
+    let reply: OpenCodePermissionReply
+    let message: String?
 }
 
 private struct EmptyRequest: Encodable {}
@@ -930,7 +504,7 @@ extension JSONDecoder {
             }
 
             if let string = try? container.decode(String.self) {
-                if let isoDate = Self.parseOpenCodeISO8601Date(from: string) {
+                if let isoDate = ISO8601DateFormatter().date(from: string) {
                     return isoDate
                 }
 
@@ -943,16 +517,5 @@ extension JSONDecoder {
             throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unsupported OpenCode date value")
         }
         return decoder
-    }
-
-    private nonisolated static func parseOpenCodeISO8601Date(from value: String) -> Date? {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: value) {
-            return date
-        }
-
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter.date(from: value)
     }
 }

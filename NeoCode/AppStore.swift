@@ -59,7 +59,7 @@ final class AppStore {
     }
 
     private struct DashboardRuntimeService {
-        let service: any NeoCodeServicing
+        let service: any OpenCodeServicing
         let shouldStopAfterUse: Bool
     }
 
@@ -202,7 +202,7 @@ final class AppStore {
     var isRefreshingGitCommitPreview = false
     var refreshingGitStatusProjectPath: String?
     var refreshingGitCommitPreviewProjectPath: String?
-    private var liveServices: [ProjectSummary.ID: any NeoCodeServicing] = [:]
+    private var liveServices: [ProjectSummary.ID: any OpenCodeServicing] = [:]
     private var serviceConnectionIdentifiers: [ProjectSummary.ID: String] = [:]
     private var eventTasks: [ProjectSummary.ID: Task<Void, Never>] = [:]
     private var eventSubscriptionTokens: [ProjectSummary.ID: UUID] = [:]
@@ -252,21 +252,11 @@ final class AppStore {
     private var sessionListSyncActivityByProjectID: [ProjectSummary.ID: Int] = [:]
     private var loadingSessionCountsByProjectID: [ProjectSummary.ID: Int] = [:]
     private var locallyDeletedSessionIDsByProjectID: [ProjectSummary.ID: Set<String>] = [:]
-    private var debugEventsBySessionID: [String: [SessionDebugEvent]] = [:]
-    private var lastLiveEventBySessionID: [String: (date: Date, activity: OpenCodeSessionActivity)] = [:]
-    private var lastTranscriptRefreshAtBySessionID: [String: Date] = [:]
-    private var lastCompletedMessageAtBySessionID: [String: Date] = [:]
-    private var transcriptLoadRequestCounters: [String: Int] = [:]
-
-    private let maxDebugEventsPerSession = 80
-    private let liveActivityTrustWindow: TimeInterval = 4
 
     init() {
         let persistence = AppStorePersistence()
         let services = AppStoreServices()
-        let normalizedProjects = Self.normalizedProjects(
-            Self.removingPersistedTranscripts(from: persistence.projects.loadProjects())
-        )
+        let normalizedProjects = Self.normalizedProjects(persistence.projects.loadProjects())
         let extractedState = Self.extractTranscriptState(from: normalizedProjects)
         let loadedAppSettings = persistence.appSettings.loadSettings()
         let restoredWorkspaceSelection = persistence.workspaceSelection.loadSelection()
@@ -392,15 +382,9 @@ final class AppStore {
     var selectedSession: SessionSummary? {
         let _ = sessionUIRevision
         guard let selectedSessionID else { return nil }
-        guard var session = projects
+        return projects
             .flatMap(\.sessions)
             .first(where: { $0.id == selectedSessionID })
-        else {
-            return nil
-        }
-
-        session.status = sessionActivityState(for: selectedSessionID).status
-        return session
     }
 
     var selectedTranscript: [ChatMessage] {
@@ -421,8 +405,7 @@ final class AppStore {
 
     func transcript(for sessionID: String?) -> [ChatMessage] {
         guard let sessionID else { return [] }
-        let resolvedID = resolvedSessionID(for: sessionID)
-        return transcriptStateBySessionID[resolvedID]?.messages ?? []
+        return transcriptStateBySessionID[sessionID]?.messages ?? []
     }
 
     func visibleTranscript(for sessionID: String?) -> [ChatMessage] {
@@ -447,14 +430,12 @@ final class AppStore {
 
     func remainingTodoCount(for sessionID: String?) -> Int {
         guard let sessionID else { return 0 }
-        let resolvedID = resolvedSessionID(for: sessionID)
-        return activeTodosBySessionID[resolvedID]?.remainingCount ?? 0
+        return activeTodosBySessionID[sessionID]?.remainingCount ?? 0
     }
 
     func transcriptRevisionToken(for sessionID: String?) -> Int {
         guard let sessionID else { return 0 }
-        let resolvedID = resolvedSessionID(for: sessionID)
-        return transcriptStateBySessionID[resolvedID]?.revision ?? 0
+        return transcriptStateBySessionID[sessionID]?.revision ?? 0
     }
 
     func sessionStats(for sessionID: String?) -> SessionStatsSnapshot? {
@@ -464,9 +445,7 @@ final class AppStore {
 
     func sessionSummary(for sessionID: String) -> SessionSummary? {
         let _ = sessionUIRevision
-        guard var session = session(for: sessionID) else { return nil }
-        session.status = sessionActivityState(for: sessionID).status
-        return session
+        return session(for: sessionID)
     }
 
     func showsNewSessionEmptyState(for sessionID: String?) -> Bool {
@@ -499,19 +478,10 @@ final class AppStore {
     var selectedSessionActivity: OpenCodeSessionActivity? {
         let _ = sessionUIRevision
         guard let selectedSessionID else { return nil }
-        return sessionActivityState(for: selectedSessionID).liveActivity
-    }
-
-    var selectedSessionStatus: SessionStatus {
-        let _ = sessionUIRevision
-        guard let selectedSessionID else { return .idle }
-        return sessionActivityState(for: selectedSessionID).status
-    }
-
-    var selectedSessionDebugSnapshot: SessionDebugSnapshot? {
-        let _ = sessionUIRevision
-        guard let selectedSessionID else { return nil }
-        return debugSnapshot(for: selectedSessionID)
+        return effectiveLiveSessionActivity(
+            for: selectedSessionID,
+            transcript: transcript(for: selectedSessionID)
+        )
     }
 
     func handleApplicationDidBecomeActive() {
@@ -524,104 +494,12 @@ final class AppStore {
             refreshCommitPreviewIfLoaded: gitCommitPreview != nil,
             delay: .milliseconds(100)
         )
-
-        refreshSelectedSessionStats()
-
-        guard let projectID = selectedProject?.id,
-              let service = liveServices[projectID]
-        else {
-            return
-        }
-
-        Task { [weak self] in
-            await self?.reconcileProjectLiveState(
-                using: service,
-                projectID: projectID,
-                refreshSelectedSession: true,
-                reason: "application-active"
-            )
-        }
     }
 
     var selectedSessionIsActivelyResponding: Bool {
         let _ = sessionUIRevision
         guard let selectedSessionID else { return false }
-        return sessionActivityState(for: selectedSessionID).isResponding
-    }
-
-    func sessionStatus(for sessionID: String?) -> SessionStatus {
-        let _ = sessionUIRevision
-        guard let sessionID else { return .idle }
-        return sessionActivityState(for: sessionID).status
-    }
-
-    func sessionIsActivelyResponding(_ sessionID: String?) -> Bool {
-        let _ = sessionUIRevision
-        guard let sessionID else { return false }
-        return sessionActivityState(for: sessionID).isResponding
-    }
-
-    func clearSelectedSessionLocalActivityForDebugging() {
-        guard let selectedSessionID,
-              let projectID = selectedProject?.id
-        else {
-            return
-        }
-
-        clearLocalSessionActivity(selectedSessionID)
-        refreshSessionStatus(sessionID: selectedSessionID, projectID: projectID)
-        recordSessionDebugEvent(
-            sessionID: selectedSessionID,
-            category: "debug",
-            message: "Cleared local activity markers from developer panel"
-        )
-        logger.notice(
-            "Developer panel cleared local activity markers session=\(selectedSessionID, privacy: .public)"
-        )
-    }
-
-    func debugRefreshSelectedSession(using runtime: OpenCodeRuntime) async {
-        guard let projectID = selectedProject?.id,
-              let selectedSessionID,
-              let service = await connectProject(projectID, using: runtime, includeComposerOptions: false)
-        else {
-            logger.error("Developer refresh could not connect selected session")
-            return
-        }
-
-        logger.notice(
-            "Developer panel refreshing selected session session=\(selectedSessionID, privacy: .public)"
-        )
-        recordSessionDebugEvent(
-            sessionID: selectedSessionID,
-            category: "debug",
-            message: "Refreshing transcript and live session statuses from developer panel"
-        )
-
-        do {
-            let statuses = try await service.listSessionStatuses()
-            applyLiveSessionStatuses(statuses, projectID: projectID)
-            await loadMessages(
-                for: selectedSessionID,
-                using: service,
-                projectID: projectID,
-                allowCachedFallback: true
-            )
-        } catch {
-            logger.error(
-                "Developer refresh failed session=\(selectedSessionID, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
-            )
-            recordSessionDebugEvent(
-                sessionID: selectedSessionID,
-                category: "error",
-                message: "Developer refresh failed: \(error.localizedDescription)"
-            )
-        }
-    }
-
-    func recentDebugEvents(for sessionID: String?) -> [SessionDebugEvent] {
-        guard let sessionID else { return [] }
-        return debugEventsBySessionID[sessionID] ?? []
+        return isSessionActivelyResponding(selectedSessionID)
     }
 
     func project(for sessionID: String) -> ProjectSummary? {
@@ -666,13 +544,11 @@ final class AppStore {
 
     func pendingPermission(for sessionID: String) -> OpenCodePermissionRequest? {
         let _ = sessionUIRevision
-        let sessionID = resolvedSessionID(for: sessionID)
         return pendingPermissionsBySession[sessionID]?.first
     }
 
     func pendingQuestion(for sessionID: String) -> OpenCodeQuestionRequest? {
         let _ = sessionUIRevision
-        let sessionID = resolvedSessionID(for: sessionID)
         return pendingQuestionsBySession[sessionID]?.first
     }
 
@@ -905,11 +781,7 @@ final class AppStore {
 
     func selectSession(_ sessionID: String) {
         let sessionID = resolvedSessionID(for: sessionID)
-        if selectedSessionID == sessionID {
-            clearStatusIndicators(for: sessionID)
-            refreshSelectedSessionStats()
-            return
-        }
+        guard selectedSessionID != sessionID else { return }
         persistComposerStateForSelectedSession()
         let destinationProjectID = projectID(for: sessionID)
         selectedSessionID = sessionID
@@ -930,7 +802,6 @@ final class AppStore {
 
         primePromptState(for: sessionID)
         scheduleGitRefreshLoop(for: selectedProject?.path)
-        refreshSelectedSessionStats()
     }
 
     func addProject(directoryURL: URL) {
@@ -1068,7 +939,7 @@ final class AppStore {
 
     private var hasRunningSessions: Bool {
         projects.contains { project in
-            project.sessions.contains { sessionActivityState(for: $0.id).status.isActive }
+            project.sessions.contains { $0.status.isActive }
         }
     }
 
@@ -1113,7 +984,7 @@ final class AppStore {
     }
 
     @discardableResult
-    func createSession(in projectID: ProjectSummary.ID, using service: any NeoCodeServicing) async -> String? {
+    func createSession(in projectID: ProjectSummary.ID, using service: any OpenCodeServicing) async -> String? {
         selectedProjectID = projectID
         let pendingSessionID = stagePendingSession(in: projectID)
         return await ensureServerSession(for: pendingSessionID, in: projectID, using: service)
@@ -1345,7 +1216,7 @@ final class AppStore {
             return
         }
 
-        let batchSize = hasCachedSnapshot ? 8 : 12
+        let batchSize = hasCachedSnapshot ? 2 : 4
         var processedSessions = 0
         var cursor = 0
 
@@ -1354,50 +1225,41 @@ final class AppStore {
             let batch = Array(refreshWork[cursor..<nextCursor])
             cursor = nextCursor
 
-            let groupedBatch = Dictionary(grouping: batch, by: { $0.project.id })
-            var summaryIngresses: [DashboardSessionSummaryIngress] = []
-
-            for (projectID, items) in groupedBatch {
-                guard let runtimeService = runtimeServices[projectID],
-                      let firstItem = items.first else { continue }
-
+            var ingestions: [DashboardSessionIngress] = []
+            for item in batch {
+                guard let runtimeService = runtimeServices[item.project.id] else { continue }
                 dashboardStatus = DashboardRefreshStatus(
                     phase: initialPhase,
                     title: hasCachedSnapshot ? "Refreshing usage cache" : "Building usage cache",
                     detail: hasCachedSnapshot
                         ? "Updating only the sessions that changed since the cached snapshot was written."
-                        : "Reading lightweight session usage summaries so future launches stay fast.",
+                        : "Reading historical session data and caching it so future launches can load instantly.",
                     processedSessions: processedSessions,
                     totalSessions: refreshWork.count,
-                    currentProjectName: firstItem.project.name,
-                    currentSessionTitle: items.first?.session.title,
+                    currentProjectName: item.project.name,
+                    currentSessionTitle: item.session.title,
                     lastUpdatedAt: dashboardSnapshot?.generatedAt
                 )
 
                 do {
-                    let summaries = try await runtimeService.service.listDashboardSessionSummaries(sessionIDs: items.map { $0.session.id })
-                    let byID = Dictionary(uniqueKeysWithValues: summaries.map { ($0.id, $0) })
-                    for item in items {
-                        if let summary = byID[item.session.id] {
-                            summaryIngresses.append(DashboardSessionSummaryIngress(project: item.descriptor, summary: summary))
-                        }
-                    }
+                    let messages = try await runtimeService.service.listMessages(sessionID: item.session.id)
+                    ingestions.append(DashboardSessionIngress(project: item.descriptor, session: item.session, messages: messages))
                 } catch {
                     guard !Task.isCancelled, !(error is CancellationError) else {
                         stopDashboardOnlyRuntimes(runtimeServices, runtime: runtime)
                         return
                     }
-                    logger.error("Failed to fetch dashboard summaries for project \(firstItem.project.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                    logger.error("Failed to fetch dashboard messages for session \(item.session.id, privacy: .public): \(error.localizedDescription, privacy: .public)")
                 }
             }
 
-            if !summaryIngresses.isEmpty {
-                dashboardSnapshot = await self.services.dashboardStats.ingestSummaries(
-                    summaryIngresses,
+            if !ingestions.isEmpty {
+                dashboardSnapshot = await self.services.dashboardStats.ingest(
+                    ingestions,
                     range: selectedDashboardRange,
                     projectPath: selectedDashboardProject?.path
                 )
-                processedSessions += summaryIngresses.count
+                processedSessions += ingestions.count
             }
 
             await Task.yield()
@@ -1444,7 +1306,7 @@ final class AppStore {
 
         runtime.markUsed(for: project.path)
         let shouldStopAfterUse = !hadConnection && liveServices[project.id] == nil
-        return DashboardRuntimeService(service: NeoCodeClient(connection: connection), shouldStopAfterUse: shouldStopAfterUse)
+        return DashboardRuntimeService(service: OpenCodeClient(connection: connection), shouldStopAfterUse: shouldStopAfterUse)
     }
 
     func syncSelectedSession(using runtime: OpenCodeRuntime) async {
@@ -1570,7 +1432,7 @@ final class AppStore {
     func canCompactSession(_ sessionID: String) -> Bool {
         guard let session = sessionSummary(for: sessionID),
               session.isEphemeral == false,
-              !sessionActivityState(for: sessionID).isResponding,
+              session.status != .running,
               resolvedCompactionModel(for: sessionID) != nil
         else {
             return false
@@ -1579,7 +1441,7 @@ final class AppStore {
         return true
     }
 
-    private func liveService(for projectID: ProjectSummary.ID, runtime: OpenCodeRuntime) async -> (any NeoCodeServicing)? {
+    private func liveService(for projectID: ProjectSummary.ID, runtime: OpenCodeRuntime) async -> (any OpenCodeServicing)? {
         guard let project = projects.first(where: { $0.id == projectID }) else {
             logger.error("Could not resolve project for id: \(projectID.uuidString, privacy: .public)")
             lastError = "Could not find the selected project."
@@ -1596,8 +1458,8 @@ final class AppStore {
         }
 
         if let connection = runtime.connection(for: project.path) {
-            logger.debug("Creating fallback daemon client from runtime connection for project: \(project.path, privacy: .public)")
-            let liveClient = NeoCodeClient(connection: connection)
+            logger.debug("Creating fallback OpenCode client from runtime connection for project: \(project.path, privacy: .public)")
+            let liveClient = OpenCodeClient(connection: connection)
             liveServices[projectID] = liveClient
             serviceConnectionIdentifiers[projectID] = Self.connectionIdentifier(for: connection)
             reevaluateRuntimeRetention(using: runtime)
@@ -1645,7 +1507,7 @@ final class AppStore {
 
         if let selectedSessionID,
            self.projectID(for: selectedSessionID) == projectID,
-           sessionActivityState(for: selectedSessionID).isResponding,
+           session(for: selectedSessionID)?.status.isActive == true,
            enqueueDraft(in: selectedSessionID) {
             reevaluateRuntimeRetention(using: runtime)
             return
@@ -1803,7 +1665,7 @@ final class AppStore {
 
     @discardableResult
     func sendDraft(
-        using service: any NeoCodeServicing,
+        using service: any OpenCodeServicing,
         projectID: ProjectSummary.ID,
         sessionID: String,
         originatingSessionID: String? = nil,
@@ -1821,7 +1683,7 @@ final class AppStore {
         guard !trimmed.isEmpty || !attachments.isEmpty else { return false }
 
         if allowQueueIfRunning,
-           sessionActivityState(for: sessionID).isResponding {
+           session(for: sessionID)?.status.isActive == true {
             return enqueueDraft(in: sessionID)
         }
 
@@ -1857,7 +1719,7 @@ final class AppStore {
         attachments: [ComposerAttachment],
         fileReferences: [ComposerPromptFileReference],
         options: OpenCodePromptOptions,
-        using service: any NeoCodeServicing,
+        using service: any OpenCodeServicing,
         projectID: ProjectSummary.ID,
         sessionID: String,
         originatingSessionID: String? = nil,
@@ -1869,7 +1731,7 @@ final class AppStore {
         guard !trimmed.isEmpty || !attachments.isEmpty else { return false }
 
         let slashCommand = slashCommandInvocation(in: trimmed)
-        let shouldShowOptimisticUserMessage = true
+        let shouldShowOptimisticUserMessage = slashCommand == nil
         if let slashCommand {
             logger.info(
                 "Sending slash command session=\(sessionID, privacy: .public) command=\(slashCommand.command.name, privacy: .public) argumentLength=\(slashCommand.arguments.count, privacy: .public) project=\(projectID.uuidString, privacy: .public)"
@@ -1969,7 +1831,7 @@ final class AppStore {
             return false
         }
 
-        guard !sessionActivityState(for: sessionID).isResponding else {
+        guard session(for: sessionID)?.status != .running else {
             lastError = "Wait for the current response to finish before reverting history."
             return false
         }
@@ -1987,7 +1849,7 @@ final class AppStore {
         messageID: String,
         in sessionID: String,
         projectID: ProjectSummary.ID,
-        using service: any NeoCodeServicing
+        using service: any OpenCodeServicing
     ) async -> Bool {
         let currentTranscript = transcript(for: sessionID)
         guard let preview = revertPreview(for: messageID, in: sessionID),
@@ -2047,7 +1909,7 @@ final class AppStore {
             return false
         }
 
-        guard !sessionActivityState(for: sessionID).isResponding else {
+        guard session(for: sessionID)?.status != .running else {
             lastError = "Wait for the current response to finish before editing an earlier message."
             return false
         }
@@ -2070,7 +1932,7 @@ final class AppStore {
         newText: String,
         in sessionID: String,
         projectID: ProjectSummary.ID,
-        using service: any NeoCodeServicing
+        using service: any OpenCodeServicing
     ) async -> Bool {
         let trimmed = newText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty,
@@ -2181,7 +2043,7 @@ final class AppStore {
     func stopSession(
         sessionID: String,
         projectID: ProjectSummary.ID,
-        using service: any NeoCodeServicing
+        using service: any OpenCodeServicing
     ) async -> Bool {
         guard isSessionActivelyResponding(sessionID) else { return false }
 
@@ -2302,12 +2164,7 @@ final class AppStore {
         }
 
         do {
-            guard let projectID = projects.first(where: { $0.path == projectPath })?.id,
-                  let service = liveServices[projectID] else {
-                lastError = GitClientUnavailableError().errorDescription
-                return false
-            }
-            try await service.pushGitChanges()
+            try await GitRepositoryService().push(in: projectPath)
             lastError = nil
             await refreshGitStatus()
             return true
@@ -2345,12 +2202,6 @@ final class AppStore {
         case .sessionStatusChanged(let sessionID, let status):
             let previousStatus = liveSessionStatuses[sessionID]
             liveSessionStatuses[sessionID] = status
-            lastLiveEventBySessionID[sessionID] = (.now, status)
-            recordSessionDebugEvent(
-                sessionID: sessionID,
-                category: "event",
-                message: "Received live status \(debugSessionActivityLabel(status)) (previous: \(debugSessionActivityLabel(previousStatus)))"
-            )
             if case .idle = status {
                 settleSessionActivity(sessionID: sessionID, projectID: projectID)
             }
@@ -2381,13 +2232,6 @@ final class AppStore {
                 var infos = messageInfosBySessionID[sessionID] ?? [:]
                 infos[info.id] = info
                 messageInfosBySessionID[sessionID] = infos
-                if info.isCompleted {
-                    recordSessionDebugEvent(
-                        sessionID: sessionID,
-                        category: "message",
-                        message: "Message \(info.id) completed"
-                    )
-                }
                 reconcileCompletedMessageIfNeeded(info, sessionID: sessionID, projectID: projectID)
                 refreshSessionStats(sessionID: sessionID, projectID: projectID)
                 touchSession(sessionID: sessionID, projectID: projectID, updatedAt: info.updatedAt ?? info.createdAt ?? Date())
@@ -2408,7 +2252,7 @@ final class AppStore {
         using runtime: OpenCodeRuntime,
         includeComposerOptions: Bool,
         allowCachedFallback: Bool = true
-    ) async -> (any NeoCodeServicing)? {
+    ) async -> (any OpenCodeServicing)? {
         guard let project = projects.first(where: { $0.id == projectID }) else {
             logger.error("Could not resolve project for id: \(projectID.uuidString, privacy: .public)")
             lastError = "Could not find the selected project."
@@ -2425,7 +2269,7 @@ final class AppStore {
         }
 
         logger.info("Connecting store to runtime for project: \(project.path, privacy: .public)")
-        let service = NeoCodeClient(connection: connection)
+        let service = OpenCodeClient(connection: connection)
         let connectionIdentifier = Self.connectionIdentifier(for: connection)
         let connectionChanged = serviceConnectionIdentifiers[projectID] != connectionIdentifier || liveServices[projectID] == nil
 
@@ -2491,14 +2335,6 @@ final class AppStore {
         refreshThinkingLevels()
     }
 
-    func connectedService(forProjectPath projectPath: String) -> (ProjectSummary.ID, any NeoCodeServicing)? {
-        guard let project = projects.first(where: { $0.path == projectPath }),
-              let service = liveServices[project.id] else {
-            return nil
-        }
-        return (project.id, service)
-    }
-
     func disconnectLiveState() {
         cancelGitRefreshLoop()
 
@@ -2558,7 +2394,7 @@ final class AppStore {
         }
     }
 
-    private func loadComposerOptions(using service: any NeoCodeServicing, projectPath: String) async {
+    private func loadComposerOptions(using service: any OpenCodeServicing, projectPath: String) async {
         async let providersTask = Self.captureResult { try await service.listProviders() }
         async let agentsTask = Self.captureResult { try await service.listAgents() }
         async let commandsTask = Self.captureResult { try await service.listCommands() }
@@ -2684,7 +2520,7 @@ final class AppStore {
         }
     }
 
-    private func loadPendingPermissions(using service: any NeoCodeServicing, for projectID: ProjectSummary.ID) async {
+    private func loadPendingPermissions(using service: any OpenCodeServicing, for projectID: ProjectSummary.ID) async {
         do {
             let requests = try await service.listPermissions()
             var pendingRequests: [OpenCodePermissionRequest] = []
@@ -2701,7 +2537,7 @@ final class AppStore {
         }
     }
 
-    private func loadPendingQuestions(using service: any NeoCodeServicing, for projectID: ProjectSummary.ID) async {
+    private func loadPendingQuestions(using service: any OpenCodeServicing, for projectID: ProjectSummary.ID) async {
         do {
             let requests = try await service.listQuestions()
             replacePendingQuestions(requests, in: projectID)
@@ -3103,7 +2939,7 @@ final class AppStore {
     func compactSession(
         _ sessionID: String,
         projectID: ProjectSummary.ID,
-        using service: any NeoCodeServicing
+        using service: any OpenCodeServicing
     ) async -> Bool {
         guard let session = sessionSummary(for: sessionID, projectID: projectID) else {
             return false
@@ -3119,7 +2955,7 @@ final class AppStore {
             return false
         }
 
-        guard !sessionActivityState(for: sessionID).isResponding else {
+        guard session.status != .running else {
             lastError = "Wait for the current response to finish before compacting the session."
             return false
         }
@@ -3216,7 +3052,7 @@ final class AppStore {
         selectedBranch = "main"
     }
 
-    private func loadSessions(using service: any NeoCodeServicing, for projectID: ProjectSummary.ID, allowCachedFallback: Bool = false) async {
+    private func loadSessions(using service: any OpenCodeServicing, for projectID: ProjectSummary.ID, allowCachedFallback: Bool = false) async {
         beginSessionLoad(for: projectID)
         defer { endSessionLoad(for: projectID) }
 
@@ -3254,7 +3090,7 @@ final class AppStore {
         }
     }
 
-    private func loadSessionStatuses(using service: any NeoCodeServicing, for projectID: ProjectSummary.ID) async {
+    private func loadSessionStatuses(using service: any OpenCodeServicing, for projectID: ProjectSummary.ID) async {
         do {
             let remoteStatuses = try await service.listSessionStatuses()
             applyLiveSessionStatuses(remoteStatuses, projectID: projectID)
@@ -3315,10 +3151,8 @@ final class AppStore {
         }
     }
 
-    private func loadMessages(for sessionID: String, using service: any NeoCodeServicing, projectID: ProjectSummary.ID, allowCachedFallback: Bool = false) async {
+    private func loadMessages(for sessionID: String, using service: any OpenCodeServicing, projectID: ProjectSummary.ID, allowCachedFallback: Bool = false) async {
         let loadKey = "\(projectID.uuidString)|\(sessionID)"
-        let requestGeneration = (transcriptLoadRequestCounters[loadKey] ?? 0) + 1
-        transcriptLoadRequestCounters[loadKey] = requestGeneration
         guard activeTranscriptLoadKeys.insert(loadKey).inserted else { return }
 
         let keepsCurrentUI = allowCachedFallback && hasCachedTranscript(for: sessionID, projectID: projectID)
@@ -3334,24 +3168,11 @@ final class AppStore {
             if loadingTranscriptSessionID == sessionID {
                 loadingTranscriptSessionID = nil
             }
-
-            if transcriptLoadRequestCounters[loadKey] != requestGeneration,
-               let latestService = liveServices[projectID] {
-                Task { [weak self] in
-                    await self?.loadMessages(
-                        for: sessionID,
-                        using: latestService,
-                        projectID: projectID,
-                        allowCachedFallback: allowCachedFallback
-                    )
-                }
-            }
         }
 
         do {
             let messages = try await service.listMessages(sessionID: sessionID)
             guard !Task.isCancelled else { return }
-            guard transcriptLoadRequestCounters[loadKey] == requestGeneration else { return }
             let existingTranscript = transcript(for: sessionID)
             let liveActivity = liveSessionStatuses[sessionID]
             let hasLiveBusyStatus = liveActivity == .busy || {
@@ -3373,9 +3194,7 @@ final class AppStore {
             for message in messages {
                 messageRoles[message.info.id] = message.info.chatRole
             }
-            lastTranscriptRefreshAtBySessionID[sessionID] = .now
             replaceTranscript(in: sessionID, projectID: projectID, with: transcript)
-            recordSuspiciousInProgressDiagnosticsIfNeeded(sessionID: sessionID, transcript: transcript, source: "transcript refresh")
             replaceActiveTodos(in: sessionID, with: SessionTodoParser.latestSnapshot(from: messages))
             refreshSessionStats(sessionID: sessionID, projectID: projectID)
             refreshSessionStatus(sessionID: sessionID, projectID: projectID)
@@ -3403,7 +3222,7 @@ final class AppStore {
     }
 
     private func subscribeToEvents(
-        using service: any NeoCodeServicing,
+        using service: any OpenCodeServicing,
         projectID: ProjectSummary.ID,
         connectionIdentifier: String,
         runtime: OpenCodeRuntime
@@ -3413,6 +3232,7 @@ final class AppStore {
         )
         eventTasks[projectID]?.cancel()
         let subscriptionToken = UUID()
+        logger.debug("Created event subscription token=\(subscriptionToken.uuidString, privacy: .public)")
         eventSubscriptionTokens[projectID] = subscriptionToken
         subscribedConnectionIdentifiers[projectID] = connectionIdentifier
 
@@ -3447,10 +3267,11 @@ final class AppStore {
                                 "Live event stream connected for project id: \(projectID.uuidString, privacy: .public) token=\(subscriptionToken.uuidString, privacy: .public)"
                             )
                             lastError = nil
-                            scheduleProjectLiveStateRefresh(projectID: projectID, reason: "stream-connected")
+                            refreshSelectedSessionMessages(projectID: projectID)
                         } else if case .ignored = event {
                         } else {
                             reconnectAttempt = 0
+                            logger.debug("Received live event: \(event.debugName, privacy: .public)")
                         }
 
                         self.apply(event: event, projectID: projectID)
@@ -3510,6 +3331,9 @@ final class AppStore {
                         streamService = nextService
                     }
                 } catch is CancellationError {
+                    logger.debug(
+                        "Live event stream task cancelled project=\(projectID.uuidString, privacy: .public) token=\(subscriptionToken.uuidString, privacy: .public)"
+                    )
                     return
                 } catch {
                     guard self.hasActiveSubscription(projectID: projectID, connectionIdentifier: connectionIdentifier, token: subscriptionToken) else {
@@ -3536,45 +3360,23 @@ final class AppStore {
         }
     }
 
-    private func scheduleProjectLiveStateRefresh(projectID: ProjectSummary.ID, reason: String) {
+    private func refreshSelectedSessionMessages(projectID: ProjectSummary.ID) {
+        guard let selectedSessionID,
+              session(for: selectedSessionID)?.isEphemeral != true,
+              self.projectID(for: selectedSessionID) == projectID,
+              let service = liveServices[projectID]
+        else { return }
+
+        logger.debug(
+            "Scheduling transcript refresh after stream connect session=\(selectedSessionID, privacy: .public) project=\(projectID.uuidString, privacy: .public)"
+        )
         refreshTask?.cancel()
         refreshTask = Task { [weak self] in
             guard let self else { return }
             try? await Task.sleep(for: .milliseconds(120))
             if Task.isCancelled { return }
-            guard let service = liveServices[projectID] else { return }
-            await self.reconcileProjectLiveState(
-                using: service,
-                projectID: projectID,
-                refreshSelectedSession: true,
-                reason: reason
-            )
+            await self.loadMessages(for: selectedSessionID, using: service, projectID: projectID, allowCachedFallback: true)
         }
-    }
-
-    private func reconcileProjectLiveState(
-        using service: any NeoCodeServicing,
-        projectID: ProjectSummary.ID,
-        refreshSelectedSession: Bool,
-        reason: String
-    ) async {
-        logger.info(
-            "Reconciling live project state project=\(projectID.uuidString, privacy: .public) reason=\(reason, privacy: .public)"
-        )
-
-        await loadSessionStatuses(using: service, for: projectID)
-        await loadPendingPermissions(using: service, for: projectID)
-        await loadPendingQuestions(using: service, for: projectID)
-
-        guard refreshSelectedSession,
-              let selectedSessionID,
-              self.projectID(for: selectedSessionID) == projectID,
-              session(for: selectedSessionID)?.isEphemeral != true
-        else {
-            return
-        }
-
-        await loadMessages(for: selectedSessionID, using: service, projectID: projectID, allowCachedFallback: true)
     }
 
     private func scheduleStreamingRecoveryCheck(
@@ -3590,6 +3392,9 @@ final class AppStore {
         }
 
         let initialRevision = baselineRevision ?? transcriptRevision(for: sessionID, projectID: projectID)
+        logger.debug(
+            "Scheduling streaming recovery check session=\(sessionID, privacy: .public) attemptsRemaining=\(attemptsRemaining, privacy: .public) baselineRevision=\(initialRevision, privacy: .public)"
+        )
         streamingRecoveryTasks[sessionID]?.cancel()
         streamingRecoveryTasks[sessionID] = Task { [weak self] in
             guard let self else { return }
@@ -3597,15 +3402,21 @@ final class AppStore {
             let recoveryDelay: Duration = baselineRevision == nil ? .milliseconds(750) : .seconds(2)
             try? await Task.sleep(for: recoveryDelay)
             guard !Task.isCancelled,
-                  sessionSummary(for: sessionID, projectID: projectID) != nil,
-                  sessionActivityState(for: sessionID).isResponding
+                  let session = sessionSummary(for: sessionID, projectID: projectID),
+                  session.status == .running
             else {
+                logger.debug(
+                    "Skipping streaming recovery check session=\(sessionID, privacy: .public) because task cancelled or session no longer running"
+                )
                 cancelStreamingRecoveryCheck(for: sessionID)
                 return
             }
 
             let currentRevision = transcriptRevision(for: sessionID, projectID: projectID)
             guard currentRevision == initialRevision else {
+                logger.debug(
+                    "Streaming recovery check satisfied by transcript progress session=\(sessionID, privacy: .public) baselineRevision=\(initialRevision, privacy: .public) currentRevision=\(currentRevision, privacy: .public)"
+                )
                 cancelStreamingRecoveryCheck(for: sessionID)
                 return
             }
@@ -3615,12 +3426,7 @@ final class AppStore {
             )
 
             if let service = await connectProject(projectID, using: runtime, includeComposerOptions: false) {
-                await reconcileProjectLiveState(
-                    using: service,
-                    projectID: projectID,
-                    refreshSelectedSession: self.selectedSessionID == sessionID,
-                    reason: "streaming-recovery"
-                )
+                await loadMessages(for: sessionID, using: service, projectID: projectID, allowCachedFallback: true)
                 await sendQueuedMessagesIfPossible(for: sessionID, projectID: projectID, using: runtime)
             }
 
@@ -3635,6 +3441,9 @@ final class AppStore {
     }
 
     private func cancelStreamingRecoveryCheck(for sessionID: String) {
+        if streamingRecoveryTasks[sessionID] != nil {
+            logger.debug("Cancelling streaming recovery check session=\(sessionID, privacy: .public)")
+        }
         streamingRecoveryTasks[sessionID]?.cancel()
         streamingRecoveryTasks.removeValue(forKey: sessionID)
     }
@@ -3661,7 +3470,6 @@ final class AppStore {
         upsertMessage(message, in: sessionID, projectID: projectID)
         reconcileLocalSessionActivityIfSettled(sessionID: sessionID)
         touchSession(sessionID: sessionID, projectID: projectID, updatedAt: message.timestamp)
-        refreshSessionStats(sessionID: sessionID, projectID: projectID)
         refreshSessionStatus(sessionID: sessionID, projectID: projectID)
 
         if partTriggersGitRefresh(part, projectID: projectID),
@@ -3676,15 +3484,14 @@ final class AppStore {
     }
 
     private func apply(delta: OpenCodePartDelta, projectID: ProjectSummary.ID) {
-        guard delta.field == "text" else {
+        guard delta.field == "text",
+              let indices = indices(for: delta.sessionID, projectID: projectID)
+        else {
             return
         }
 
-        let sessionID = resolvedSessionID(for: delta.sessionID)
-        guard let indices = indices(for: sessionID, projectID: projectID) else { return }
-
-        markSessionLocallyActive(sessionID)
-        let key = BufferedTextDeltaKey(projectID: projectID, sessionID: sessionID, partID: delta.partID)
+        markSessionLocallyActive(delta.sessionID)
+        let key = BufferedTextDeltaKey(projectID: projectID, sessionID: delta.sessionID, partID: delta.partID)
         if var buffered = bufferedTextDeltas[key] {
             buffered.text += delta.delta
             buffered.updatedAt = .now
@@ -3795,7 +3602,7 @@ final class AppStore {
     }
 
     private func terminationBlockReason(for session: SessionSummary) -> String? {
-        if sessionActivityState(for: session.id).isResponding {
+        if session.status.isActive || isSessionLocallyActive(session.id) {
             return "responding"
         }
 
@@ -4028,23 +3835,13 @@ final class AppStore {
 
     private func resolvedSessionID(for part: OpenCodePart) -> String? {
         if let sessionID = part.sessionID {
-            return resolvedSessionID(for: sessionID)
+            return sessionID
         }
 
         guard let messageID = part.messageID else { return nil }
 
         for (sessionID, infos) in messageInfosBySessionID where infos[messageID] != nil {
-            return resolvedSessionID(for: sessionID)
-        }
-
-        return nil
-    }
-
-    private func messageInfo(for messageID: String) -> OpenCodeMessageInfo? {
-        for infos in messageInfosBySessionID.values {
-            if let info = infos[messageID] {
-                return info
-            }
+            return sessionID
         }
 
         return nil
@@ -4120,52 +3917,7 @@ final class AppStore {
             transcript: transcript,
             fallback: previousStatus
         )
-        let liveActivity = liveSessionStatuses[sessionID]
-        let localActivity = isSessionLocallyActive(sessionID)
-        let inProgressDiagnostics = inProgressDiagnostics(for: transcript, sessionID: sessionID)
-        let inProgressCount = inProgressDiagnostics.filter(\.isBlocking).count
-        let backgroundInProgressCount = inProgressDiagnostics.count - inProgressCount
-        let bufferedDeltaCount = bufferedTextDeltas.keys.filter { $0.sessionID == sessionID }.count
-        let permissionCount = pendingPermissionsBySession[sessionID]?.count ?? 0
-        let questionCount = pendingQuestionsBySession[sessionID]?.count ?? 0
-
         projects[indices.project].sessions[indices.session].status = resolvedStatus
-        if previousStatus != resolvedStatus {
-            let context = debugSessionStateContext(
-                sessionID: sessionID,
-                liveActivity: liveActivity,
-                localActivity: localActivity,
-                inProgressCount: inProgressCount,
-                bufferedDeltaCount: bufferedDeltaCount,
-                permissionCount: permissionCount,
-                questionCount: questionCount
-            )
-            recordSessionDebugEvent(
-                sessionID: sessionID,
-                category: "status",
-                message: "Resolved status changed \(previousStatus.rawValue) -> \(resolvedStatus.rawValue) [\(context),background=\(backgroundInProgressCount)]"
-            )
-            logger.notice(
-                "Resolved session status changed session=\(sessionID, privacy: .public) from=\(previousStatus.rawValue, privacy: .public) to=\(resolvedStatus.rawValue, privacy: .public) context=\(context, privacy: .public) background=\(backgroundInProgressCount, privacy: .public)"
-            )
-        }
-
-        if resolvedStatus.isActive,
-           let suspiciousReason = possibleStuckActiveReason(
-               liveActivity: liveActivity,
-               localActivity: localActivity,
-               inProgressCount: inProgressCount,
-               bufferedDeltaCount: bufferedDeltaCount,
-               permissionCount: permissionCount,
-               questionCount: questionCount,
-               transcript: transcript
-           ) {
-            recordSessionDebugEvent(sessionID: sessionID, category: "warning", message: suspiciousReason)
-            logger.warning(
-                "Suspicious active session state session=\(sessionID, privacy: .public) detail=\(suspiciousReason, privacy: .public)"
-            )
-        }
-
         if previousStatus.isActive && !resolvedStatus.isActive {
             markSidebarActivity(sessionID: sessionID, projectID: projectID)
         }
@@ -4192,7 +3944,6 @@ final class AppStore {
         }
 
         flushBufferedTextDeltas(for: sessionID, projectID: projectID)
-        lastCompletedMessageAtBySessionID[sessionID] = info.completedAt ?? .now
 
         var transcript = transcript(for: sessionID)
         var didChangeTranscript = false
@@ -4213,11 +3964,6 @@ final class AppStore {
 
         if !transcript.contains(where: \.isInProgress) && !hasBufferedTextDeltas(for: sessionID) {
             clearLocalSessionActivity(sessionID)
-            recordSessionDebugEvent(
-                sessionID: sessionID,
-                category: "message",
-                message: "Cleared local activity after completed message \(info.id)"
-            )
         }
 
         refreshSessionStatus(sessionID: sessionID, projectID: projectID)
@@ -4232,17 +3978,7 @@ final class AppStore {
         guard let projectIndex = projects.firstIndex(where: { $0.id == projectID }) else { return }
 
         for session in projects[projectIndex].sessions {
-            if let status = statuses[session.id] {
-                liveSessionStatuses[session.id] = status
-                lastLiveEventBySessionID[session.id] = (.now, status)
-                continue
-            }
-
-            if shouldCarryForwardLiveActivity(for: session.id) {
-                continue
-            }
-
-            liveSessionStatuses[session.id] = .idle
+            liveSessionStatuses[session.id] = statuses[session.id] ?? .idle
         }
 
         for session in projects[projectIndex].sessions {
@@ -4262,7 +3998,7 @@ final class AppStore {
         if let activity = effectiveLiveSessionActivity(for: sessionID, transcript: transcript) {
             switch activity {
             case .idle:
-                return transcriptDerivedStatus(for: transcript, sessionID: sessionID, fallback: .idle)
+                return .idle
             case .busy:
                 return .running
             case .retry:
@@ -4278,7 +4014,7 @@ final class AppStore {
         sessionID: String,
         fallback _: SessionStatus = .idle
     ) -> SessionStatus {
-        if hasBlockingInProgressActivity(in: transcript, sessionID: sessionID) || hasBufferedTextDeltas(for: sessionID) {
+        if isSessionLocallyActive(sessionID), transcript.contains(where: \.isInProgress) {
             return .running
         }
 
@@ -4312,31 +4048,21 @@ final class AppStore {
     ) -> OpenCodeSessionActivity? {
         guard let activity = liveSessionStatuses[sessionID] else { return nil }
 
-        let hasBlockingActivity = hasBlockingInProgressActivity(in: transcript, sessionID: sessionID)
-            || hasBufferedTextDeltas(for: sessionID)
-        let hasVisibleInProgressActivity = transcript.contains(where: \.isInProgress)
         let hasLocalActivity = isSessionLocallyActive(sessionID)
+            || transcript.contains(where: \.isInProgress)
+            || hasBufferedTextDeltas(for: sessionID)
         let isAwaitingFirstAssistantUpdate = transcript.isEmpty || transcript.last?.role == .user
         let isAwaitingInput = pendingPermission(for: sessionID) != nil || pendingQuestion(for: sessionID) != nil
-        let hasObservedRecentRun = observedRunningSessionIDs.contains(sessionID)
-        let hasRecentActiveLiveEvent = hasRecentActiveLiveEvent(for: sessionID)
-        let shouldTrustRecentBootstrapEvent = transcript.isEmpty && hasRecentActiveLiveEvent
 
         switch activity {
         case .idle:
-            if hasBlockingActivity {
-                return nil
-            }
-
-            if hasLocalActivity || hasVisibleInProgressActivity {
+            if hasLocalActivity {
                 return .idle
             }
             return nil
         case .busy, .retry:
-            guard hasBlockingActivity
-                    || hasLocalActivity
-                    || shouldTrustRecentBootstrapEvent
-                    || (hasObservedRecentRun && isAwaitingFirstAssistantUpdate)
+            guard hasLocalActivity
+                    || isAwaitingFirstAssistantUpdate
                     || isAwaitingInput
             else {
                 return nil
@@ -4345,61 +4071,16 @@ final class AppStore {
         }
     }
 
-    private func hasRecentActiveLiveEvent(for sessionID: String) -> Bool {
-        guard let lastLiveEvent = lastLiveEventBySessionID[sessionID],
-              Date().timeIntervalSince(lastLiveEvent.date) <= liveActivityTrustWindow
-        else {
-            return false
-        }
-
-        switch lastLiveEvent.activity {
-        case .busy, .retry:
-            return true
-        case .idle:
-            return false
-        }
-    }
-
-    private func shouldCarryForwardLiveActivity(for sessionID: String) -> Bool {
-        guard let currentActivity = liveSessionStatuses[sessionID] else { return false }
-
-        switch currentActivity {
-        case .idle:
-            return false
-        case .busy, .retry:
-            let transcript = transcript(for: sessionID)
-            if hasBlockingInProgressActivity(in: transcript, sessionID: sessionID)
-                || hasBufferedTextDeltas(for: sessionID)
-                || isSessionLocallyActive(sessionID)
-                || pendingPermission(for: sessionID) != nil
-                || pendingQuestion(for: sessionID) != nil {
-                return true
-            }
-
-            return transcript.isEmpty && hasRecentActiveLiveEvent(for: sessionID)
-        }
-    }
-
     private func settleSessionActivity(sessionID: String, projectID: ProjectSummary.ID) {
         flushBufferedTextDeltas(for: sessionID, projectID: projectID)
         clearLocalSessionActivity(sessionID)
-        recordSessionDebugEvent(
-            sessionID: sessionID,
-            category: "activity",
-            message: "Settling session activity after live idle event"
-        )
 
         guard let indices = indices(for: sessionID, projectID: projectID) else { return }
 
         var transcript = transcript(for: sessionID)
-        let diagnostics = inProgressDiagnostics(for: transcript, sessionID: sessionID)
-        guard !diagnostics.isEmpty else { return }
+        guard transcript.contains(where: \.isInProgress) else { return }
 
         for index in transcript.indices where transcript[index].isInProgress {
-            let diagnostic = diagnosticForMessage(transcript[index], in: transcript, sessionID: sessionID)
-            if diagnostic?.isBlocking == false {
-                continue
-            }
             transcript[index].isInProgress = false
         }
 
@@ -4408,7 +4089,7 @@ final class AppStore {
     }
 
     private func reconcileLocalSessionActivityIfSettled(sessionID: String) {
-        guard !hasBlockingInProgressActivity(in: transcript(for: sessionID), sessionID: sessionID),
+        guard !transcript(for: sessionID).contains(where: \.isInProgress),
               !hasBufferedTextDeltas(for: sessionID),
               pendingPermission(for: sessionID) == nil,
               pendingQuestion(for: sessionID) == nil
@@ -4417,342 +4098,10 @@ final class AppStore {
         }
 
         clearLocalSessionActivity(sessionID)
-        recordSessionDebugEvent(
-            sessionID: sessionID,
-            category: "activity",
-            message: "Cleared local activity because transcript and pending input are settled"
-        )
     }
 
     private func hasBufferedTextDeltas(for sessionID: String) -> Bool {
         bufferedTextDeltas.keys.contains { $0.sessionID == sessionID }
-    }
-
-    private func hasBlockingInProgressActivity(in transcript: [ChatMessage], sessionID: String) -> Bool {
-        inProgressDiagnostics(for: transcript, sessionID: sessionID).contains(where: \.isBlocking)
-    }
-
-    private func inProgressDiagnostics(for transcript: [ChatMessage], sessionID: String) -> [SessionInProgressDiagnostic] {
-        transcript.compactMap { message in
-            diagnosticForMessage(message, in: transcript, sessionID: sessionID)
-        }
-    }
-
-    private func diagnosticForMessage(_ message: ChatMessage, in transcript: [ChatMessage], sessionID: String) -> SessionInProgressDiagnostic? {
-        guard message.isInProgress else { return nil }
-
-        let parentMessageInfo: OpenCodeMessageInfo?
-        if let messageID = message.messageID {
-            parentMessageInfo = self.messageInfo(for: messageID)
-        } else {
-            parentMessageInfo = nil
-        }
-
-        if let toolCall = message.kind.toolCall {
-            let isBackgroundTool = toolCall.isLikelyDetachedBackgroundWork
-            let diagnostic = SessionInProgressDiagnostic(
-                id: message.id,
-                messageID: message.messageID,
-                title: toolCall.name,
-                detail: toolCall.conciseDebugDetail,
-                category: isBackgroundTool ? .backgroundTool : .toolCall,
-                isBlocking: !isBackgroundTool,
-                role: message.role.rawValue,
-                blockingReason: isBackgroundTool ? .detachedBackgroundTool : .foregroundToolRunning,
-                parentMessageCompletedAt: parentMessageInfo?.completedAt,
-                itemTimestamp: message.timestamp
-            )
-            return orphanAwareDiagnostic(diagnostic, sessionID: sessionID)
-        }
-
-        let latestMessageID = transcript.last?.messageID
-        let blockingReason: SessionInProgressDiagnostic.BlockingReason
-        if message.role == .user {
-            blockingReason = .unexpectedUserProgress
-        } else if parentMessageInfo?.isCompleted == false {
-            blockingReason = .messageIncomplete
-        } else if message.messageID == latestMessageID {
-            blockingReason = .partIncomplete
-        } else {
-            blockingReason = .unknown
-        }
-
-        let diagnostic = SessionInProgressDiagnostic(
-            id: message.id,
-            messageID: message.messageID,
-            title: message.role == .assistant ? "assistant response" : message.role.rawValue,
-            detail: message.debugPreviewText,
-            category: .assistantOutput,
-            isBlocking: true,
-            role: message.role.rawValue,
-            blockingReason: blockingReason,
-            parentMessageCompletedAt: parentMessageInfo?.completedAt,
-            itemTimestamp: message.timestamp
-        )
-        return orphanAwareDiagnostic(diagnostic, sessionID: sessionID)
-    }
-
-    private func orphanAwareDiagnostic(_ diagnostic: SessionInProgressDiagnostic, sessionID: String) -> SessionInProgressDiagnostic {
-        guard isOrphanedInProgressDiagnostic(diagnostic, sessionID: sessionID) else {
-            return diagnostic
-        }
-
-        return SessionInProgressDiagnostic(
-            id: diagnostic.id,
-            messageID: diagnostic.messageID,
-            title: diagnostic.title,
-            detail: diagnostic.detail,
-            category: diagnostic.category,
-            isBlocking: false,
-            role: diagnostic.role,
-            blockingReason: .orphanedAfterRefresh,
-            parentMessageCompletedAt: diagnostic.parentMessageCompletedAt,
-            itemTimestamp: diagnostic.itemTimestamp
-        )
-    }
-
-    private func isOrphanedInProgressDiagnostic(_ diagnostic: SessionInProgressDiagnostic, sessionID: String) -> Bool {
-        guard let lastRefresh = lastTranscriptRefreshAtBySessionID[sessionID]
-        else {
-            return false
-        }
-
-        return Self.shouldTreatDiagnosticAsOrphaned(
-            diagnostic,
-            liveActivity: liveSessionStatuses[sessionID],
-            hasLocalActivity: isSessionLocallyActive(sessionID),
-            hasBufferedTextDeltas: hasBufferedTextDeltas(for: sessionID),
-            hasPendingInput: pendingPermission(for: sessionID) != nil || pendingQuestion(for: sessionID) != nil,
-            lastTranscriptRefreshAt: lastRefresh
-        )
-    }
-
-    static func shouldTreatDiagnosticAsOrphaned(
-        _ diagnostic: SessionInProgressDiagnostic,
-        liveActivity: OpenCodeSessionActivity?,
-        hasLocalActivity: Bool,
-        hasBufferedTextDeltas: Bool,
-        hasPendingInput: Bool,
-        lastTranscriptRefreshAt: Date
-    ) -> Bool {
-        guard !hasLocalActivity,
-              !hasBufferedTextDeltas,
-              !hasPendingInput
-        else {
-            return false
-        }
-
-        if let liveActivity {
-            switch liveActivity {
-            case .busy, .retry:
-                return false
-            case .idle:
-                break
-            }
-        }
-
-        let refreshGracePeriod: TimeInterval = 2
-        guard diagnostic.itemTimestamp < lastTranscriptRefreshAt.addingTimeInterval(-refreshGracePeriod) else {
-            return false
-        }
-
-        switch diagnostic.blockingReason {
-        case .messageIncomplete, .partIncomplete, .foregroundToolRunning, .unexpectedUserProgress, .unknown:
-            return true
-        case .detachedBackgroundTool, .orphanedAfterRefresh:
-            return false
-        }
-    }
-
-    private func debugSnapshot(for sessionID: String) -> SessionDebugSnapshot? {
-        guard let session = session(for: sessionID),
-              let project = project(for: sessionID)
-        else {
-            return nil
-        }
-
-        let transcript = transcript(for: sessionID)
-        let activityState = sessionActivityState(for: sessionID, transcript: transcript)
-        let liveActivity = liveSessionStatuses[sessionID]
-        let hasLocalActivity = isSessionLocallyActive(sessionID)
-        let inProgressDiagnostics = inProgressDiagnostics(for: transcript, sessionID: sessionID)
-        let inProgressCount = inProgressDiagnostics.count
-        let blockingInProgressCount = inProgressDiagnostics.filter(\.isBlocking).count
-        let nonBlockingInProgressCount = inProgressDiagnostics.count - blockingInProgressCount
-        let bufferedDeltaCount = bufferedTextDeltas.keys.filter { $0.sessionID == sessionID }.count
-        let pendingPermissionCount = pendingPermissionsBySession[sessionID]?.count ?? 0
-        let pendingQuestionCount = pendingQuestionsBySession[sessionID]?.count ?? 0
-        let queuedMessageCount = queuedMessagesBySessionID[sessionID]?.count ?? 0
-        let lastLiveEvent = lastLiveEventBySessionID[sessionID]
-        let possibleStuckReason = possibleStuckActiveReason(
-            liveActivity: liveActivity,
-            localActivity: hasLocalActivity,
-            inProgressCount: blockingInProgressCount,
-            bufferedDeltaCount: bufferedDeltaCount,
-            permissionCount: pendingPermissionCount,
-            questionCount: pendingQuestionCount,
-            transcript: transcript
-        )
-
-        return SessionDebugSnapshot(
-            projectName: project.name,
-            projectPath: project.path,
-            sessionID: sessionID,
-            sessionTitle: session.title,
-            sessionStatus: activityState.status,
-            liveActivity: activityState.liveActivity ?? liveActivity,
-            isActivelyResponding: activityState.isResponding,
-            hasLocalActivity: hasLocalActivity,
-            inProgressMessageCount: inProgressCount,
-            blockingInProgressMessageCount: blockingInProgressCount,
-            nonBlockingInProgressMessageCount: nonBlockingInProgressCount,
-            bufferedDeltaCount: bufferedDeltaCount,
-            pendingPermissionCount: pendingPermissionCount,
-            pendingQuestionCount: pendingQuestionCount,
-            queuedMessageCount: queuedMessageCount,
-            transcriptMessageCount: transcript.count,
-            transcriptRevision: transcriptRevisionToken(for: sessionID),
-            lastUpdatedAt: session.lastUpdatedAt,
-            lastLiveEventAt: lastLiveEvent?.date,
-            lastLiveEventLabel: lastLiveEvent.map { debugSessionActivityLabel($0.activity) },
-            lastTranscriptRefreshAt: lastTranscriptRefreshAtBySessionID[sessionID],
-            lastCompletedMessageAt: lastCompletedMessageAtBySessionID[sessionID],
-            possibleStuckReason: possibleStuckReason,
-            inProgressDiagnostics: inProgressDiagnostics,
-            recentEvents: recentDebugEvents(for: sessionID)
-        )
-    }
-
-    private func sessionActivityState(for sessionID: String, transcript: [ChatMessage]? = nil) -> SessionActivityState {
-        let resolvedTranscript = transcript ?? self.transcript(for: sessionID)
-        let liveActivity = effectiveLiveSessionActivity(for: sessionID, transcript: resolvedTranscript)
-        let fallbackStatus = session(for: sessionID)?.status ?? .idle
-        let status = resolvedSessionStatus(
-            sessionID: sessionID,
-            transcript: resolvedTranscript,
-            fallback: fallbackStatus
-        )
-        let hasBlockingActivity = hasBlockingInProgressActivity(in: resolvedTranscript, sessionID: sessionID)
-        let hasBufferedDeltas = hasBufferedTextDeltas(for: sessionID)
-        let hasLocalActivity = isSessionLocallyActive(sessionID)
-        let hasAwaitingInput = pendingPermission(for: sessionID) != nil || pendingQuestion(for: sessionID) != nil
-
-        let isResponding: Bool
-        switch liveActivity {
-        case .busy, .retry:
-            isResponding = true
-        case .idle:
-            isResponding = false
-        case nil:
-            isResponding = !hasAwaitingInput && (hasBlockingActivity || hasBufferedDeltas || (status == .running && hasLocalActivity))
-        }
-
-        return SessionActivityState(
-            status: status,
-            liveActivity: liveActivity,
-            isResponding: isResponding,
-            hasBlockingActivity: hasBlockingActivity,
-            hasBufferedTextDeltas: hasBufferedDeltas,
-            hasLocalActivity: hasLocalActivity
-        )
-    }
-
-    private func recordSessionDebugEvent(sessionID: String, category: String, message: String) {
-        var events = debugEventsBySessionID[sessionID] ?? []
-        events.append(SessionDebugEvent(category: category, message: message))
-        if events.count > maxDebugEventsPerSession {
-            events.removeFirst(events.count - maxDebugEventsPerSession)
-        }
-        debugEventsBySessionID[sessionID] = events
-        bumpSessionUIRevision()
-    }
-
-    private func recordSuspiciousInProgressDiagnosticsIfNeeded(sessionID: String, transcript: [ChatMessage], source: String) {
-        let diagnostics = inProgressDiagnostics(for: transcript, sessionID: sessionID)
-        let suspicious = diagnostics.filter {
-            $0.blockingReason == .unexpectedUserProgress || $0.blockingReason == .unknown
-        }
-
-        guard !suspicious.isEmpty else { return }
-
-        let summary = suspicious.prefix(3).map { diagnostic in
-            "message=\(diagnostic.messageID ?? diagnostic.id) reason=\(diagnostic.blockingReason.rawValue) role=\(diagnostic.role)"
-        }.joined(separator: "; ")
-
-        recordSessionDebugEvent(
-            sessionID: sessionID,
-            category: "warning",
-            message: "Suspicious in-progress transcript items after \(source): \(summary)"
-        )
-        logger.warning(
-            "Suspicious in-progress transcript items session=\(sessionID, privacy: .public) source=\(source, privacy: .public) detail=\(summary, privacy: .public)"
-        )
-    }
-
-    private func debugSessionStateContext(
-        sessionID: String,
-        liveActivity: OpenCodeSessionActivity?,
-        localActivity: Bool,
-        inProgressCount: Int,
-        bufferedDeltaCount: Int,
-        permissionCount: Int,
-        questionCount: Int
-    ) -> String {
-        [
-            "live=\(debugSessionActivityLabel(liveActivity))",
-            "local=\(localActivity)",
-            "inProgress=\(inProgressCount)",
-            "buffered=\(bufferedDeltaCount)",
-            "permissions=\(permissionCount)",
-            "questions=\(questionCount)",
-            "queued=\(queuedMessagesBySessionID[sessionID]?.count ?? 0)",
-        ].joined(separator: ",")
-    }
-
-    private func possibleStuckActiveReason(
-        liveActivity: OpenCodeSessionActivity?,
-        localActivity: Bool,
-        inProgressCount: Int,
-        bufferedDeltaCount: Int,
-        permissionCount: Int,
-        questionCount: Int,
-        transcript: [ChatMessage]
-    ) -> String? {
-        guard inProgressCount == 0,
-              bufferedDeltaCount == 0,
-              permissionCount == 0,
-              questionCount == 0
-        else {
-            return nil
-        }
-
-        switch liveActivity {
-        case .busy?, .retry?:
-            if localActivity {
-                return "Session still appears active even though no transcript parts or pending input remain. Local activity markers may be stale."
-            }
-
-            if transcript.last?.role != .user {
-                return "Live session status still reports active even though the transcript has no in-progress parts or pending input."
-            }
-        case .idle?, nil:
-            break
-        }
-
-        return nil
-    }
-
-    private func debugSessionActivityLabel(_ activity: OpenCodeSessionActivity?) -> String {
-        guard let activity else { return "none" }
-
-        switch activity {
-        case .idle:
-            return "idle"
-        case .busy:
-            return "busy"
-        case .retry(let attempt, let message, let next):
-            return "retry(attempt=\(attempt), next=\(next), message=\(message))"
-        }
     }
 
     private func clearStatusIndicators(for sessionID: String?) {
@@ -4833,7 +4182,7 @@ final class AppStore {
         in sessionID: String,
         projectID: ProjectSummary.ID,
         projectPath: String,
-        using service: any NeoCodeServicing
+        using service: any OpenCodeServicing
     ) async -> Bool {
         guard canDispatchQueuedMessages(for: sessionID, projectID: projectID),
               pendingPermission(for: sessionID) == nil,
@@ -4890,7 +4239,7 @@ final class AppStore {
             refreshSessionStatus(sessionID: sessionID, projectID: projectID)
         }
 
-        return !sessionActivityState(for: sessionID).status.isActive
+        return !(session(for: sessionID)?.status.isActive ?? true)
     }
 
     @discardableResult
@@ -4899,7 +4248,7 @@ final class AppStore {
         in sessionID: String,
         projectID: ProjectSummary.ID,
         projectPath: String,
-        using service: any NeoCodeServicing
+        using service: any OpenCodeServicing
     ) async -> Bool {
         guard pendingPermission(for: sessionID) == nil,
               pendingQuestion(for: sessionID) == nil,
@@ -5168,7 +4517,7 @@ final class AppStore {
         return autoRespondedPermissionIDs[request.id] == nil
     }
 
-    private func autoRespondToPermission(_ request: OpenCodePermissionRequest, projectID: ProjectSummary.ID, service: any NeoCodeServicing) async {
+    private func autoRespondToPermission(_ request: OpenCodePermissionRequest, projectID: ProjectSummary.ID, service: any OpenCodeServicing) async {
         pruneAutoRespondedPermissions()
         guard autoRespondedPermissionIDs[request.id] == nil else { return }
 
@@ -5554,17 +4903,7 @@ final class AppStore {
         )
     }
 
-    func refreshSelectedSessionStats() {
-        guard let selectedSessionID,
-              let projectID = selectedProject?.id else {
-            return
-        }
-
-        refreshSessionStats(sessionID: selectedSessionID, projectID: projectID)
-    }
-
     private func indices(for sessionID: String, projectID: ProjectSummary.ID) -> (project: Int, session: Int)? {
-        let sessionID = resolvedSessionID(for: sessionID)
         guard let projectIndex = projects.firstIndex(where: { $0.id == projectID }),
               let sessionIndex = projects[projectIndex].sessions.firstIndex(where: { $0.id == sessionID })
         else { return nil }
@@ -5611,7 +4950,7 @@ final class AppStore {
     }
 
     private func isNotFoundError(_ error: Error) -> Bool {
-        guard case NeoCodeClientError.httpStatus(404, _) = error else {
+        guard case OpenCodeClientError.httpStatus(404) = error else {
             return false
         }
 
@@ -5646,19 +4985,6 @@ final class AppStore {
         messageInfosBySessionID.removeValue(forKey: sessionID)
     }
 
-    private func moveTranscript(from sourceSessionID: String, to destinationSessionID: String) {
-        guard sourceSessionID != destinationSessionID,
-              let existingState = transcriptStateBySessionID.removeValue(forKey: sourceSessionID)
-        else {
-            return
-        }
-
-        transcriptStateBySessionID[destinationSessionID] = existingState
-        if let infos = messageInfosBySessionID.removeValue(forKey: sourceSessionID) {
-            messageInfosBySessionID[destinationSessionID] = infos
-        }
-    }
-
     private func trackNewlyCreatedSession(_ sessionID: String) {
         guard newlyCreatedSessionIDs.insert(sessionID).inserted else { return }
         bumpSessionUIRevision()
@@ -5678,6 +5004,19 @@ final class AppStore {
     private func clearNewlyCreatedSession(_ sessionID: String) {
         guard newlyCreatedSessionIDs.remove(sessionID) != nil else { return }
         bumpSessionUIRevision()
+    }
+
+    private func moveTranscript(from sourceSessionID: String, to destinationSessionID: String) {
+        guard sourceSessionID != destinationSessionID,
+              let existingState = transcriptStateBySessionID.removeValue(forKey: sourceSessionID)
+        else {
+            return
+        }
+
+        transcriptStateBySessionID[destinationSessionID] = existingState
+        if let infos = messageInfosBySessionID.removeValue(forKey: sourceSessionID) {
+            messageInfosBySessionID[destinationSessionID] = infos
+        }
     }
 
     @discardableResult
@@ -5709,7 +5048,7 @@ final class AppStore {
     private func ensureServerSession(
         for sessionID: String,
         in projectID: ProjectSummary.ID,
-        using service: any NeoCodeServicing
+        using service: any OpenCodeServicing
     ) async -> String? {
         guard let session = self.session(for: sessionID) else {
             return nil
@@ -5899,7 +5238,20 @@ final class AppStore {
     }
 
     private func isSessionActivelyResponding(_ sessionID: String) -> Bool {
-        sessionActivityState(for: sessionID).isResponding
+        if let activity = effectiveLiveSessionActivity(for: sessionID, transcript: transcript(for: sessionID)) {
+            switch activity {
+            case .busy, .retry:
+                return true
+            case .idle:
+                return false
+            }
+        }
+
+        if session(for: sessionID)?.status.isActive == true {
+            return true
+        }
+
+        return isSessionLocallyActive(sessionID) || hasBufferedTextDeltas(for: sessionID)
     }
 
     @discardableResult
@@ -5942,7 +5294,7 @@ final class AppStore {
         return true
     }
 
-    private func resolveSessionForSend(projectID: ProjectSummary.ID, service: any NeoCodeServicing) async -> String? {
+    private func resolveSessionForSend(projectID: ProjectSummary.ID, service: any OpenCodeServicing) async -> String? {
         guard let currentSessionID = selectedSessionID,
               let session = self.session(for: currentSessionID)
         else {
@@ -6021,72 +5373,7 @@ final class AppStore {
         projects[projectIndex].sessions[sessionIndex] = replacement
         registerSessionAlias(from: sessionID, to: session.id)
         moveTranscript(from: sessionID, to: session.id)
-        moveSessionRuntimeState(from: sessionID, to: session.id, projectID: projectID)
         scheduleProjectPersistence()
-    }
-
-    private func moveSessionRuntimeState(from sourceSessionID: String, to destinationSessionID: String, projectID: ProjectSummary.ID) {
-        guard sourceSessionID != destinationSessionID else { return }
-
-        if let liveActivity = liveSessionStatuses.removeValue(forKey: sourceSessionID) {
-            liveSessionStatuses[destinationSessionID] = liveActivity
-        }
-        if let permissions = pendingPermissionsBySession.removeValue(forKey: sourceSessionID) {
-            pendingPermissionsBySession[destinationSessionID] = permissions
-        }
-        if let questions = pendingQuestionsBySession.removeValue(forKey: sourceSessionID) {
-            pendingQuestionsBySession[destinationSessionID] = questions
-        }
-        if let todos = activeTodosBySessionID.removeValue(forKey: sourceSessionID) {
-            activeTodosBySessionID[destinationSessionID] = todos
-        }
-        if let queuedMessages = queuedMessagesBySessionID.removeValue(forKey: sourceSessionID) {
-            queuedMessagesBySessionID[destinationSessionID] = queuedMessages
-        }
-        if let events = debugEventsBySessionID.removeValue(forKey: sourceSessionID) {
-            debugEventsBySessionID[destinationSessionID] = events
-        }
-        if let lastLiveEvent = lastLiveEventBySessionID.removeValue(forKey: sourceSessionID) {
-            lastLiveEventBySessionID[destinationSessionID] = lastLiveEvent
-        }
-        if let lastTranscriptRefresh = lastTranscriptRefreshAtBySessionID.removeValue(forKey: sourceSessionID) {
-            lastTranscriptRefreshAtBySessionID[destinationSessionID] = lastTranscriptRefresh
-        }
-        if let lastCompletedMessage = lastCompletedMessageAtBySessionID.removeValue(forKey: sourceSessionID) {
-            lastCompletedMessageAtBySessionID[destinationSessionID] = lastCompletedMessage
-        }
-
-        if locallyActiveSessionIDs.remove(sourceSessionID) != nil {
-            locallyActiveSessionIDs.insert(destinationSessionID)
-        }
-        if observedRunningSessionIDs.remove(sourceSessionID) != nil {
-            observedRunningSessionIDs.insert(destinationSessionID)
-        }
-        if finishedSessionIDs.remove(sourceSessionID) != nil {
-            finishedSessionIDs.insert(destinationSessionID)
-        }
-        if failedSessionIDs.remove(sourceSessionID) != nil {
-            failedSessionIDs.insert(destinationSessionID)
-        }
-        if loadingTranscriptSessionID == sourceSessionID {
-            loadingTranscriptSessionID = destinationSessionID
-        }
-
-        let remappedDeltas = bufferedTextDeltas.reduce(into: [BufferedTextDeltaKey: BufferedTextDelta]()) { result, entry in
-            let key = entry.key.sessionID == sourceSessionID
-                ? BufferedTextDeltaKey(projectID: projectID, sessionID: destinationSessionID, partID: entry.key.partID)
-                : entry.key
-            result[key] = entry.value
-        }
-        bufferedTextDeltas = remappedDeltas
-        bufferedTextDeltaOrder = bufferedTextDeltaOrder.map { key in
-            guard key.sessionID == sourceSessionID else { return key }
-            return BufferedTextDeltaKey(projectID: projectID, sessionID: destinationSessionID, partID: key.partID)
-        }
-
-        if streamingRecoveryTasks[sourceSessionID] != nil {
-            cancelStreamingRecoveryCheck(for: sourceSessionID)
-        }
     }
 
     private static func normalizedProjects(_ projects: [ProjectSummary]) -> [ProjectSummary] {
@@ -6113,18 +5400,6 @@ final class AppStore {
         }
 
         return (sanitizedProjects, transcripts)
-    }
-
-    private static func removingPersistedTranscripts(from projects: [ProjectSummary]) -> [ProjectSummary] {
-        projects.map { project in
-            var sanitizedProject = project
-            sanitizedProject.sessions = project.sessions.map { session in
-                var sanitizedSession = session
-                sanitizedSession.transcript = []
-                return sanitizedSession
-            }
-            return sanitizedProject
-        }
     }
 
     private static func deduplicatedSessions(_ sessions: [SessionSummary]) -> [SessionSummary] {
@@ -6163,8 +5438,7 @@ final class AppStore {
             return preservedLocalTranscriptSuffix(
                 existing: existing,
                 incomingIDs: [],
-                preserveInProgressSuffix: preserveInProgressSuffix,
-                newestIncomingTimestamp: nil
+                preserveInProgressSuffix: preserveInProgressSuffix
             ) ?? incoming
         }
 
@@ -6181,8 +5455,7 @@ final class AppStore {
         if let preservedSuffix = preservedLocalTranscriptSuffix(
             existing: existing,
             incomingIDs: incomingIDs,
-            preserveInProgressSuffix: preserveInProgressSuffix,
-            newestIncomingTimestamp: incoming.last?.timestamp
+            preserveInProgressSuffix: preserveInProgressSuffix
         ) {
             reconciled.append(contentsOf: preservedSuffix)
         }
@@ -6193,10 +5466,9 @@ final class AppStore {
     private static func preservedLocalTranscriptSuffix(
         existing: [ChatMessage],
         incomingIDs: Set<String>,
-        preserveInProgressSuffix: Bool,
-        newestIncomingTimestamp: Date?
+        preserveInProgressSuffix: Bool
     ) -> [ChatMessage]? {
-        guard preserveInProgressSuffix || newestIncomingTimestamp != nil else { return nil }
+        guard preserveInProgressSuffix else { return nil }
 
         var trailingMessages: [ChatMessage] = []
 
@@ -6210,20 +5482,8 @@ final class AppStore {
 
         guard !trailingMessages.isEmpty else { return nil }
 
-        let preserved = trailingMessages.reversed().filter { message in
-            !(message.role == .user && message.isInProgress)
-        }
-
-        let hasInProgress = preserved.contains(where: \.isInProgress)
-        let hasNewerLocalContent: Bool
-        if let newestIncomingTimestamp {
-            hasNewerLocalContent = preserved.contains { $0.timestamp >= newestIncomingTimestamp }
-        } else {
-            hasNewerLocalContent = false
-        }
-
-        guard (preserveInProgressSuffix && hasInProgress) || hasNewerLocalContent else { return nil }
-        return Array(preserved)
+        let preserved = trailingMessages.reversed()
+        return preserved.contains(where: \.isInProgress) ? Array(preserved) : nil
     }
 
     private static func mergeSession(_ existing: SessionSummary, with incoming: SessionSummary) -> SessionSummary {
@@ -6376,7 +5636,6 @@ final class AppStore {
                 transcript: transcript,
                 fallback: projects[indices.project].sessions[indices.session].status
             )
-            refreshSessionStats(sessionID: components[1], projectID: projectID)
         }
 
         if sessionID == nil && projectID == nil {
@@ -6440,69 +5699,6 @@ final class AppStore {
     }
 }
 
-private extension ChatMessage {
-    var debugPreviewText: String? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        return trimmed.count > 96 ? String(trimmed.prefix(96)) + "..." : trimmed
-    }
-}
-
-private extension ChatMessage.ToolCall {
-    var conciseDebugDetail: String? {
-        if let command = input?.stringValue(forKey: "command")?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !command.isEmpty {
-            return command.count > 96 ? String(command.prefix(96)) + "..." : command
-        }
-
-        let detail = detail?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let detail, !detail.isEmpty {
-            return detail.count > 96 ? String(detail.prefix(96)) + "..." : detail
-        }
-
-        return nil
-    }
-
-    var isLikelyDetachedBackgroundWork: Bool {
-        guard name.normalizedToolLeafName == "bash",
-              let command = input?.stringValue(forKey: "command")?.lowercased()
-        else {
-            return false
-        }
-
-        return command.contains("nohup ")
-            || command.contains(" disown")
-            || command.contains("setsid ")
-            || command.contains("&>")
-            || command.contains(" >/dev/null 2>&1 &")
-            || command.contains(" 2>&1 &")
-            || command.contains(" &")
-    }
-}
-
-private extension String {
-    var normalizedToolLeafName: String {
-        let leaf = split(whereSeparator: { $0 == "." || $0 == "/" || $0 == ":" }).last.map(String.init) ?? self
-        return leaf.lowercased()
-    }
-}
-
-private extension JSONValue {
-    var stringValue: String? {
-        guard case .string(let value) = self else { return nil }
-        return value
-    }
-
-    var objectValue: [String: JSONValue]? {
-        guard case .object(let value) = self else { return nil }
-        return value
-    }
-
-    func stringValue(forKey key: String) -> String? {
-        objectValue?[key]?.stringValue
-    }
-}
-
 private struct SlashCommandInvocation {
     let command: OpenCodeCommand
     let arguments: String
@@ -6519,5 +5715,21 @@ private extension String {
         return leaf
             .lowercased()
             .replacingOccurrences(of: "_", with: "")
+    }
+}
+
+private extension JSONValue {
+    var string: String? {
+        guard case .string(let value) = self else { return nil }
+        return value
+    }
+
+    var object: [String: JSONValue]? {
+        guard case .object(let value) = self else { return nil }
+        return value
+    }
+
+    func stringValue(forKey key: String) -> String? {
+        object?[key]?.string
     }
 }

@@ -93,7 +93,7 @@ struct RuntimeTests {
             let path = OpenCodeRuntime.enhancedPATH(from: "/custom/bin:/usr/local/bin")
             let entries = path.split(separator: ":").map(String.init)
     
-            #expect(entries.first == NSHomeDirectory() + "/.local/bin")
+            #expect(entries.first == NSHomeDirectory() + "/.bun/bin")
             #expect(entries.contains("/custom/bin"))
             #expect(entries.filter { $0 == "/usr/local/bin" }.count == 1)
         }
@@ -104,90 +104,14 @@ struct RuntimeTests {
             #expect(OpenCodeRuntime.normalizedExecutablePath("  /tmp/opencode  ") == "/tmp/opencode")
         }
 
-        @Test func appLogStoreUsesLibraryLogsDirectoryByDefault() {
-            let url = AppLogStore.appLogFileURL()
-            let daemonURL = AppLogStore.daemonLogFileURL()
-
-            #expect(url.path.hasSuffix("Library/Logs/NeoCode/neocode-app.log"))
-            #expect(daemonURL.path.hasSuffix("Library/Logs/NeoCode/neocoded.log"))
-        }
-
-        @Test func daemonReleaseAssetNamesMatchExpectedConvention() async throws {
-            let manager = NeoCodeDaemonBinaryManager.shared
-            let asset = await manager.releaseAsset(version: "0.6.0", architecture: .arm64)
-
-            #expect(asset.assetName == "neocoded-v0.6.0-darwin-arm64.tar.gz")
-            #expect(asset.checksumsURL.absoluteString.hasSuffix("/neocoded-v0.6.0-checksums.txt"))
-        }
-
-        @Test func daemonChecksumParsingFindsRequestedAsset() async throws {
-            let manager = NeoCodeDaemonBinaryManager.shared
-            let data = Data("abc123  neocoded-v0.6.0-darwin-arm64.tar.gz\ndef456  neocoded-v0.6.0-darwin-amd64.tar.gz\n".utf8)
-
-            let checksum = try await manager.parseChecksum(named: "neocoded-v0.6.0-darwin-amd64.tar.gz", from: data)
-            #expect(checksum == "def456")
-        }
-
-        @Test func daemonManagedBinaryURLUsesVersionedInstallPath() async {
-            let manager = NeoCodeDaemonBinaryManager.shared
-            let url = await manager.managedBinaryURL(version: "0.6.0", architecture: .arm64)
-
-            #expect(url.lastPathComponent == "neocoded-v0.6.0-darwin-arm64")
-            #expect(url.path.contains("Application Support/tech.watzon.NeoCode/Daemon/bin"))
-        }
-
-        @Test func daemonVersionReadsExecutableOutput() async throws {
-            let fileManager = FileManager.default
-            let tempDirectory = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-            try fileManager.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
-            defer { try? fileManager.removeItem(at: tempDirectory) }
-
-            let executableURL = tempDirectory.appendingPathComponent("neocoded")
-            try "#!/bin/sh\necho 0.6.0\n".write(to: executableURL, atomically: true, encoding: .utf8)
-            try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path)
-
-            let manager = NeoCodeDaemonBinaryManager.shared
-            let version = try await manager.daemonVersion(at: executableURL)
-            #expect(version == "0.6.0")
-        }
-
-        @Test func daemonResolveExecutableRejectsExplicitVersionMismatch() async throws {
-            let fileManager = FileManager.default
-            let tempDirectory = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-            try fileManager.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
-            defer { try? fileManager.removeItem(at: tempDirectory) }
-
-            let executableURL = tempDirectory.appendingPathComponent("neocoded")
-            try "#!/bin/sh\necho 0.5.0\n".write(to: executableURL, atomically: true, encoding: .utf8)
-            try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path)
-
-            let manager = NeoCodeDaemonBinaryManager.shared
-            do {
-                _ = try await manager.resolveExecutableURL(
-                    preferredPath: executableURL.path,
-                    expectedVersion: "0.6.0",
-                    environment: [:],
-                    status: { _ in }
-                )
-                Issue.record("Expected explicit version mismatch")
-            } catch let error as NeoCodeDaemonBinaryError {
-                guard case .explicitBinaryVersionMismatch(let expected, let actual) = error else {
-                    Issue.record("Unexpected daemon error: \(error.localizedDescription)")
-                    return
-                }
-                #expect(expected == "0.6.0")
-                #expect(actual == "0.5.0")
-            }
-        }
-
         @MainActor
         @Test func runtimeFailureStateStaysScopedToTheProjectThatFailed() async {
             let runtime = OpenCodeRuntime()
-            runtime.preferredExecutablePath = "/definitely/missing/neocoded"
+            runtime.preferredExecutablePath = "/definitely/missing/opencode"
     
             await runtime.ensureRunning(for: "/tmp/NeoCode-A")
     
-            #expect(runtime.failureMessage(for: "/tmp/NeoCode-A") != nil)
+            #expect(runtime.failureMessage(for: "/tmp/NeoCode-A")?.contains("Could not find the OpenCode CLI") == true)
             #expect(runtime.failureMessage(for: "/tmp/NeoCode-B") == nil)
             #expect(runtime.detailLabel(for: "/tmp/NeoCode-B") == "Select a project")
         }

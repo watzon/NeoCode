@@ -623,7 +623,7 @@ struct MessageRowView: View {
     }
 
     private var canRevertMessage: Bool {
-        !store.selectedSessionIsActivelyResponding && !store.isSending
+        store.selectedSession?.status != .running && !store.isSending
     }
 
     private var highlightedUserMessageText: AttributedString? {

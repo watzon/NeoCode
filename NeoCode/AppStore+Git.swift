@@ -31,28 +31,19 @@ extension AppStore {
             }
         }
 
-        guard let (_, service) = liveGitService(for: projectPath) else {
-            logger.debug("Skipping git status refresh because no daemon service is connected for path=\(projectPath, privacy: .public)")
-            return
-        }
-
-        let status: GitRepositoryStatus
-        let branches: [String]
-        let currentBranch: String
-        do {
-            status = try await service.gitStatus()
-            let branchInfo = try await service.listGitBranches()
-            branches = branchInfo.branches
-            currentBranch = branchInfo.current
-        } catch {
-            logger.warning("Git status refresh failed path=\(projectPath, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
-            return
-        }
+        let repositoryService = GitRepositoryService()
+        let branchService = GitBranchService()
+        let status = await repositoryService.status(in: projectPath)
         guard !Task.isCancelled else { return }
+
+        logger.debug(
+            "Git refresh result path=\(projectPath, privacy: .public) repo=\(status.isRepository, privacy: .public) changes=\(status.hasChanges, privacy: .public) ahead=\(status.aheadCount, privacy: .public) hasRemote=\(status.hasRemote, privacy: .public)"
+        )
 
         guard projectPathOverride != nil || selectedProject?.path == projectPath else { return }
 
         if !status.isRepository {
+            logger.debug("Git refresh marked project as non-repository: \(projectPath, privacy: .public)")
             cacheGitState(
                 GitCachedState(
                     status: .notRepository,
@@ -68,15 +59,23 @@ extension AppStore {
             return
         }
 
+        async let branchesTask = branchService.listBranches(in: projectPath)
+        async let currentBranchTask = branchService.currentBranch(in: projectPath)
+
+        let branches = (try? await branchesTask) ?? []
         let fallbackBranch = gitStateByProjectPath[projectPath]?.selectedBranch ?? selectedBranch
-        let resolvedCurrentBranch = currentBranch.isEmpty ? fallbackBranch : currentBranch
+        let currentBranch = (try? await currentBranchTask) ?? fallbackBranch
         guard !Task.isCancelled else { return }
+
+        logger.debug(
+            "Git branch refresh path=\(projectPath, privacy: .public) current=\(currentBranch, privacy: .public) branches=\(branches.joined(separator: ","), privacy: .public)"
+        )
 
         guard projectPathOverride != nil || selectedProject?.path == projectPath else { return }
 
         var resolvedBranches = branches
-        if !resolvedCurrentBranch.isEmpty, !resolvedBranches.contains(resolvedCurrentBranch) {
-            resolvedBranches.insert(resolvedCurrentBranch, at: 0)
+        if !currentBranch.isEmpty, !resolvedBranches.contains(currentBranch) {
+            resolvedBranches.insert(currentBranch, at: 0)
         }
 
         cacheGitState(
@@ -84,7 +83,7 @@ extension AppStore {
                 status: status,
                 commitPreview: gitStateByProjectPath[projectPath]?.commitPreview,
                 branches: resolvedBranches,
-                selectedBranch: resolvedCurrentBranch.isEmpty ? "main" : resolvedCurrentBranch
+                selectedBranch: currentBranch.isEmpty ? "main" : currentBranch
             ),
             for: projectPath
         )
@@ -169,8 +168,7 @@ extension AppStore {
         }
 
         do {
-            guard let (_, service) = liveGitService(for: projectPath) else { return }
-            try await service.initializeGitRepository()
+            try await GitBranchService().initializeRepository(in: projectPath)
             lastError = nil
             await refreshGitStatus()
         } catch {
@@ -198,8 +196,7 @@ extension AppStore {
         }
 
         do {
-            guard let (_, service) = liveGitService(for: projectPath) else { return }
-            try await service.switchGitBranch(named: trimmed)
+            try await GitBranchService().switchBranch(named: trimmed, in: projectPath)
             lastError = nil
             await refreshGitStatus()
         } catch {
@@ -222,8 +219,7 @@ extension AppStore {
         }
 
         do {
-            guard let (_, service) = liveGitService(for: projectPath) else { return }
-            try await service.createGitBranch(named: trimmed)
+            try await GitBranchService().createBranch(named: trimmed, in: projectPath)
             lastError = nil
             await refreshGitStatus()
         } catch {
@@ -248,11 +244,10 @@ extension AppStore {
         }
 
         do {
-            guard let (_, service) = liveGitService(for: projectPath) else { return false }
-            try await service.commitGitChanges(message: resolvedMessage, includeUnstaged: includeUnstaged)
+            try await GitRepositoryService().commit(message: resolvedMessage, includeUnstaged: includeUnstaged, in: projectPath)
             if pushAfterCommit {
                 setGitOperationState(.pushing, for: projectPath)
-                try await service.pushGitChanges()
+                try await GitRepositoryService().push(in: projectPath)
             }
             lastError = nil
             logger.info("Git commit finished for project: \(projectPath, privacy: .public)")
@@ -312,6 +307,10 @@ extension AppStore {
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled else { return }
             guard self.selectedProject?.path == projectPath else { return }
+
+            self.logger.debug(
+                "Scheduling git refresh path=\(projectPath, privacy: .public) reason=\(reason, privacy: .public)"
+            )
             await self.refreshVisibleGitState(for: projectPath, refreshCommitPreviewIfLoaded: refreshCommitPreviewIfLoaded)
         }
     }
@@ -332,21 +331,22 @@ extension AppStore {
     }
 
     func loadGitCommitPreview(in projectPath: String) async throws -> GitCommitPreview {
-        guard let (_, service) = liveGitService(for: projectPath) else {
-            throw GitClientUnavailableError()
-        }
+        let repositoryService = GitRepositoryService()
 
-        for (_, delay) in gitCommitPreviewRetryDelays.enumerated() {
+        for (attempt, delay) in gitCommitPreviewRetryDelays.enumerated() {
             do {
-                return try await service.gitCommitPreview()
+                return try await repositoryService.commitPreview(in: projectPath)
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
+                logger.debug(
+                    "Retrying git commit preview path=\(projectPath, privacy: .public) attempt=\(attempt + 1, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+                )
                 try await Task.sleep(for: delay)
             }
         }
 
-        return try await service.gitCommitPreview()
+        return try await repositoryService.commitPreview(in: projectPath)
     }
 
     func applyCachedGitState(for projectPath: String?) {
@@ -404,12 +404,16 @@ extension AppStore {
         let aheadCount = pushAfterCommit ? 0 : (gitStatus.hasRemote ? max(1, gitStatus.aheadCount + 1) : 0)
         let hasRemote = gitStatus.hasRemote
         gitStatus = GitRepositoryStatus(isRepository: true, hasChanges: false, aheadCount: aheadCount, hasRemote: hasRemote)
+        logger.debug(
+            "Applied optimistic post-commit state path=\(projectPath, privacy: .public) changes=false ahead=\(aheadCount, privacy: .public) hasRemote=\(hasRemote, privacy: .public)"
+        )
         cacheCurrentGitState(for: projectPath)
     }
 
     func scheduleGitRefreshAfterOperation(for projectPath: String) {
         Task { [weak self] in
             guard let self else { return }
+            self.logger.debug("Scheduling post-operation git refresh for path=\(projectPath, privacy: .public)")
             await self.refreshGitStatus(projectPathOverride: projectPath)
             await self.refreshGitCommitPreview(showLoadingIndicator: false, projectPathOverride: projectPath)
             guard self.selectedProject?.path == projectPath else { return }
@@ -430,15 +434,5 @@ extension AppStore {
         gitCommitPreview = nil
         availableBranches = []
         selectedBranch = "main"
-    }
-
-    private func liveGitService(for projectPath: String) -> (ProjectSummary.ID, any NeoCodeServicing)? {
-        connectedService(forProjectPath: projectPath)
-    }
-}
-
-struct GitClientUnavailableError: LocalizedError {
-    var errorDescription: String? {
-        "NeoCode daemon is not connected for this workspace yet."
     }
 }

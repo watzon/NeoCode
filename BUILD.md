@@ -2,16 +2,6 @@
 
 This document covers the local build, signing, DMG, notarization, and release-related commands for NeoCode.
 
-NeoCode now ships with a matching `neocoded` daemon release alongside the app. Debug and release workflows should treat the app and daemon as a single versioned unit.
-
-At runtime, NeoCode prefers a managed daemon install in:
-
-```text
-~/Library/Application Support/tech.watzon.NeoCode/Daemon/bin/
-```
-
-If a matching managed daemon is not installed, NeoCode falls back to `PATH` only when the daemon version exactly matches the app version. Otherwise it downloads the matching daemon from the GitHub release for the app version.
-
 For the full shipping checklist, see `RELEASING.md`.
 
 ## Core Commands
@@ -35,30 +25,6 @@ For distributable builds, use the release flow in `RELEASING.md` rather than shi
 ```bash
 just test
 ```
-
-This runs both the Swift app tests and the Go daemon tests.
-
-### Build daemon artifacts for release
-
-```bash
-just daemon-artifacts X.Y.Z
-```
-
-Output:
-
-```text
-dist/daemon/neocoded-vX.Y.Z-darwin-arm64.tar.gz
-dist/daemon/neocoded-vX.Y.Z-darwin-amd64.tar.gz
-dist/daemon/neocoded-vX.Y.Z-checksums.txt
-```
-
-### Run a full non-publishing release dry run
-
-```bash
-just release-dry-run X.Y.Z
-```
-
-This runs the release validation build, Go daemon tests, daemon packaging, DMG creation, notarization, stapling, and appcast generation without creating or publishing a GitHub release.
 
 ### Show current version/build
 
@@ -124,8 +90,6 @@ This command:
 
 - requires the Sparkle signing key to be available in Keychain
 - verifies the Sparkle key is available locally and passes the active public key into the archive build
-
-The daemon release artifacts are built separately with `just daemon-artifacts X.Y.Z` and published with the same release tag as the app.
 
 Normal Xcode and `just build` / `just build-release` builds already embed NeoCode's checked-in `SUPublicEDKey`, so Sparkle stays available outside the release pipeline too.
 
@@ -231,7 +195,6 @@ That runs:
 1. `clean`
 2. `test`
 3. `dmg`
-4. `daemon-artifacts X.Y.Z`
 
 Then you continue with notarization, stapling, and appcast manually.
 
@@ -258,16 +221,6 @@ just release-beta X.Y.Z
 See `RELEASING.md` for the complete operational flow and expectations.
 
 ## Troubleshooting
-
-### Rebuild and relink the local daemon
-
-```bash
-just server-install
-```
-
-This builds `neocoded` with the current app marketing version and links it into `~/.local/bin` for local development.
-
-Managed daemon installs inside `~/Library/Application Support/tech.watzon.NeoCode/Daemon/bin/` are pruned automatically whenever NeoCode installs a newer matching daemon.
 
 ### Missing Sparkle key
 

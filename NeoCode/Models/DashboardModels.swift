@@ -334,19 +334,6 @@ struct DashboardSessionIngress: Sendable {
     let messages: [OpenCodeMessageEnvelope]
 }
 
-struct DashboardSessionSummaryIngress: Sendable {
-    let project: DashboardProjectDescriptor
-    let summary: DashboardRemoteSessionSummary
-}
-
-struct DashboardRemoteSessionSummary: Codable, Hashable, Identifiable, Sendable {
-    let id: String
-    let title: String
-    let createdAt: Date
-    let updatedAt: Date
-    let stats: DashboardSessionStats
-}
-
 struct DashboardRefreshPlan: Sendable {
     let changedSessions: [DashboardRemoteSessionDescriptor]
     let snapshot: DashboardSnapshot

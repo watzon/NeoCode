@@ -88,32 +88,6 @@ actor DashboardStatsService {
         return buildSnapshot(range: range, projectPath: projectPath)
     }
 
-    func ingestSummaries(
-        _ ingestions: [DashboardSessionSummaryIngress],
-        range: DashboardTimeRange = .allTime,
-        projectPath: String? = nil
-    ) async -> DashboardSnapshot {
-        await loadCacheIfNeeded()
-
-        for ingress in ingestions {
-            let summary = ingress.summary
-            let entry = DashboardSessionCacheEntry(
-                projectID: ingress.project.id,
-                projectName: ingress.project.name,
-                projectPath: ingress.project.path,
-                sessionID: summary.id,
-                sessionTitle: summary.title,
-                createdAt: summary.createdAt,
-                updatedAt: summary.updatedAt,
-                stats: summary.stats
-            )
-            sessionsByKey[entry.id] = entry
-        }
-
-        await persist()
-        return buildSnapshot(range: range, projectPath: projectPath)
-    }
-
     private func loadCacheIfNeeded() async {
         guard !hasLoadedCache else { return }
         hasLoadedCache = true

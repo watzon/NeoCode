@@ -22,18 +22,17 @@ struct OpenCodeTransportTests {
                     throw URLError(.badServerResponse)
                 }
     
-                return (response, Data("{\"ok\":true}".utf8))
+                return (response, Data("{}".utf8))
             }
     
             let baseURL = try #require(URL(string: "http://127.0.0.1:4000"))
-            let client = NeoCodeClient(
+            let client = OpenCodeClient(
                 connection: OpenCodeRuntime.Connection(
                     projectPath: "/tmp/NeoCode",
                     baseURL: baseURL,
                     username: "user",
                     password: "pass",
-                    version: "1.0.0",
-                    workspaceID: "ws_1"
+                    version: "1.0.0"
                 ),
                 session: session
             )
@@ -54,7 +53,7 @@ struct OpenCodeTransportTests {
     
             let request = try #require(capturedRequest)
             #expect(request.httpMethod == "POST")
-            #expect(request.url?.path == "/v1/sessions/ses_1/prompt")
+            #expect(request.url?.path == "/session/ses_1/prompt_async")
     
             let bodyData = try requestBodyData(from: request)
             let body = try #require(bodyData)
@@ -90,9 +89,12 @@ struct OpenCodeTransportTests {
                     {
                       "id": "ses_1",
                       "title": "Existing",
-                      "parentId": null,
-                      "createdAt": "2026-03-13T10:00:00Z",
-                      "updatedAt": "2026-03-13T10:05:00Z",
+                      "parentID": null,
+                      "time": {
+                        "created": "2026-03-13T10:00:00Z",
+                        "updated": "2026-03-13T10:05:00Z",
+                        "completed": null
+                      },
                       "summary": {
                         "additions": 4,
                         "deletions": 1,
@@ -109,7 +111,7 @@ struct OpenCodeTransportTests {
                         ]
                       },
                       "revert": {
-                        "messageId": "msg_user_1"
+                        "messageID": "msg_user_1"
                       }
                     }
                     """.utf8
@@ -118,14 +120,13 @@ struct OpenCodeTransportTests {
             }
     
             let baseURL = try #require(URL(string: "http://127.0.0.1:4000"))
-            let client = NeoCodeClient(
+            let client = OpenCodeClient(
                 connection: OpenCodeRuntime.Connection(
                     projectPath: "/tmp/NeoCode",
                     baseURL: baseURL,
                     username: "user",
                     password: "pass",
-                    version: "1.0.0",
-                    workspaceID: "ws_1"
+                    version: "1.0.0"
                 ),
                 session: session
             )
@@ -134,7 +135,7 @@ struct OpenCodeTransportTests {
     
             let request = try #require(capturedRequest)
             #expect(request.httpMethod == "POST")
-            #expect(request.url?.path == "/v1/sessions/ses_1/revert")
+            #expect(request.url?.path == "/session/ses_1/revert")
             let bodyData = try requestBodyData(from: request)
             let body = try #require(bodyData)
             let payload = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
@@ -166,9 +167,12 @@ struct OpenCodeTransportTests {
                     {
                       "id": "ses_1",
                       "title": "Existing",
-                      "parentId": null,
-                      "createdAt": "2026-03-13T10:00:00Z",
-                      "updatedAt": "2026-03-13T10:05:00Z"
+                      "parentID": null,
+                      "time": {
+                        "created": "2026-03-13T10:00:00Z",
+                        "updated": "2026-03-13T10:05:00Z",
+                        "completed": null
+                      }
                     }
                     """.utf8
                 )
@@ -176,14 +180,13 @@ struct OpenCodeTransportTests {
             }
     
             let baseURL = try #require(URL(string: "http://127.0.0.1:4000"))
-            let client = NeoCodeClient(
+            let client = OpenCodeClient(
                 connection: OpenCodeRuntime.Connection(
                     projectPath: "/tmp/NeoCode",
                     baseURL: baseURL,
                     username: "user",
                     password: "pass",
-                    version: "1.0.0",
-                    workspaceID: "ws_1"
+                    version: "1.0.0"
                 ),
                 session: session
             )
@@ -192,7 +195,7 @@ struct OpenCodeTransportTests {
     
             let request = try #require(capturedRequest)
             #expect(request.httpMethod == "POST")
-            #expect(request.url?.path == "/v1/sessions/ses_1/unrevert")
+            #expect(request.url?.path == "/session/ses_1/unrevert")
             #expect(restored.id == "ses_1")
         }
 
@@ -202,26 +205,43 @@ struct OpenCodeTransportTests {
             configuration.protocolClasses = [MockURLProtocol.self]
             let session = URLSession(configuration: configuration)
             defer { MockURLProtocol.requestHandler = nil }
-
+            var capturedRequest: URLRequest?
+    
             MockURLProtocol.requestHandler = { request in
+                capturedRequest = request
+    
                 guard let url = request.url,
                       let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)
                 else {
                     throw URLError(.badServerResponse)
                 }
     
-                return (response, Data("{\"ok\":true}".utf8))
+                let body = Data(
+                    """
+                    {
+                      "info": {
+                        "id": "msg_1",
+                        "sessionID": "ses_1",
+                        "role": "assistant",
+                        "agent": null,
+                        "modelID": null,
+                        "time": null
+                      },
+                      "parts": []
+                    }
+                    """.utf8
+                )
+                return (response, body)
             }
     
             let baseURL = try #require(URL(string: "http://127.0.0.1:4000"))
-            let client = NeoCodeClient(
+            let client = OpenCodeClient(
                 connection: OpenCodeRuntime.Connection(
                     projectPath: "/tmp/NeoCode",
                     baseURL: baseURL,
                     username: "user",
                     password: "pass",
-                    version: "1.0.0",
-                    workspaceID: "ws_1"
+                    version: "1.0.0"
                 ),
                 session: session
             )
@@ -251,7 +271,23 @@ struct OpenCodeTransportTests {
                     variant: "high"
                 )
             )
-
+    
+            let request = try #require(capturedRequest)
+            #expect(request.httpMethod == "POST")
+            #expect(request.url?.path == "/session/ses_1/command")
+    
+            let bodyData = try #require(try requestBodyData(from: request))
+            let payload = try #require(JSONSerialization.jsonObject(with: bodyData) as? [String: Any])
+            #expect(payload["command"] as? String == "review")
+            #expect(payload["arguments"] as? String == "current diff")
+            #expect(payload["model"] as? String == "openai/gpt-5.4")
+            #expect(payload["agent"] as? String == "builder")
+            #expect(payload["variant"] as? String == "high")
+    
+            let parts = try #require(payload["parts"] as? [[String: Any]])
+            #expect(parts.count == 1)
+            #expect(parts[0]["type"] as? String == "file")
+            #expect(parts[0]["filename"] as? String == "diagram.png")
         }
 
         @MainActor
@@ -271,18 +307,17 @@ struct OpenCodeTransportTests {
                     throw URLError(.badServerResponse)
                 }
     
-                return (response, Data("{\"ok\":true}".utf8))
+                return (response, Data("{}".utf8))
             }
     
             let baseURL = try #require(URL(string: "http://127.0.0.1:4000"))
-            let client = NeoCodeClient(
+            let client = OpenCodeClient(
                 connection: OpenCodeRuntime.Connection(
                     projectPath: "/tmp/NeoCode",
                     baseURL: baseURL,
                     username: "user",
                     password: "pass",
-                    version: "1.0.0",
-                    workspaceID: "ws_1"
+                    version: "1.0.0"
                 ),
                 session: session
             )
@@ -329,7 +364,7 @@ struct OpenCodeTransportTests {
     
             MockURLProtocol.requestHandler = { request in
                 #expect(request.httpMethod == "POST")
-                #expect(request.url?.path == "/v1/sessions/ses_1/abort")
+                #expect(request.url?.path == "/session/ses_1/abort")
                 #expect(request.value(forHTTPHeaderField: "Authorization")?.hasPrefix("Basic ") == true)
     
                 guard let url = request.url,
@@ -338,18 +373,17 @@ struct OpenCodeTransportTests {
                     throw URLError(.badServerResponse)
                 }
     
-                return (response, Data("{\"ok\":true}".utf8))
+                return (response, Data("true".utf8))
             }
     
             let baseURL = try #require(URL(string: "http://127.0.0.1:4000"))
-            let client = NeoCodeClient(
+            let client = OpenCodeClient(
                 connection: OpenCodeRuntime.Connection(
                     projectPath: "/tmp/NeoCode",
                     baseURL: baseURL,
                     username: "user",
                     password: "pass",
-                    version: "1.0.0",
-                    workspaceID: "ws_1"
+                    version: "1.0.0"
                 ),
                 session: session
             )
@@ -366,7 +400,7 @@ struct OpenCodeTransportTests {
     
             MockURLProtocol.requestHandler = { request in
                 #expect(request.httpMethod == "GET")
-                #expect(request.url?.path == "/v1/workspaces/ws_1/session-status")
+                #expect(request.url?.path == "/session/status")
     
                 guard let url = request.url,
                       let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)
@@ -379,14 +413,13 @@ struct OpenCodeTransportTests {
             }
     
             let baseURL = try #require(URL(string: "http://127.0.0.1:4000"))
-            let client = NeoCodeClient(
+            let client = OpenCodeClient(
                 connection: OpenCodeRuntime.Connection(
                     projectPath: "/tmp/NeoCode",
                     baseURL: baseURL,
                     username: "user",
                     password: "pass",
-                    version: "1.0.0",
-                    workspaceID: "ws_1"
+                    version: "1.0.0"
                 ),
                 session: session
             )
@@ -401,31 +434,44 @@ struct OpenCodeTransportTests {
             configuration.protocolClasses = [MockURLProtocol.self]
             let session = URLSession(configuration: configuration)
             defer { MockURLProtocol.requestHandler = nil }
-
+            var capturedRequest: URLRequest?
+    
             MockURLProtocol.requestHandler = { request in
+                capturedRequest = request
+    
                 guard let url = request.url,
                       let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)
                 else {
                     throw URLError(.badServerResponse)
                 }
     
-                return (response, Data("{\"ok\":true}".utf8))
+                return (response, Data("true".utf8))
             }
     
             let baseURL = try #require(URL(string: "http://127.0.0.1:4000"))
-            let client = NeoCodeClient(
+            let client = OpenCodeClient(
                 connection: OpenCodeRuntime.Connection(
                     projectPath: "/tmp/NeoCode",
                     baseURL: baseURL,
                     username: "user",
                     password: "pass",
-                    version: "1.0.0",
-                    workspaceID: "ws_1"
+                    version: "1.0.0"
                 ),
                 session: session
             )
-
+    
             try await client.summarizeSession(sessionID: "ses_1", providerID: "openai", modelID: "gpt-5.4", auto: false)
+    
+            let request = try #require(capturedRequest)
+            #expect(request.httpMethod == "POST")
+            #expect(request.url?.path == "/session/ses_1/summarize")
+    
+            let bodyData = try requestBodyData(from: request)
+            let body = try #require(bodyData)
+            let payload = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            #expect(payload["providerID"] as? String == "openai")
+            #expect(payload["modelID"] as? String == "gpt-5.4")
+            #expect(payload["auto"] as? Bool == false)
         }
 
         @MainActor
@@ -445,18 +491,17 @@ struct OpenCodeTransportTests {
                     throw URLError(.badServerResponse)
                 }
     
-                return (response, Data("{\"ok\":true}".utf8))
+                return (response, Data("true".utf8))
             }
     
             let baseURL = try #require(URL(string: "http://127.0.0.1:4000"))
-            let client = NeoCodeClient(
+            let client = OpenCodeClient(
                 connection: OpenCodeRuntime.Connection(
                     projectPath: "/tmp/NeoCode",
                     baseURL: baseURL,
                     username: "user",
                     password: "pass",
-                    version: "1.0.0",
-                    workspaceID: "ws_1"
+                    version: "1.0.0"
                 ),
                 session: session
             )
@@ -465,7 +510,7 @@ struct OpenCodeTransportTests {
     
             let request = try #require(capturedRequest)
             #expect(request.httpMethod == "POST")
-            #expect(request.url?.path == "/v1/permissions/perm_1/reply")
+            #expect(request.url?.path == "/permission/perm_1/reply")
     
             let bodyData = try requestBodyData(from: request)
             let body = try #require(bodyData)
@@ -491,18 +536,17 @@ struct OpenCodeTransportTests {
                     throw URLError(.badServerResponse)
                 }
     
-                return (response, Data("{\"ok\":true}".utf8))
+                return (response, Data("true".utf8))
             }
     
             let baseURL = try #require(URL(string: "http://127.0.0.1:4000"))
-            let client = NeoCodeClient(
+            let client = OpenCodeClient(
                 connection: OpenCodeRuntime.Connection(
                     projectPath: "/tmp/NeoCode",
                     baseURL: baseURL,
                     username: "user",
                     password: "pass",
-                    version: "1.0.0",
-                    workspaceID: "ws_1"
+                    version: "1.0.0"
                 ),
                 session: session
             )
@@ -511,7 +555,7 @@ struct OpenCodeTransportTests {
     
             let request = try #require(capturedRequest)
             #expect(request.httpMethod == "POST")
-            #expect(request.url?.path == "/v1/questions/que_1/reply")
+            #expect(request.url?.path == "/question/que_1/reply")
     
             let bodyData = try requestBodyData(from: request)
             let body = try #require(bodyData)

@@ -345,7 +345,7 @@ private struct DashboardHeroCard: View {
     private var subtitle: String {
         if let snapshot,
            snapshot.knownSessionCount > 0 {
-            return localized("A cached view of model mix, token totals, tool usage, and project activity across your tracked workspaces.", locale: locale)
+            return localized("A cached view of model mix, token totals, tool usage, and project activity across your tracked OpenCode workspaces.", locale: locale)
         }
         return localized("NeoCode keeps a historical usage cache so the dashboard can load instantly on future launches and only refresh the sessions that changed.", locale: locale)
     }

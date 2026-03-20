@@ -67,7 +67,7 @@
         }
       }
     },
-    "/Users/you/.local/bin/neocoded" : {
+    "/opt/homebrew/bin/opencode" : {
 
     },
     "#000000" : {
@@ -4493,12 +4493,6 @@
         }
       }
     },
-    "Developer" : {
-
-    },
-    "Developer Panel" : {
-
-    },
     "Dismiss" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -7646,9 +7640,6 @@
         }
       }
     },
-    "Open Developer Panel" : {
-
-    },
     "Open Project" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -7808,16 +7799,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Saída"
-          }
-        }
-      }
-    },
-    "part time: %@ | message completed: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "part time: %1$@ | message completed: %2$@"
           }
         }
       }
@@ -8683,6 +8664,36 @@
         }
       }
     },
+    "+%@ more" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "+%@ more"
+          }
+        }
+      }
+    },
+    "%@ attachment" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%@ attachment"
+          }
+        }
+      }
+    },
+    "%@ attachments" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%@ attachments"
+          }
+        }
+      }
+    },
     "Queued %@ of %@" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -8848,16 +8859,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Pronta para instalar"
-          }
-        }
-      }
-    },
-    "reason: %@ | role: %@ | message: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "reason: %1$@ | role: %2$@ | message: %3$@"
           }
         }
       }
@@ -11961,12 +11962,6 @@
           }
         }
       }
-    },
-    "UI Scroll Fixture Back To Bottom Visible" : {
-
-    },
-    "UI Scroll Fixture Ready" : {
-
     },
     "Unavailable" : {
       "extractionState" : "stale",

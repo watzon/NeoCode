@@ -58,7 +58,6 @@ extension AppStore {
            availableModels.contains(where: { $0.id == ephemeralModelID }) {
             selectedModelID = ephemeralModelID
             logger.info("Switched to ephemeral model for agent \(agentName): \(ephemeralModelID)")
-            refreshSelectedSessionStats()
             return
         }
 
@@ -67,7 +66,6 @@ extension AppStore {
             if availableModels.contains(where: { $0.id == modelOptionID }) {
                 selectedModelID = modelOptionID
                 logger.info("Switched to agent \(agentName)'s configured model: \(modelOptionID)")
-                refreshSelectedSessionStats()
                 return
             } else {
                 logger.warning("Agent \(agentName)'s configured model \(modelOptionID) is not available")
@@ -78,14 +76,12 @@ extension AppStore {
            availableModels.contains(where: { $0.id == preferredFallbackModelID }) {
             selectedModelID = preferredFallbackModelID
             logger.debug("Switched to fallback model for agent \(agentName): \(preferredFallbackModelID)")
-            refreshSelectedSessionStats()
             return
         }
 
         if let firstModel = availableModels.first {
             selectedModelID = firstModel.id
             logger.info("Fell back to first available model for agent \(agentName): \(firstModel.id)")
-            refreshSelectedSessionStats()
         }
     }
 
@@ -99,7 +95,6 @@ extension AppStore {
         }
 
         persistComposerStateForSelectedSession()
-        refreshSelectedSessionStats()
     }
 
     func reconcileSelectedModel(using models: [ComposerModelOption]) {

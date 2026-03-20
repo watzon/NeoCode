@@ -1,26 +1,33 @@
 import Foundation
 
-struct RuntimeServerHealth: Decodable {
+struct OpenCodeHealth: Decodable {
+    let healthy: Bool
     let version: String
 }
 
-struct NeoCodeRuntimeHealthClient {
-    func waitUntilHealthy(baseURL: URL, username: String, password: String, timeout: TimeInterval) async throws -> RuntimeServerHealth {
+struct OpenCodeRuntimeHealthClient {
+    func waitUntilHealthy(baseURL: URL, username: String, password: String, timeout: TimeInterval) async throws -> OpenCodeHealth {
         let deadline = Date().addingTimeInterval(timeout)
 
         while Date() < deadline {
             do {
-                return try await health(baseURL: baseURL, username: username, password: password)
+                let health = try await health(baseURL: baseURL, username: username, password: password)
+                if health.healthy {
+                    return health
+                }
             } catch {
                 try await Task.sleep(for: .milliseconds(250))
+                continue
             }
+
+            try await Task.sleep(for: .milliseconds(250))
         }
 
         throw OpenCodeRuntimeError.healthCheckTimedOut
     }
 
-    private func health(baseURL: URL, username: String, password: String) async throws -> RuntimeServerHealth {
-        let url = baseURL.appending(path: "/v1/server")
+    private func health(baseURL: URL, username: String, password: String) async throws -> OpenCodeHealth {
+        let url = baseURL.appending(path: "/global/health")
         var request = URLRequest(url: url)
         request.setValue(Self.authorizationHeader(username: username, password: password), forHTTPHeaderField: "Authorization")
 
@@ -31,7 +38,7 @@ struct NeoCodeRuntimeHealthClient {
             throw OpenCodeRuntimeError.invalidServerResponse
         }
 
-        return try JSONDecoder().decode(RuntimeServerHealth.self, from: data)
+        return try JSONDecoder().decode(OpenCodeHealth.self, from: data)
     }
 
     private static func authorizationHeader(username: String, password: String) -> String {

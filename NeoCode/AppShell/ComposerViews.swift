@@ -359,7 +359,7 @@ struct ComposerView: View {
             }
         }
 
-        if store.selectedSessionStatus == .retrying {
+        if store.selectedSession?.status == .retrying {
             return .retrying
         }
 
@@ -849,7 +849,7 @@ private struct ComposerActivityIndicator: View {
     private var activitySignature: String {
         [
             state.title,
-            store.selectedSessionStatus.rawValue,
+            store.selectedSession?.status.rawValue ?? "idle",
             selectedSessionActivityKey,
             "\(runningToolCount)",
             "\(inProgressMessageCount)"
