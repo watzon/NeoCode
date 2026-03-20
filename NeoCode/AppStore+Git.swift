@@ -50,14 +50,9 @@ extension AppStore {
         }
         guard !Task.isCancelled else { return }
 
-        logger.debug(
-            "Git refresh result path=\(projectPath, privacy: .public) repo=\(status.isRepository, privacy: .public) changes=\(status.hasChanges, privacy: .public) ahead=\(status.aheadCount, privacy: .public) hasRemote=\(status.hasRemote, privacy: .public)"
-        )
-
         guard projectPathOverride != nil || selectedProject?.path == projectPath else { return }
 
         if !status.isRepository {
-            logger.debug("Git refresh marked project as non-repository: \(projectPath, privacy: .public)")
             cacheGitState(
                 GitCachedState(
                     status: .notRepository,
@@ -76,10 +71,6 @@ extension AppStore {
         let fallbackBranch = gitStateByProjectPath[projectPath]?.selectedBranch ?? selectedBranch
         let resolvedCurrentBranch = currentBranch.isEmpty ? fallbackBranch : currentBranch
         guard !Task.isCancelled else { return }
-
-        logger.debug(
-            "Git branch refresh path=\(projectPath, privacy: .public) current=\(resolvedCurrentBranch, privacy: .public) branches=\(branches.joined(separator: ","), privacy: .public)"
-        )
 
         guard projectPathOverride != nil || selectedProject?.path == projectPath else { return }
 
@@ -321,10 +312,6 @@ extension AppStore {
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled else { return }
             guard self.selectedProject?.path == projectPath else { return }
-
-            self.logger.debug(
-                "Scheduling git refresh path=\(projectPath, privacy: .public) reason=\(reason, privacy: .public)"
-            )
             await self.refreshVisibleGitState(for: projectPath, refreshCommitPreviewIfLoaded: refreshCommitPreviewIfLoaded)
         }
     }
@@ -349,15 +336,12 @@ extension AppStore {
             throw GitClientUnavailableError()
         }
 
-        for (attempt, delay) in gitCommitPreviewRetryDelays.enumerated() {
+        for (_, delay) in gitCommitPreviewRetryDelays.enumerated() {
             do {
                 return try await service.gitCommitPreview()
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
-                logger.debug(
-                    "Retrying git commit preview path=\(projectPath, privacy: .public) attempt=\(attempt + 1, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
-                )
                 try await Task.sleep(for: delay)
             }
         }
@@ -420,16 +404,12 @@ extension AppStore {
         let aheadCount = pushAfterCommit ? 0 : (gitStatus.hasRemote ? max(1, gitStatus.aheadCount + 1) : 0)
         let hasRemote = gitStatus.hasRemote
         gitStatus = GitRepositoryStatus(isRepository: true, hasChanges: false, aheadCount: aheadCount, hasRemote: hasRemote)
-        logger.debug(
-            "Applied optimistic post-commit state path=\(projectPath, privacy: .public) changes=false ahead=\(aheadCount, privacy: .public) hasRemote=\(hasRemote, privacy: .public)"
-        )
         cacheCurrentGitState(for: projectPath)
     }
 
     func scheduleGitRefreshAfterOperation(for projectPath: String) {
         Task { [weak self] in
             guard let self else { return }
-            self.logger.debug("Scheduling post-operation git refresh for path=\(projectPath, privacy: .public)")
             await self.refreshGitStatus(projectPathOverride: projectPath)
             await self.refreshGitCommitPreview(showLoadingIndicator: false, projectPathOverride: projectPath)
             guard self.selectedProject?.path == projectPath else { return }

@@ -4493,6 +4493,9 @@
         }
       }
     },
+    "Developer" : {
+
+    },
     "Dismiss" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -7639,6 +7642,9 @@
           }
         }
       }
+    },
+    "Open Developer Panel" : {
+
     },
     "Open Project" : {
       "extractionState" : "stale",

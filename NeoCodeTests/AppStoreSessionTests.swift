@@ -298,6 +298,64 @@ struct AppStoreSessionTests {
         }
 
         @MainActor
+        @Test func appStoreDebugSnapshotHighlightsPotentiallyStuckBusyState() throws {
+            let store = AppStore(projects: [
+                ProjectSummary(
+                    name: "NeoCode",
+                    path: "/tmp/NeoCode",
+                    sessions: [
+                        SessionSummary(id: "ses_1", title: "Existing", lastUpdatedAt: .distantPast),
+                    ]
+                ),
+            ])
+            store.selectSession("ses_1")
+
+            store.apply(event: .sessionStatusChanged(sessionID: "ses_1", status: .busy))
+
+            let snapshot = try #require(store.selectedSessionDebugSnapshot)
+            #expect(snapshot.sessionStatus == .running)
+            #expect(snapshot.possibleStuckReason != nil)
+            #expect(snapshot.recentEvents.contains { $0.category == "event" })
+        }
+
+        @MainActor
+        @Test func appStoreDeveloperClearLocalActivityCanSettleStaleWorkingState() {
+            let store = AppStore(projects: [
+                ProjectSummary(
+                    name: "NeoCode",
+                    path: "/tmp/NeoCode",
+                    sessions: [
+                        SessionSummary(
+                            id: "ses_1",
+                            title: "Existing",
+                            lastUpdatedAt: .distantPast,
+                            status: .running,
+                            transcript: [
+                                ChatMessage(
+                                    id: "msg_1",
+                                    role: .assistant,
+                                    text: "Finished response",
+                                    timestamp: .now,
+                                    emphasis: .normal,
+                                    isInProgress: false
+                                ),
+                            ]
+                        ),
+                    ]
+                ),
+            ])
+            store.selectSession("ses_1")
+
+            #expect(store.selectedSession?.status == .running)
+
+            store.clearSelectedSessionLocalActivityForDebugging()
+
+            #expect(store.selectedSession?.status == .idle)
+            #expect(store.selectedSessionIsActivelyResponding == false)
+            #expect(store.selectedSessionDebugSnapshot?.recentEvents.contains { $0.message.contains("developer panel") } == true)
+        }
+
+        @MainActor
         @Test func appStoreUsesExternalBusyStatusForSnapshotInProgressTranscript() {
             let store = AppStore(projects: [
                 ProjectSummary(

@@ -104,6 +104,14 @@ struct RuntimeTests {
             #expect(OpenCodeRuntime.normalizedExecutablePath("  /tmp/opencode  ") == "/tmp/opencode")
         }
 
+        @Test func appLogStoreUsesLibraryLogsDirectoryByDefault() {
+            let url = AppLogStore.appLogFileURL()
+            let daemonURL = AppLogStore.daemonLogFileURL()
+
+            #expect(url.path.hasSuffix("Library/Logs/NeoCode/neocode-app.log"))
+            #expect(daemonURL.path.hasSuffix("Library/Logs/NeoCode/neocoded.log"))
+        }
+
         @Test func daemonReleaseAssetNamesMatchExpectedConvention() async throws {
             let manager = NeoCodeDaemonBinaryManager.shared
             let asset = await manager.releaseAsset(version: "0.6.0", architecture: .arm64)

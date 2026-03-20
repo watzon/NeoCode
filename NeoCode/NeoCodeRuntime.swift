@@ -96,7 +96,6 @@ final class OpenCodeRuntime {
         if case .running(let connection) = state(for: projectPath),
            connection.projectPath == projectPath,
            sharedEntry.process?.isRunning == true {
-            logger.debug("Runtime already running for project: \(projectPath, privacy: .public)")
             return
         }
 
@@ -142,13 +141,11 @@ final class OpenCodeRuntime {
         guard let projectPath else { return }
 
         if projectPath == Self.sharedRuntimeKey {
-            logger.debug("Stopping shared runtime")
             stop(entry: sharedEntry, projectPath: projectPath)
             sharedConnection = nil
             return
         }
 
-        logger.debug("Stopping runtime for project: \(projectPath, privacy: .public)")
         statesByProjectPath[projectPath] = .idle
         connectionsByProjectPath.removeValue(forKey: projectPath)
     }
@@ -383,7 +380,6 @@ final class OpenCodeRuntime {
                 self.setState(.running(connection), for: projectPath)
                 self.logger.info("Registered workspace \(workspaceID, privacy: .public) for project: \(projectPath, privacy: .public)")
             } catch is CancellationError {
-                self.logger.debug("Workspace registration cancelled for project: \(projectPath, privacy: .public)")
             } catch {
                 self.logger.error("Failed to register workspace for project \(projectPath, privacy: .public): \(error.localizedDescription, privacy: .public)")
                 self.setState(.failed(projectPath: projectPath, message: error.localizedDescription), for: projectPath)
@@ -572,7 +568,6 @@ final class OpenCodeRuntime {
             )
         }
 
-        logger.debug("Runtime output for project \(projectPath, privacy: .public): \(chunk, privacy: .private(mask: .hash))")
     }
 
     nonisolated static func cappedOutputBuffer(_ existing: String, appending chunk: String, limit: Int) -> String {

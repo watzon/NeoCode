@@ -316,12 +316,6 @@ final class NeoCodeClient: NeoCodeServicing {
                             let event = try await MainActor.run {
                                 try OpenCodeEventDecoder.decode(frame: frame, decoder: decoder)
                             }
-                            if case .ignored = event {
-                            } else {
-                                logger.debug(
-                                    "\(final ? "Flushing final" : "Received") SSE event=\(event.debugName, privacy: .public)"
-                                )
-                            }
                             continuation.yield(event)
                         } catch {
                             let frameEvent = frame.event ?? "message"
@@ -369,7 +363,7 @@ final class NeoCodeClient: NeoCodeServicing {
             }
 
             continuation.onTermination = { termination in
-                logger.debug("SSE continuation terminated: \(String(describing: termination), privacy: .public)")
+                let _ = termination
                 task.cancel()
             }
         }

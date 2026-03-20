@@ -252,6 +252,9 @@ final class AppStore {
     private var sessionListSyncActivityByProjectID: [ProjectSummary.ID: Int] = [:]
     private var loadingSessionCountsByProjectID: [ProjectSummary.ID: Int] = [:]
     private var locallyDeletedSessionIDsByProjectID: [ProjectSummary.ID: Set<String>] = [:]
+    private var debugEventsBySessionID: [String: [SessionDebugEvent]] = [:]
+
+    private let maxDebugEventsPerSession = 80
 
     init() {
         let persistence = AppStorePersistence()
@@ -486,6 +489,12 @@ final class AppStore {
         )
     }
 
+    var selectedSessionDebugSnapshot: SessionDebugSnapshot? {
+        let _ = sessionUIRevision
+        guard let selectedSessionID else { return nil }
+        return debugSnapshot(for: selectedSessionID)
+    }
+
     func handleApplicationDidBecomeActive() {
         lifecycleRefreshToken &+= 1
 
@@ -515,6 +524,69 @@ final class AppStore {
         let _ = sessionUIRevision
         guard let selectedSessionID else { return false }
         return isSessionActivelyResponding(selectedSessionID)
+    }
+
+    func clearSelectedSessionLocalActivityForDebugging() {
+        guard let selectedSessionID,
+              let projectID = selectedProject?.id
+        else {
+            return
+        }
+
+        clearLocalSessionActivity(selectedSessionID)
+        refreshSessionStatus(sessionID: selectedSessionID, projectID: projectID)
+        recordSessionDebugEvent(
+            sessionID: selectedSessionID,
+            category: "debug",
+            message: "Cleared local activity markers from developer panel"
+        )
+        logger.notice(
+            "Developer panel cleared local activity markers session=\(selectedSessionID, privacy: .public)"
+        )
+    }
+
+    func debugRefreshSelectedSession(using runtime: OpenCodeRuntime) async {
+        guard let projectID = selectedProject?.id,
+              let selectedSessionID,
+              let service = await connectProject(projectID, using: runtime, includeComposerOptions: false)
+        else {
+            logger.error("Developer refresh could not connect selected session")
+            return
+        }
+
+        logger.notice(
+            "Developer panel refreshing selected session session=\(selectedSessionID, privacy: .public)"
+        )
+        recordSessionDebugEvent(
+            sessionID: selectedSessionID,
+            category: "debug",
+            message: "Refreshing transcript and live session statuses from developer panel"
+        )
+
+        do {
+            let statuses = try await service.listSessionStatuses()
+            applyLiveSessionStatuses(statuses, projectID: projectID)
+            await loadMessages(
+                for: selectedSessionID,
+                using: service,
+                projectID: projectID,
+                allowCachedFallback: true
+            )
+        } catch {
+            logger.error(
+                "Developer refresh failed session=\(selectedSessionID, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+            )
+            recordSessionDebugEvent(
+                sessionID: selectedSessionID,
+                category: "error",
+                message: "Developer refresh failed: \(error.localizedDescription)"
+            )
+        }
+    }
+
+    func recentDebugEvents(for sessionID: String?) -> [SessionDebugEvent] {
+        guard let sessionID else { return [] }
+        return debugEventsBySessionID[sessionID] ?? []
     }
 
     func project(for sessionID: String) -> ProjectSummary? {
@@ -2232,6 +2304,11 @@ final class AppStore {
         case .sessionStatusChanged(let sessionID, let status):
             let previousStatus = liveSessionStatuses[sessionID]
             liveSessionStatuses[sessionID] = status
+            recordSessionDebugEvent(
+                sessionID: sessionID,
+                category: "event",
+                message: "Received live status \(debugSessionActivityLabel(status)) (previous: \(debugSessionActivityLabel(previousStatus)))"
+            )
             if case .idle = status {
                 settleSessionActivity(sessionID: sessionID, projectID: projectID)
             }
@@ -2262,6 +2339,13 @@ final class AppStore {
                 var infos = messageInfosBySessionID[sessionID] ?? [:]
                 infos[info.id] = info
                 messageInfosBySessionID[sessionID] = infos
+                if info.isCompleted {
+                    recordSessionDebugEvent(
+                        sessionID: sessionID,
+                        category: "message",
+                        message: "Message \(info.id) completed"
+                    )
+                }
                 reconcileCompletedMessageIfNeeded(info, sessionID: sessionID, projectID: projectID)
                 refreshSessionStats(sessionID: sessionID, projectID: projectID)
                 touchSession(sessionID: sessionID, projectID: projectID, updatedAt: info.updatedAt ?? info.createdAt ?? Date())
@@ -3270,7 +3354,6 @@ final class AppStore {
         )
         eventTasks[projectID]?.cancel()
         let subscriptionToken = UUID()
-        logger.debug("Created event subscription token=\(subscriptionToken.uuidString, privacy: .public)")
         eventSubscriptionTokens[projectID] = subscriptionToken
         subscribedConnectionIdentifiers[projectID] = connectionIdentifier
 
@@ -3309,7 +3392,6 @@ final class AppStore {
                         } else if case .ignored = event {
                         } else {
                             reconnectAttempt = 0
-                            logger.debug("Received live event: \(event.debugName, privacy: .public)")
                         }
 
                         self.apply(event: event, projectID: projectID)
@@ -3369,9 +3451,6 @@ final class AppStore {
                         streamService = nextService
                     }
                 } catch is CancellationError {
-                    logger.debug(
-                        "Live event stream task cancelled project=\(projectID.uuidString, privacy: .public) token=\(subscriptionToken.uuidString, privacy: .public)"
-                    )
                     return
                 } catch {
                     guard self.hasActiveSubscription(projectID: projectID, connectionIdentifier: connectionIdentifier, token: subscriptionToken) else {
@@ -3405,9 +3484,6 @@ final class AppStore {
               let service = liveServices[projectID]
         else { return }
 
-        logger.debug(
-            "Scheduling transcript refresh after stream connect session=\(selectedSessionID, privacy: .public) project=\(projectID.uuidString, privacy: .public)"
-        )
         refreshTask?.cancel()
         refreshTask = Task { [weak self] in
             guard let self else { return }
@@ -3430,9 +3506,6 @@ final class AppStore {
         }
 
         let initialRevision = baselineRevision ?? transcriptRevision(for: sessionID, projectID: projectID)
-        logger.debug(
-            "Scheduling streaming recovery check session=\(sessionID, privacy: .public) attemptsRemaining=\(attemptsRemaining, privacy: .public) baselineRevision=\(initialRevision, privacy: .public)"
-        )
         streamingRecoveryTasks[sessionID]?.cancel()
         streamingRecoveryTasks[sessionID] = Task { [weak self] in
             guard let self else { return }
@@ -3443,18 +3516,12 @@ final class AppStore {
                   let session = sessionSummary(for: sessionID, projectID: projectID),
                   session.status == .running
             else {
-                logger.debug(
-                    "Skipping streaming recovery check session=\(sessionID, privacy: .public) because task cancelled or session no longer running"
-                )
                 cancelStreamingRecoveryCheck(for: sessionID)
                 return
             }
 
             let currentRevision = transcriptRevision(for: sessionID, projectID: projectID)
             guard currentRevision == initialRevision else {
-                logger.debug(
-                    "Streaming recovery check satisfied by transcript progress session=\(sessionID, privacy: .public) baselineRevision=\(initialRevision, privacy: .public) currentRevision=\(currentRevision, privacy: .public)"
-                )
                 cancelStreamingRecoveryCheck(for: sessionID)
                 return
             }
@@ -3479,9 +3546,6 @@ final class AppStore {
     }
 
     private func cancelStreamingRecoveryCheck(for sessionID: String) {
-        if streamingRecoveryTasks[sessionID] != nil {
-            logger.debug("Cancelling streaming recovery check session=\(sessionID, privacy: .public)")
-        }
         streamingRecoveryTasks[sessionID]?.cancel()
         streamingRecoveryTasks.removeValue(forKey: sessionID)
     }
@@ -3956,7 +4020,50 @@ final class AppStore {
             transcript: transcript,
             fallback: previousStatus
         )
+        let liveActivity = liveSessionStatuses[sessionID]
+        let localActivity = isSessionLocallyActive(sessionID)
+        let inProgressCount = transcript.filter(\.isInProgress).count
+        let bufferedDeltaCount = bufferedTextDeltas.keys.filter { $0.sessionID == sessionID }.count
+        let permissionCount = pendingPermissionsBySession[sessionID]?.count ?? 0
+        let questionCount = pendingQuestionsBySession[sessionID]?.count ?? 0
+
         projects[indices.project].sessions[indices.session].status = resolvedStatus
+        if previousStatus != resolvedStatus {
+            let context = debugSessionStateContext(
+                sessionID: sessionID,
+                liveActivity: liveActivity,
+                localActivity: localActivity,
+                inProgressCount: inProgressCount,
+                bufferedDeltaCount: bufferedDeltaCount,
+                permissionCount: permissionCount,
+                questionCount: questionCount
+            )
+            recordSessionDebugEvent(
+                sessionID: sessionID,
+                category: "status",
+                message: "Resolved status changed \(previousStatus.rawValue) -> \(resolvedStatus.rawValue) [\(context)]"
+            )
+            logger.notice(
+                "Resolved session status changed session=\(sessionID, privacy: .public) from=\(previousStatus.rawValue, privacy: .public) to=\(resolvedStatus.rawValue, privacy: .public) context=\(context, privacy: .public)"
+            )
+        }
+
+        if resolvedStatus.isActive,
+           let suspiciousReason = possibleStuckActiveReason(
+               liveActivity: liveActivity,
+               localActivity: localActivity,
+               inProgressCount: inProgressCount,
+               bufferedDeltaCount: bufferedDeltaCount,
+               permissionCount: permissionCount,
+               questionCount: questionCount,
+               transcript: transcript
+           ) {
+            recordSessionDebugEvent(sessionID: sessionID, category: "warning", message: suspiciousReason)
+            logger.warning(
+                "Suspicious active session state session=\(sessionID, privacy: .public) detail=\(suspiciousReason, privacy: .public)"
+            )
+        }
+
         if previousStatus.isActive && !resolvedStatus.isActive {
             markSidebarActivity(sessionID: sessionID, projectID: projectID)
         }
@@ -4003,6 +4110,11 @@ final class AppStore {
 
         if !transcript.contains(where: \.isInProgress) && !hasBufferedTextDeltas(for: sessionID) {
             clearLocalSessionActivity(sessionID)
+            recordSessionDebugEvent(
+                sessionID: sessionID,
+                category: "message",
+                message: "Cleared local activity after completed message \(info.id)"
+            )
         }
 
         refreshSessionStatus(sessionID: sessionID, projectID: projectID)
@@ -4113,6 +4225,11 @@ final class AppStore {
     private func settleSessionActivity(sessionID: String, projectID: ProjectSummary.ID) {
         flushBufferedTextDeltas(for: sessionID, projectID: projectID)
         clearLocalSessionActivity(sessionID)
+        recordSessionDebugEvent(
+            sessionID: sessionID,
+            category: "activity",
+            message: "Settling session activity after live idle event"
+        )
 
         guard let indices = indices(for: sessionID, projectID: projectID) else { return }
 
@@ -4137,10 +4254,138 @@ final class AppStore {
         }
 
         clearLocalSessionActivity(sessionID)
+        recordSessionDebugEvent(
+            sessionID: sessionID,
+            category: "activity",
+            message: "Cleared local activity because transcript and pending input are settled"
+        )
     }
 
     private func hasBufferedTextDeltas(for sessionID: String) -> Bool {
         bufferedTextDeltas.keys.contains { $0.sessionID == sessionID }
+    }
+
+    private func debugSnapshot(for sessionID: String) -> SessionDebugSnapshot? {
+        guard let session = session(for: sessionID),
+              let project = project(for: sessionID)
+        else {
+            return nil
+        }
+
+        let transcript = transcript(for: sessionID)
+        let liveActivity = liveSessionStatuses[sessionID]
+        let hasLocalActivity = isSessionLocallyActive(sessionID)
+        let inProgressCount = transcript.filter(\.isInProgress).count
+        let bufferedDeltaCount = bufferedTextDeltas.keys.filter { $0.sessionID == sessionID }.count
+        let pendingPermissionCount = pendingPermissionsBySession[sessionID]?.count ?? 0
+        let pendingQuestionCount = pendingQuestionsBySession[sessionID]?.count ?? 0
+        let queuedMessageCount = queuedMessagesBySessionID[sessionID]?.count ?? 0
+        let possibleStuckReason = possibleStuckActiveReason(
+            liveActivity: liveActivity,
+            localActivity: hasLocalActivity,
+            inProgressCount: inProgressCount,
+            bufferedDeltaCount: bufferedDeltaCount,
+            permissionCount: pendingPermissionCount,
+            questionCount: pendingQuestionCount,
+            transcript: transcript
+        )
+
+        return SessionDebugSnapshot(
+            projectName: project.name,
+            projectPath: project.path,
+            sessionID: sessionID,
+            sessionTitle: session.title,
+            sessionStatus: session.status,
+            liveActivity: liveActivity,
+            isActivelyResponding: isSessionActivelyResponding(sessionID),
+            hasLocalActivity: hasLocalActivity,
+            inProgressMessageCount: inProgressCount,
+            bufferedDeltaCount: bufferedDeltaCount,
+            pendingPermissionCount: pendingPermissionCount,
+            pendingQuestionCount: pendingQuestionCount,
+            queuedMessageCount: queuedMessageCount,
+            transcriptMessageCount: transcript.count,
+            transcriptRevision: transcriptRevisionToken(for: sessionID),
+            lastUpdatedAt: session.lastUpdatedAt,
+            possibleStuckReason: possibleStuckReason,
+            recentEvents: recentDebugEvents(for: sessionID)
+        )
+    }
+
+    private func recordSessionDebugEvent(sessionID: String, category: String, message: String) {
+        var events = debugEventsBySessionID[sessionID] ?? []
+        events.append(SessionDebugEvent(category: category, message: message))
+        if events.count > maxDebugEventsPerSession {
+            events.removeFirst(events.count - maxDebugEventsPerSession)
+        }
+        debugEventsBySessionID[sessionID] = events
+        bumpSessionUIRevision()
+    }
+
+    private func debugSessionStateContext(
+        sessionID: String,
+        liveActivity: OpenCodeSessionActivity?,
+        localActivity: Bool,
+        inProgressCount: Int,
+        bufferedDeltaCount: Int,
+        permissionCount: Int,
+        questionCount: Int
+    ) -> String {
+        [
+            "live=\(debugSessionActivityLabel(liveActivity))",
+            "local=\(localActivity)",
+            "inProgress=\(inProgressCount)",
+            "buffered=\(bufferedDeltaCount)",
+            "permissions=\(permissionCount)",
+            "questions=\(questionCount)",
+            "queued=\(queuedMessagesBySessionID[sessionID]?.count ?? 0)",
+        ].joined(separator: ",")
+    }
+
+    private func possibleStuckActiveReason(
+        liveActivity: OpenCodeSessionActivity?,
+        localActivity: Bool,
+        inProgressCount: Int,
+        bufferedDeltaCount: Int,
+        permissionCount: Int,
+        questionCount: Int,
+        transcript: [ChatMessage]
+    ) -> String? {
+        guard inProgressCount == 0,
+              bufferedDeltaCount == 0,
+              permissionCount == 0,
+              questionCount == 0
+        else {
+            return nil
+        }
+
+        switch liveActivity {
+        case .busy?, .retry?:
+            if localActivity {
+                return "Session still appears active even though no transcript parts or pending input remain. Local activity markers may be stale."
+            }
+
+            if transcript.last?.role != .user {
+                return "Live session status still reports active even though the transcript has no in-progress parts or pending input."
+            }
+        case .idle?, nil:
+            break
+        }
+
+        return nil
+    }
+
+    private func debugSessionActivityLabel(_ activity: OpenCodeSessionActivity?) -> String {
+        guard let activity else { return "none" }
+
+        switch activity {
+        case .idle:
+            return "idle"
+        case .busy:
+            return "busy"
+        case .retry(let attempt, let message, let next):
+            return "retry(attempt=\(attempt), next=\(next), message=\(message))"
+        }
     }
 
     private func clearStatusIndicators(for sessionID: String?) {

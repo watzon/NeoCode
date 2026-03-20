@@ -17,13 +17,45 @@ struct NeoCodeApp: App {
             if AppTestMode.isUnitTestHost {
                 UnitTestHostView()
             } else {
-                AppSceneView(appDelegate: appDelegate)
+                AppSceneView(
+                    appDelegate: appDelegate,
+                    store: SharedAppServices.store,
+                    runtime: SharedAppServices.runtime,
+                    updateService: SharedAppServices.updateService,
+                    appLogStore: SharedAppServices.appLogStore
+                )
             }
         }
         .defaultSize(width: 1280, height: 900)
         .windowResizability(.contentMinSize)
         .windowStyle(.hiddenTitleBar)
+        .commands {
+            DeveloperPanelCommands()
+        }
+
+        WindowGroup(id: DeveloperPanelView.windowID) {
+            if AppTestMode.isUnitTestHost {
+                UnitTestHostView()
+            } else {
+                DeveloperPanelView()
+                    .environment(SharedAppServices.store)
+                    .environment(SharedAppServices.runtime)
+                    .environment(SharedAppServices.appLogStore)
+                    .environment(SharedAppServices.updateService)
+                    .environment(\.locale, SharedAppServices.store.appSettings.general.appLanguage.locale)
+            }
+        }
+        .defaultSize(width: 980, height: 760)
+        .windowResizability(.contentMinSize)
     }
+}
+
+@MainActor
+private enum SharedAppServices {
+    static let store = AppUITestFixture.makeStoreIfNeeded() ?? AppStore()
+    static let runtime = OpenCodeRuntime()
+    static let updateService = AppUpdateService()
+    static let appLogStore = AppLogStore()
 }
 
 @MainActor
@@ -216,15 +248,13 @@ private struct UnitTestHostView: View {
 }
 
 private struct AppSceneView: View {
-    @State private var store: AppStore
-    @State private var runtime = OpenCodeRuntime()
-    @State private var updateService = AppUpdateService()
-    let appDelegate: AppDelegate
+    @Environment(\.openWindow) private var openWindow
 
-    init(appDelegate: AppDelegate) {
-        self.appDelegate = appDelegate
-        _store = State(initialValue: AppUITestFixture.makeStoreIfNeeded() ?? AppStore())
-    }
+    let appDelegate: AppDelegate
+    let store: AppStore
+    let runtime: OpenCodeRuntime
+    let updateService: AppUpdateService
+    let appLogStore: AppLogStore
 
     var body: some View {
         ContentView()
@@ -232,9 +262,16 @@ private struct AppSceneView: View {
             .environment(store)
             .environment(runtime)
             .environment(updateService)
+            .environment(appLogStore)
             .environment(\.locale, store.appSettings.general.appLanguage.locale)
+            .background(DeveloperPanelShortcutMonitor {
+                openWindow(id: DeveloperPanelView.windowID)
+            })
             .task(id: store.appSettings.general.opencodeExecutablePath) {
                 runtime.preferredExecutablePath = store.appSettings.general.opencodeExecutablePath
+            }
+            .task {
+                appLogStore.start()
             }
             .onAppear {
                 NeoCodeTheme.configure(with: store.appSettings.appearance)
