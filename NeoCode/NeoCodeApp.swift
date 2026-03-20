@@ -191,7 +191,10 @@ private enum AppUITestFixture {
                 ]
             ),
         ])
-        store.selectSession(sessionID)
+        if let projectID = store.projects.first?.id {
+            store.selectedProjectID = projectID
+            store.selectedContent = .session(sessionID)
+        }
         return store
     }
 }

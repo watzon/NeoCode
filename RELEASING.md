@@ -10,6 +10,12 @@ just release X.Y.Z
 
 If the machine is already set up, that command should be all you need.
 
+If you want to validate the full local release flow without publishing anything, use:
+
+```bash
+just release-dry-run X.Y.Z
+```
+
 For beta distribution, use:
 
 ```bash
@@ -35,6 +41,8 @@ Important:
 - use the GitHub prerelease flag to communicate beta status instead
 
 NeoCode downloads the daemon from the GitHub release matching the app version whenever it cannot find an exact matching local daemon. That makes the daemon asset names and checksums part of the public release contract.
+
+NeoCode also prunes older managed daemon installs after successfully installing a newer matching daemon version.
 
 ## Sparkle Keys
 

@@ -234,6 +234,32 @@ release-local: clean test dmg
     @echo "Release build complete: {{dmg_path}}"
     @echo "Next: just daemon-artifacts X.Y.Z && just notarize {{dmg_path}} && just staple {{dmg_path}} && just appcast {{dmg_path}}"
 
+release-dry-run version: sparkle-tools
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    VERSION="{{version}}"
+    if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "Invalid version format: $VERSION"
+        exit 1
+    fi
+
+    just clean
+    just test-release
+    just daemon-artifacts "$VERSION"
+    just dmg
+    just notarize "{{dmg_path}}"
+    just staple "{{dmg_path}}"
+    just appcast "{{dmg_path}}"
+
+    echo "Release dry run complete for v${VERSION}."
+    echo "Artifacts:" \
+      && echo "  - {{dmg_path}}" \
+      && echo "  - appcast.xml" \
+      && echo "  - {{daemon_dir}}/neocoded-v${VERSION}-darwin-arm64.tar.gz" \
+      && echo "  - {{daemon_dir}}/neocoded-v${VERSION}-darwin-amd64.tar.gz" \
+      && echo "  - {{daemon_dir}}/neocoded-v${VERSION}-checksums.txt"
+
 release version: sparkle-tools
     #!/usr/bin/env bash
     set -euo pipefail

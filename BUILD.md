@@ -52,6 +52,14 @@ dist/daemon/neocoded-vX.Y.Z-darwin-amd64.tar.gz
 dist/daemon/neocoded-vX.Y.Z-checksums.txt
 ```
 
+### Run a full non-publishing release dry run
+
+```bash
+just release-dry-run X.Y.Z
+```
+
+This runs the release validation build, Go daemon tests, daemon packaging, DMG creation, notarization, stapling, and appcast generation without creating or publishing a GitHub release.
+
 ### Show current version/build
 
 ```bash
@@ -258,6 +266,8 @@ just server-install
 ```
 
 This builds `neocoded` with the current app marketing version and links it into `~/.local/bin` for local development.
+
+Managed daemon installs inside `~/Library/Application Support/tech.watzon.NeoCode/Daemon/bin/` are pruned automatically whenever NeoCode installs a newer matching daemon.
 
 ### Missing Sparkle key
 

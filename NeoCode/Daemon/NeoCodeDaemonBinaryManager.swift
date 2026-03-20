@@ -178,6 +178,7 @@ actor NeoCodeDaemonBinaryManager {
         try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stagedURL.path)
         try? fileManager.removeItem(at: destinationURL)
         try fileManager.moveItem(at: stagedURL, to: destinationURL)
+        pruneManagedInstalls(keeping: destinationURL)
         logger.info("Installed NeoCode daemon version \(version, privacy: .public) for \(architecture.rawValue, privacy: .public) at \(destinationURL.path, privacy: .public)")
         return destinationURL
     }
@@ -259,6 +260,19 @@ actor NeoCodeDaemonBinaryManager {
         uname(&systemInfo)
         return withUnsafePointer(to: &systemInfo.machine) {
             $0.withMemoryRebound(to: CChar.self, capacity: Int(_SYS_NAMELEN)) { String(cString: $0) }
+        }
+    }
+
+    private func pruneManagedInstalls(keeping keptURL: URL) {
+        guard let contents = try? FileManager.default.contentsOfDirectory(at: managedInstallDirectory, includingPropertiesForKeys: nil) else {
+            return
+        }
+
+        for url in contents {
+            let name = url.lastPathComponent
+            guard name.hasPrefix("neocoded-v") else { continue }
+            guard url != keptURL else { continue }
+            try? FileManager.default.removeItem(at: url)
         }
     }
 }

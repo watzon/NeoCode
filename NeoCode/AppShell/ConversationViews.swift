@@ -70,6 +70,8 @@ struct ConversationView: View {
     @State private var isTodoListPresented = false
     @State private var renderedGroups: [DisplayMessageGroup] = []
 
+    private let scrollFixtureKey = "NEOCODE_UI_TEST_SCROLL_FIXTURE"
+
     private let bottomAnchorSpacerHeight: CGFloat = 1
     private let autoScrollThreshold: CGFloat = 72
     private let olderMessagesLoadThreshold: CGFloat = 300
@@ -118,6 +120,9 @@ struct ConversationView: View {
                 prepareSessionPresentation(using: proxy)
                 refreshRenderedGroups()
                 refreshFileMentionResults()
+                if ProcessInfo.processInfo.environment[scrollFixtureKey] == "1" {
+                    isPinnedToBottom = false
+                }
             }
             .task(id: sessionID) {
                 await store.preparePrompt(for: sessionID)
@@ -493,8 +498,27 @@ struct ConversationView: View {
                     .allowsHitTesting(false)
             }
 
+            if ProcessInfo.processInfo.environment[scrollFixtureKey] == "1" {
+                Text("UI Scroll Fixture Ready")
+                    .font(.system(size: 1))
+                    .opacity(0.01)
+                    .accessibilityLabel("UI Scroll Fixture Ready")
+                    .accessibilityIdentifier("ui.scrollFixture.ready")
+                    .allowsHitTesting(false)
+            }
+
+            if ProcessInfo.processInfo.environment[scrollFixtureKey] == "1", !isPinnedToBottom {
+                Text("UI Scroll Fixture Back To Bottom Visible")
+                    .font(.system(size: 1))
+                    .opacity(0.01)
+                    .accessibilityLabel("UI Scroll Fixture Back To Bottom Visible")
+                    .accessibilityIdentifier("ui.scrollFixture.backToBottomVisible")
+                    .allowsHitTesting(false)
+            }
+
             composerOverlay(using: proxy)
         }
+        .accessibilityIdentifier("conversation.transcript.container")
     }
 
     @ViewBuilder
