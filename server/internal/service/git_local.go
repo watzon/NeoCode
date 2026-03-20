@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -94,12 +95,20 @@ func (LocalGitProvider) Commit(ctx context.Context, workspace core.Workspace, me
 	if err != nil {
 		return err
 	}
+	trimmedMessage := strings.TrimSpace(message)
+	log.Printf("git commit start workspace=%s path=%q includeUnstaged=%t messageLength=%d", workspace.ID, projectPath, includeUnstaged, len(trimmedMessage))
 	if includeUnstaged {
 		if _, err := runGit(ctx, projectPath, "add", "-A"); err != nil {
+			log.Printf("git commit staging failed workspace=%s path=%q error=%v", workspace.ID, projectPath, err)
 			return err
 		}
 	}
-	_, err = runGit(ctx, projectPath, "commit", "-m", strings.TrimSpace(message))
+	_, err = runGit(ctx, projectPath, "commit", "-m", trimmedMessage)
+	if err != nil {
+		log.Printf("git commit failed workspace=%s path=%q error=%v", workspace.ID, projectPath, err)
+		return err
+	}
+	log.Printf("git commit finished workspace=%s path=%q", workspace.ID, projectPath)
 	return err
 }
 
@@ -108,18 +117,23 @@ func (LocalGitProvider) Push(ctx context.Context, workspace core.Workspace) erro
 	if err != nil {
 		return err
 	}
+	log.Printf("git push start workspace=%s path=%q", workspace.ID, projectPath)
 	_, err = runGit(ctx, projectPath, "push")
 	if err == nil {
+		log.Printf("git push finished workspace=%s path=%q", workspace.ID, projectPath)
 		return nil
 	}
 	branch, branchErr := LocalGitProvider{}.CurrentBranch(ctx, workspace)
 	if branchErr != nil {
+		log.Printf("git push failed workspace=%s path=%q error=%v", workspace.ID, projectPath, err)
 		return err
 	}
 	_, upstreamErr := runGit(ctx, projectPath, "push", "-u", "origin", branch)
 	if upstreamErr != nil {
+		log.Printf("git push with upstream failed workspace=%s path=%q branch=%s error=%v", workspace.ID, projectPath, branch, upstreamErr)
 		return err
 	}
+	log.Printf("git push finished workspace=%s path=%q branch=%s upstream=origin", workspace.ID, projectPath, branch)
 	return nil
 }
 
@@ -154,15 +168,19 @@ func (LocalGitProvider) Initialize(ctx context.Context, workspace core.Workspace
 	if err != nil {
 		return err
 	}
+	log.Printf("git init start workspace=%s path=%q", workspace.ID, projectPath)
 	_, err = runGit(ctx, projectPath, "init", "-b", "main")
 	if err == nil {
+		log.Printf("git init finished workspace=%s path=%q branch=main", workspace.ID, projectPath)
 		return nil
 	}
 	_, err = runGit(ctx, projectPath, "init")
 	if err != nil {
+		log.Printf("git init failed workspace=%s path=%q error=%v", workspace.ID, projectPath, err)
 		return err
 	}
 	_, _ = runGit(ctx, projectPath, "symbolic-ref", "HEAD", "refs/heads/main")
+	log.Printf("git init finished workspace=%s path=%q branch=main fallback=true", workspace.ID, projectPath)
 	return nil
 }
 
@@ -171,11 +189,19 @@ func (LocalGitProvider) SwitchBranch(ctx context.Context, workspace core.Workspa
 	if err != nil {
 		return err
 	}
-	_, err = runGit(ctx, projectPath, "switch", strings.TrimSpace(branch))
+	trimmedBranch := strings.TrimSpace(branch)
+	log.Printf("git switch start workspace=%s path=%q branch=%s", workspace.ID, projectPath, trimmedBranch)
+	_, err = runGit(ctx, projectPath, "switch", trimmedBranch)
 	if err == nil {
+		log.Printf("git switch finished workspace=%s path=%q branch=%s", workspace.ID, projectPath, trimmedBranch)
 		return nil
 	}
-	_, err = runGit(ctx, projectPath, "checkout", strings.TrimSpace(branch))
+	_, err = runGit(ctx, projectPath, "checkout", trimmedBranch)
+	if err != nil {
+		log.Printf("git switch failed workspace=%s path=%q branch=%s error=%v", workspace.ID, projectPath, trimmedBranch, err)
+		return err
+	}
+	log.Printf("git switch finished workspace=%s path=%q branch=%s fallback=checkout", workspace.ID, projectPath, trimmedBranch)
 	return err
 }
 
@@ -184,11 +210,19 @@ func (LocalGitProvider) CreateBranch(ctx context.Context, workspace core.Workspa
 	if err != nil {
 		return err
 	}
-	_, err = runGit(ctx, projectPath, "switch", "-c", strings.TrimSpace(branch))
+	trimmedBranch := strings.TrimSpace(branch)
+	log.Printf("git create-branch start workspace=%s path=%q branch=%s", workspace.ID, projectPath, trimmedBranch)
+	_, err = runGit(ctx, projectPath, "switch", "-c", trimmedBranch)
 	if err == nil {
+		log.Printf("git create-branch finished workspace=%s path=%q branch=%s", workspace.ID, projectPath, trimmedBranch)
 		return nil
 	}
-	_, err = runGit(ctx, projectPath, "checkout", "-b", strings.TrimSpace(branch))
+	_, err = runGit(ctx, projectPath, "checkout", "-b", trimmedBranch)
+	if err != nil {
+		log.Printf("git create-branch failed workspace=%s path=%q branch=%s error=%v", workspace.ID, projectPath, trimmedBranch, err)
+		return err
+	}
+	log.Printf("git create-branch finished workspace=%s path=%q branch=%s fallback=checkout", workspace.ID, projectPath, trimmedBranch)
 	return err
 }
 

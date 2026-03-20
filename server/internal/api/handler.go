@@ -1,14 +1,17 @@
 package api
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/watzon/neocode/server/internal/core"
 	"github.com/watzon/neocode/server/internal/service"
@@ -16,18 +19,124 @@ import (
 )
 
 type Handler struct {
-	app *service.App
-	mux *http.ServeMux
+	app     *service.App
+	mux     *http.ServeMux
+	handler http.Handler
 }
 
 func NewHandler(app *service.App) *Handler {
 	h := &Handler{app: app, mux: http.NewServeMux()}
 	h.routes()
+	h.handler = h.withRequestLogging(h.mux)
 	return h
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	h.mux.ServeHTTP(w, r)
+	h.handler.ServeHTTP(w, r)
+}
+
+type loggingResponseWriter struct {
+	http.ResponseWriter
+	statusCode int
+	body       bytes.Buffer
+	bytesSent  int
+}
+
+func (w *loggingResponseWriter) WriteHeader(statusCode int) {
+	w.statusCode = statusCode
+	w.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (w *loggingResponseWriter) Write(data []byte) (int, error) {
+	if w.statusCode == 0 {
+		w.statusCode = http.StatusOK
+	}
+	if w.body.Len() < 2048 {
+		remaining := 2048 - w.body.Len()
+		if remaining > len(data) {
+			remaining = len(data)
+		}
+		_, _ = w.body.Write(data[:remaining])
+	}
+	n, err := w.ResponseWriter.Write(data)
+	w.bytesSent += n
+	return n, err
+}
+
+func (h *Handler) withRequestLogging(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		startedAt := time.Now()
+		writer := &loggingResponseWriter{ResponseWriter: w}
+		next.ServeHTTP(writer, r)
+
+		statusCode := writer.statusCode
+		if statusCode == 0 {
+			statusCode = http.StatusOK
+		}
+		duration := time.Since(startedAt)
+		if !shouldLogRequest(r, statusCode, duration) {
+			return
+		}
+
+		fields := []string{
+			fmt.Sprintf("method=%s", r.Method),
+			fmt.Sprintf("path=%s", r.URL.Path),
+			fmt.Sprintf("status=%d", statusCode),
+			fmt.Sprintf("duration=%s", duration.Round(time.Millisecond)),
+			fmt.Sprintf("bytes=%d", writer.bytesSent),
+		}
+		if workspaceID := requestWorkspaceID(r); workspaceID != "" {
+			fields = append(fields, fmt.Sprintf("workspace=%s", workspaceID))
+		}
+		if remoteAddr := strings.TrimSpace(r.RemoteAddr); remoteAddr != "" {
+			fields = append(fields, fmt.Sprintf("remote=%s", remoteAddr))
+		}
+		if statusCode >= http.StatusBadRequest {
+			message := compactLogMessage(writer.body.String())
+			if message != "" {
+				fields = append(fields, fmt.Sprintf("error=%q", message))
+			}
+		}
+		log.Printf("request %s", strings.Join(fields, " "))
+	})
+}
+
+func shouldLogRequest(r *http.Request, statusCode int, duration time.Duration) bool {
+	if statusCode >= http.StatusBadRequest {
+		return true
+	}
+	if duration >= 2*time.Second {
+		return true
+	}
+	if strings.Contains(r.URL.Path, "/git/") {
+		return true
+	}
+	return r.Method != http.MethodGet && r.Method != http.MethodHead
+}
+
+func requestWorkspaceID(r *http.Request) string {
+	if !strings.HasPrefix(r.URL.Path, "/v1/workspaces/") {
+		return strings.TrimSpace(r.Header.Get("X-NeoCode-Workspace-ID"))
+	}
+	path := strings.TrimPrefix(r.URL.Path, "/v1/workspaces/")
+	parts := splitPath(path)
+	if len(parts) == 0 {
+		return strings.TrimSpace(r.Header.Get("X-NeoCode-Workspace-ID"))
+	}
+	return parts[0]
+}
+
+func compactLogMessage(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	trimmed = strings.ReplaceAll(trimmed, "\n", " ")
+	trimmed = strings.Join(strings.Fields(trimmed), " ")
+	if len(trimmed) > 300 {
+		return trimmed[:300] + "..."
+	}
+	return trimmed
 }
 
 func (h *Handler) routes() {

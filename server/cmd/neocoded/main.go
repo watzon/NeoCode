@@ -16,6 +16,7 @@ import (
 	"github.com/watzon/neocode/server/internal/api"
 	"github.com/watzon/neocode/server/internal/auth"
 	"github.com/watzon/neocode/server/internal/core"
+	"github.com/watzon/neocode/server/internal/logging"
 	"github.com/watzon/neocode/server/internal/runtime"
 	"github.com/watzon/neocode/server/internal/service"
 	"github.com/watzon/neocode/server/internal/store"
@@ -28,6 +29,12 @@ func main() {
 		fmt.Println(version)
 		return
 	}
+
+	logPath, logFile, err := logging.Configure()
+	if err != nil {
+		log.Fatalf("configure logging: %v", err)
+	}
+	defer logFile.Close()
 
 	host, port := parseServeArgs(os.Args[1:])
 	token := os.Getenv("NEOCODE_SERVER_TOKEN")
@@ -49,6 +56,16 @@ func main() {
 	if opencodeExecutable == "" {
 		opencodeExecutable = "opencode"
 	}
+
+	log.Printf(
+		"startup version=%s bind=%s executable=%q auth.basic=%t auth.token=%t log=%q",
+		version,
+		bind,
+		opencodeExecutable,
+		username != "" && password != "",
+		token != "",
+		logPath,
+	)
 
 	var app *service.App
 	manager := runtime.NewManager(opencodeExecutable, func(event core.ServerEvent) {
@@ -89,15 +106,19 @@ func main() {
 
 	go func() {
 		<-ctx.Done()
+		log.Printf("shutdown requested signal=%v", ctx.Err())
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = server.Shutdown(shutdownCtx)
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			log.Printf("shutdown failed: %v", err)
+		}
 	}()
 
 	log.Printf("NeoCode server listening on http://%s", listener.Addr().String())
 	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
+	log.Printf("server stopped cleanly")
 }
 
 func shouldPrintVersion(args []string) bool {

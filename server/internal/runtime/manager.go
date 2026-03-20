@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math/rand"
 	"net/http"
 	"os"
@@ -96,11 +97,13 @@ func (m *Manager) Ensure(ctx context.Context, workspace core.Workspace) (*openco
 	m.mu.Unlock()
 
 	password := randomString(m.passwordLen)
+	log.Printf("runtime ensure workspace=%s path=%q executable=%q", workspace.ID, path, m.executable)
 	proc, err := m.processes.New(ctx, m.executable, []string{"serve", "--hostname", m.hostname, "--port", "0"}, path, []string{
 		"OPENCODE_SERVER_USERNAME=" + m.username,
 		"OPENCODE_SERVER_PASSWORD=" + password,
 	})
 	if err != nil {
+		log.Printf("runtime launch failed workspace=%s error=%v", workspace.ID, err)
 		return nil, err
 	}
 	stdout, err := proc.StdoutPipe()
@@ -118,8 +121,10 @@ func (m *Manager) Ensure(ctx context.Context, workspace core.Workspace) (*openco
 	baseURL, output, err := detectBaseURL(ctx, io.MultiReader(stdout, stderr))
 	if err != nil {
 		_ = proc.Kill()
+		log.Printf("runtime base url detection failed workspace=%s error=%v output=%q", workspace.ID, err, summarizeRuntimeOutput(output))
 		return nil, err
 	}
+	log.Printf("runtime detected workspace=%s baseURL=%s", workspace.ID, baseURL)
 	healthCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
 	healthy, version, err := m.waitForHealth(healthCtx, baseURL, m.username, password)
@@ -128,6 +133,7 @@ func (m *Manager) Ensure(ctx context.Context, workspace core.Workspace) (*openco
 		if err == nil {
 			err = errors.New("opencode runtime did not become healthy")
 		}
+		log.Printf("runtime health failed workspace=%s baseURL=%s error=%v", workspace.ID, baseURL, err)
 		return nil, fmt.Errorf("runtime health failed: %w", err)
 	}
 
@@ -136,6 +142,7 @@ func (m *Manager) Ensure(ctx context.Context, workspace core.Workspace) (*openco
 	m.mu.Lock()
 	m.entries[workspace.ID] = entry
 	m.mu.Unlock()
+	log.Printf("runtime ready workspace=%s baseURL=%s version=%s", workspace.ID, baseURL, version)
 	m.startEventBridge(workspace, entry)
 	return client, nil
 }
@@ -152,6 +159,7 @@ func (m *Manager) Stop(workspaceID string) error {
 		entry.stopStream()
 	}
 	if entry.process != nil {
+		log.Printf("runtime stop workspace=%s baseURL=%s", workspaceID, entry.baseURL)
 		return entry.process.Kill()
 	}
 	return nil
@@ -193,6 +201,7 @@ func (m *Manager) startEventBridge(workspace core.Workspace, entry *entry) {
 	go func() {
 		events, errs, err := entry.client.StreamEvents(ctx)
 		if err != nil {
+			log.Printf("runtime stream start failed workspace=%s error=%v", workspace.ID, err)
 			m.eventSink(core.ServerEvent{ID: "bridge_error", WorkspaceID: workspace.ID, Type: "runtime.stream.error", Payload: map[string]any{"error": err.Error()}, CreatedAt: time.Now().UTC()})
 			return
 		}
@@ -202,6 +211,7 @@ func (m *Manager) startEventBridge(workspace core.Workspace, entry *entry) {
 				return
 			case err, ok := <-errs:
 				if ok && err != nil {
+					log.Printf("runtime stream error workspace=%s error=%v", workspace.ID, err)
 					m.eventSink(core.ServerEvent{ID: "bridge_error", WorkspaceID: workspace.ID, Type: "runtime.stream.error", Payload: map[string]any{"error": err.Error()}, CreatedAt: time.Now().UTC()})
 				}
 				return
@@ -214,6 +224,18 @@ func (m *Manager) startEventBridge(workspace core.Workspace, entry *entry) {
 			}
 		}
 	}()
+}
+
+func summarizeRuntimeOutput(output string) string {
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" {
+		return ""
+	}
+	trimmed = strings.Join(strings.Fields(trimmed), " ")
+	if len(trimmed) > 300 {
+		return trimmed[:300] + "..."
+	}
+	return trimmed
 }
 
 func detectBaseURL(ctx context.Context, reader io.Reader) (string, string, error) {
