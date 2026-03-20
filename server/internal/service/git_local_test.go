@@ -41,4 +41,20 @@ func TestLocalGitProviderLifecycle(t *testing.T) {
 	if err := provider.CreateBranch(ctx, workspace, "feature/test"); err != nil {
 		t.Fatalf("create branch: %v", err)
 	}
+	if _, err := runGit(ctx, root, "config", "user.name", "Test User"); err != nil {
+		t.Fatalf("config user.name: %v", err)
+	}
+	if _, err := runGit(ctx, root, "config", "user.email", "test@example.com"); err != nil {
+		t.Fatalf("config user.email: %v", err)
+	}
+	if err := provider.Commit(ctx, workspace, "Initial commit", true); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	postCommitStatus, err := provider.Status(ctx, workspace)
+	if err != nil {
+		t.Fatalf("status after commit: %v", err)
+	}
+	if postCommitStatus.HasChanges {
+		t.Fatalf("expected clean tree after commit: %#v", postCommitStatus)
+	}
 }

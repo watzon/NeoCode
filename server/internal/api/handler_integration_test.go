@@ -49,6 +49,49 @@ func (testGit) Initialize(context.Context, core.Workspace) error              { 
 func (testGit) SwitchBranch(context.Context, core.Workspace, string) error    { return nil }
 func (testGit) CreateBranch(context.Context, core.Workspace, string) error    { return nil }
 
+type commitRecorderGit struct {
+	message         string
+	includeUnstaged bool
+}
+
+func (g *commitRecorderGit) Status(context.Context, core.Workspace) (core.GitStatus, error) {
+	return core.GitStatus{Branch: "main", HasChanges: true}, nil
+}
+
+func (g *commitRecorderGit) Diff(context.Context, core.Workspace) (core.GitDiff, error) {
+	return core.GitDiff{}, nil
+}
+
+func (g *commitRecorderGit) Preview(context.Context, core.Workspace) (core.GitCommitPreview, error) {
+	return core.GitCommitPreview{Branch: "main"}, nil
+}
+
+func (g *commitRecorderGit) Commit(_ context.Context, _ core.Workspace, message string, includeUnstaged bool) error {
+	g.message = message
+	g.includeUnstaged = includeUnstaged
+	return nil
+}
+
+func (g *commitRecorderGit) Push(context.Context, core.Workspace) error { return nil }
+
+func (g *commitRecorderGit) Branches(context.Context, core.Workspace) ([]string, error) {
+	return []string{"main"}, nil
+}
+
+func (g *commitRecorderGit) CurrentBranch(context.Context, core.Workspace) (string, error) {
+	return "main", nil
+}
+
+func (g *commitRecorderGit) Initialize(context.Context, core.Workspace) error { return nil }
+
+func (g *commitRecorderGit) SwitchBranch(context.Context, core.Workspace, string) error {
+	return nil
+}
+
+func (g *commitRecorderGit) CreateBranch(context.Context, core.Workspace, string) error {
+	return nil
+}
+
 type testFiles struct{}
 
 func (testFiles) Search(context.Context, core.Workspace, string, int) ([]core.FileMatch, error) {
@@ -218,5 +261,44 @@ func TestHandlerFullFlow(t *testing.T) {
 	handler.ServeHTTP(serverEventsResp, serverEventsReq)
 	if serverEventsResp.Code != http.StatusOK || !strings.Contains(serverEventsResp.Body.String(), "event:") {
 		t.Fatalf("unexpected server events response: %d %s", serverEventsResp.Code, serverEventsResp.Body.String())
+	}
+}
+
+func TestHandlerGitCommitRoute(t *testing.T) {
+	recorder := &commitRecorderGit{}
+	handler := NewHandler(service.New(service.Config{
+		Info:          core.ServerInfo{Name: "NeoCode", Version: "test", Mode: core.ServerModeEmbedded},
+		Authenticator: auth.StaticToken("secret"),
+		Store:         store.NewMemoryStore(),
+		Runtime:       testRuntime{},
+		Git:           recorder,
+		Files:         testFiles{},
+		Now:           func() time.Time { return time.Unix(1700000000, 0).UTC() },
+	}))
+
+	workspaceResp := doJSONRequest(t, handler, http.MethodPost, "/v1/workspaces", map[string]any{
+		"name":          "Repo",
+		"rootUri":       "file:///repo",
+		"localPathHint": "/repo",
+		"isLocal":       true,
+	})
+	if workspaceResp.Code != http.StatusCreated {
+		t.Fatalf("workspace create failed: %d %s", workspaceResp.Code, workspaceResp.Body.String())
+	}
+
+	var workspace core.Workspace
+	if err := json.Unmarshal(workspaceResp.Body.Bytes(), &workspace); err != nil {
+		t.Fatalf("unmarshal workspace: %v", err)
+	}
+
+	commitResp := doJSONRequest(t, handler, http.MethodPost, "/v1/workspaces/"+workspace.ID+"/git/commit", map[string]any{
+		"message":         "ship it",
+		"includeUnstaged": true,
+	})
+	if commitResp.Code != http.StatusOK {
+		t.Fatalf("unexpected commit response: %d %s", commitResp.Code, commitResp.Body.String())
+	}
+	if recorder.message != "ship it" || !recorder.includeUnstaged {
+		t.Fatalf("unexpected commit payload: %#v", recorder)
 	}
 }
