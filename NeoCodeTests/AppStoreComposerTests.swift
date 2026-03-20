@@ -421,7 +421,9 @@ struct AppStoreComposerTests {
             #expect(service.sentCommands[0].command == "review")
             #expect(service.sentCommands[0].arguments == "current diff")
             #expect(store.draft.isEmpty)
-            #expect(store.selectedTranscript.isEmpty == true)
+            #expect(store.selectedTranscript.count == 1)
+            #expect(store.selectedTranscript.first?.text == "/review current diff")
+            #expect(store.selectedTranscript.first?.id.hasPrefix("optimistic-user-") == true)
             #expect(store.selectedSession?.status == .running)
         }
 
@@ -1107,6 +1109,7 @@ struct AppStoreComposerTests {
             #expect(store.draft == "/review current diff")
             #expect(store.lastError == "command failed")
             #expect(store.selectedSession?.status == .error)
+            #expect(store.selectedTranscript.isEmpty == true)
             #expect(service.sentCommands.isEmpty)
         }
 

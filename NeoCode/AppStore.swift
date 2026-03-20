@@ -259,6 +259,7 @@ final class AppStore {
     private var transcriptLoadRequestCounters: [String: Int] = [:]
 
     private let maxDebugEventsPerSession = 80
+    private let liveActivityTrustWindow: TimeInterval = 4
 
     init() {
         let persistence = AppStorePersistence()
@@ -420,7 +421,8 @@ final class AppStore {
 
     func transcript(for sessionID: String?) -> [ChatMessage] {
         guard let sessionID else { return [] }
-        return transcriptStateBySessionID[sessionID]?.messages ?? []
+        let resolvedID = resolvedSessionID(for: sessionID)
+        return transcriptStateBySessionID[resolvedID]?.messages ?? []
     }
 
     func visibleTranscript(for sessionID: String?) -> [ChatMessage] {
@@ -445,12 +447,14 @@ final class AppStore {
 
     func remainingTodoCount(for sessionID: String?) -> Int {
         guard let sessionID else { return 0 }
-        return activeTodosBySessionID[sessionID]?.remainingCount ?? 0
+        let resolvedID = resolvedSessionID(for: sessionID)
+        return activeTodosBySessionID[resolvedID]?.remainingCount ?? 0
     }
 
     func transcriptRevisionToken(for sessionID: String?) -> Int {
         guard let sessionID else { return 0 }
-        return transcriptStateBySessionID[sessionID]?.revision ?? 0
+        let resolvedID = resolvedSessionID(for: sessionID)
+        return transcriptStateBySessionID[resolvedID]?.revision ?? 0
     }
 
     func sessionStats(for sessionID: String?) -> SessionStatsSnapshot? {
@@ -662,11 +666,13 @@ final class AppStore {
 
     func pendingPermission(for sessionID: String) -> OpenCodePermissionRequest? {
         let _ = sessionUIRevision
+        let sessionID = resolvedSessionID(for: sessionID)
         return pendingPermissionsBySession[sessionID]?.first
     }
 
     func pendingQuestion(for sessionID: String) -> OpenCodeQuestionRequest? {
         let _ = sessionUIRevision
+        let sessionID = resolvedSessionID(for: sessionID)
         return pendingQuestionsBySession[sessionID]?.first
     }
 
@@ -1863,7 +1869,7 @@ final class AppStore {
         guard !trimmed.isEmpty || !attachments.isEmpty else { return false }
 
         let slashCommand = slashCommandInvocation(in: trimmed)
-        let shouldShowOptimisticUserMessage = slashCommand == nil
+        let shouldShowOptimisticUserMessage = true
         if let slashCommand {
             logger.info(
                 "Sending slash command session=\(sessionID, privacy: .public) command=\(slashCommand.command.name, privacy: .public) argumentLength=\(slashCommand.arguments.count, privacy: .public) project=\(projectID.uuidString, privacy: .public)"
@@ -3670,14 +3676,15 @@ final class AppStore {
     }
 
     private func apply(delta: OpenCodePartDelta, projectID: ProjectSummary.ID) {
-        guard delta.field == "text",
-              let indices = indices(for: delta.sessionID, projectID: projectID)
-        else {
+        guard delta.field == "text" else {
             return
         }
 
-        markSessionLocallyActive(delta.sessionID)
-        let key = BufferedTextDeltaKey(projectID: projectID, sessionID: delta.sessionID, partID: delta.partID)
+        let sessionID = resolvedSessionID(for: delta.sessionID)
+        guard let indices = indices(for: sessionID, projectID: projectID) else { return }
+
+        markSessionLocallyActive(sessionID)
+        let key = BufferedTextDeltaKey(projectID: projectID, sessionID: sessionID, partID: delta.partID)
         if var buffered = bufferedTextDeltas[key] {
             buffered.text += delta.delta
             buffered.updatedAt = .now
@@ -4021,13 +4028,13 @@ final class AppStore {
 
     private func resolvedSessionID(for part: OpenCodePart) -> String? {
         if let sessionID = part.sessionID {
-            return sessionID
+            return resolvedSessionID(for: sessionID)
         }
 
         guard let messageID = part.messageID else { return nil }
 
         for (sessionID, infos) in messageInfosBySessionID where infos[messageID] != nil {
-            return sessionID
+            return resolvedSessionID(for: sessionID)
         }
 
         return nil
@@ -4225,7 +4232,17 @@ final class AppStore {
         guard let projectIndex = projects.firstIndex(where: { $0.id == projectID }) else { return }
 
         for session in projects[projectIndex].sessions {
-            liveSessionStatuses[session.id] = statuses[session.id] ?? .idle
+            if let status = statuses[session.id] {
+                liveSessionStatuses[session.id] = status
+                lastLiveEventBySessionID[session.id] = (.now, status)
+                continue
+            }
+
+            if shouldCarryForwardLiveActivity(for: session.id) {
+                continue
+            }
+
+            liveSessionStatuses[session.id] = .idle
         }
 
         for session in projects[projectIndex].sessions {
@@ -4302,6 +4319,8 @@ final class AppStore {
         let isAwaitingFirstAssistantUpdate = transcript.isEmpty || transcript.last?.role == .user
         let isAwaitingInput = pendingPermission(for: sessionID) != nil || pendingQuestion(for: sessionID) != nil
         let hasObservedRecentRun = observedRunningSessionIDs.contains(sessionID)
+        let hasRecentActiveLiveEvent = hasRecentActiveLiveEvent(for: sessionID)
+        let shouldTrustRecentBootstrapEvent = transcript.isEmpty && hasRecentActiveLiveEvent
 
         switch activity {
         case .idle:
@@ -4316,12 +4335,48 @@ final class AppStore {
         case .busy, .retry:
             guard hasBlockingActivity
                     || hasLocalActivity
+                    || shouldTrustRecentBootstrapEvent
                     || (hasObservedRecentRun && isAwaitingFirstAssistantUpdate)
                     || isAwaitingInput
             else {
                 return nil
             }
             return activity
+        }
+    }
+
+    private func hasRecentActiveLiveEvent(for sessionID: String) -> Bool {
+        guard let lastLiveEvent = lastLiveEventBySessionID[sessionID],
+              Date().timeIntervalSince(lastLiveEvent.date) <= liveActivityTrustWindow
+        else {
+            return false
+        }
+
+        switch lastLiveEvent.activity {
+        case .busy, .retry:
+            return true
+        case .idle:
+            return false
+        }
+    }
+
+    private func shouldCarryForwardLiveActivity(for sessionID: String) -> Bool {
+        guard let currentActivity = liveSessionStatuses[sessionID] else { return false }
+
+        switch currentActivity {
+        case .idle:
+            return false
+        case .busy, .retry:
+            let transcript = transcript(for: sessionID)
+            if hasBlockingInProgressActivity(in: transcript, sessionID: sessionID)
+                || hasBufferedTextDeltas(for: sessionID)
+                || isSessionLocallyActive(sessionID)
+                || pendingPermission(for: sessionID) != nil
+                || pendingQuestion(for: sessionID) != nil {
+                return true
+            }
+
+            return transcript.isEmpty && hasRecentActiveLiveEvent(for: sessionID)
         }
     }
 
@@ -5509,6 +5564,7 @@ final class AppStore {
     }
 
     private func indices(for sessionID: String, projectID: ProjectSummary.ID) -> (project: Int, session: Int)? {
+        let sessionID = resolvedSessionID(for: sessionID)
         guard let projectIndex = projects.firstIndex(where: { $0.id == projectID }),
               let sessionIndex = projects[projectIndex].sessions.firstIndex(where: { $0.id == sessionID })
         else { return nil }
@@ -5965,7 +6021,72 @@ final class AppStore {
         projects[projectIndex].sessions[sessionIndex] = replacement
         registerSessionAlias(from: sessionID, to: session.id)
         moveTranscript(from: sessionID, to: session.id)
+        moveSessionRuntimeState(from: sessionID, to: session.id, projectID: projectID)
         scheduleProjectPersistence()
+    }
+
+    private func moveSessionRuntimeState(from sourceSessionID: String, to destinationSessionID: String, projectID: ProjectSummary.ID) {
+        guard sourceSessionID != destinationSessionID else { return }
+
+        if let liveActivity = liveSessionStatuses.removeValue(forKey: sourceSessionID) {
+            liveSessionStatuses[destinationSessionID] = liveActivity
+        }
+        if let permissions = pendingPermissionsBySession.removeValue(forKey: sourceSessionID) {
+            pendingPermissionsBySession[destinationSessionID] = permissions
+        }
+        if let questions = pendingQuestionsBySession.removeValue(forKey: sourceSessionID) {
+            pendingQuestionsBySession[destinationSessionID] = questions
+        }
+        if let todos = activeTodosBySessionID.removeValue(forKey: sourceSessionID) {
+            activeTodosBySessionID[destinationSessionID] = todos
+        }
+        if let queuedMessages = queuedMessagesBySessionID.removeValue(forKey: sourceSessionID) {
+            queuedMessagesBySessionID[destinationSessionID] = queuedMessages
+        }
+        if let events = debugEventsBySessionID.removeValue(forKey: sourceSessionID) {
+            debugEventsBySessionID[destinationSessionID] = events
+        }
+        if let lastLiveEvent = lastLiveEventBySessionID.removeValue(forKey: sourceSessionID) {
+            lastLiveEventBySessionID[destinationSessionID] = lastLiveEvent
+        }
+        if let lastTranscriptRefresh = lastTranscriptRefreshAtBySessionID.removeValue(forKey: sourceSessionID) {
+            lastTranscriptRefreshAtBySessionID[destinationSessionID] = lastTranscriptRefresh
+        }
+        if let lastCompletedMessage = lastCompletedMessageAtBySessionID.removeValue(forKey: sourceSessionID) {
+            lastCompletedMessageAtBySessionID[destinationSessionID] = lastCompletedMessage
+        }
+
+        if locallyActiveSessionIDs.remove(sourceSessionID) != nil {
+            locallyActiveSessionIDs.insert(destinationSessionID)
+        }
+        if observedRunningSessionIDs.remove(sourceSessionID) != nil {
+            observedRunningSessionIDs.insert(destinationSessionID)
+        }
+        if finishedSessionIDs.remove(sourceSessionID) != nil {
+            finishedSessionIDs.insert(destinationSessionID)
+        }
+        if failedSessionIDs.remove(sourceSessionID) != nil {
+            failedSessionIDs.insert(destinationSessionID)
+        }
+        if loadingTranscriptSessionID == sourceSessionID {
+            loadingTranscriptSessionID = destinationSessionID
+        }
+
+        let remappedDeltas = bufferedTextDeltas.reduce(into: [BufferedTextDeltaKey: BufferedTextDelta]()) { result, entry in
+            let key = entry.key.sessionID == sourceSessionID
+                ? BufferedTextDeltaKey(projectID: projectID, sessionID: destinationSessionID, partID: entry.key.partID)
+                : entry.key
+            result[key] = entry.value
+        }
+        bufferedTextDeltas = remappedDeltas
+        bufferedTextDeltaOrder = bufferedTextDeltaOrder.map { key in
+            guard key.sessionID == sourceSessionID else { return key }
+            return BufferedTextDeltaKey(projectID: projectID, sessionID: destinationSessionID, partID: key.partID)
+        }
+
+        if streamingRecoveryTasks[sourceSessionID] != nil {
+            cancelStreamingRecoveryCheck(for: sourceSessionID)
+        }
     }
 
     private static func normalizedProjects(_ projects: [ProjectSummary]) -> [ProjectSummary] {

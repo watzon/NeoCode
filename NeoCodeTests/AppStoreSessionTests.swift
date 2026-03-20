@@ -2050,6 +2050,74 @@ struct AppStoreSessionTests {
         }
 
         @MainActor
+        @Test func promotedSessionRetainsLiveActivityForStopControl() async throws {
+            let store = AppStore(projects: [ProjectSummary(name: "NeoCode", path: "/tmp/NeoCode")])
+            let runtime = OpenCodeRuntime()
+            let service = MockNeoCodeService()
+            let now = Date()
+
+            await store.createSession(using: runtime)
+            let projectID = try #require(store.selectedProjectID)
+            let ephemeralID = try #require(store.selectedSessionID)
+
+            store.apply(event: .sessionStatusChanged(sessionID: ephemeralID, status: .busy))
+
+            await store.promoteEphemeralSession(
+                ephemeralID,
+                in: projectID,
+                to: OpenCodeSession(
+                    id: "ses_promoted",
+                    title: nil,
+                    parentID: nil,
+                    time: OpenCodeTimeContainer(created: now, updated: now, completed: nil)
+                )
+            )
+
+            #expect(store.selectedSessionID == "ses_promoted")
+            #expect(store.selectedSessionActivity == .busy)
+            #expect(store.selectedSessionIsActivelyResponding == true)
+
+            let didStop = await store.stopSession(sessionID: "ses_promoted", projectID: projectID, using: service)
+
+            #expect(didStop == true)
+            #expect(service.abortedSessionIDs == ["ses_promoted"])
+        }
+
+        @MainActor
+        @Test func promotedSessionAliasesRouteBufferedStreamingUpdates() async throws {
+            let store = AppStore(projects: [ProjectSummary(name: "NeoCode", path: "/tmp/NeoCode")])
+            let runtime = OpenCodeRuntime()
+            let now = Date()
+
+            await store.createSession(using: runtime)
+            let projectID = try #require(store.selectedProjectID)
+            let ephemeralID = try #require(store.selectedSessionID)
+
+            await store.promoteEphemeralSession(
+                ephemeralID,
+                in: projectID,
+                to: OpenCodeSession(
+                    id: "ses_promoted",
+                    title: nil,
+                    parentID: nil,
+                    time: OpenCodeTimeContainer(created: now, updated: now, completed: nil)
+                )
+            )
+
+            store.apply(event: .messagePartDelta(OpenCodePartDelta(
+                sessionID: ephemeralID,
+                messageID: "msg_1",
+                partID: "part_1",
+                field: "text",
+                delta: "Hello"
+            )))
+
+            #expect(store.selectedSessionID == "ses_promoted")
+            #expect(store.selectedSession?.status == .running)
+            #expect(store.debugBufferedTextDeltaCount == 1)
+        }
+
+        @MainActor
         @Test func selectingProjectDoesNotAutoSelectFirstThread() async {
             let firstProject = ProjectSummary(
                 id: UUID(),
