@@ -2,6 +2,7 @@ package opencode
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -39,6 +40,50 @@ func TestClientListSessions(t *testing.T) {
 	}
 	if len(sessions) != 1 || sessions[0].ID != "s1" {
 		t.Fatalf("unexpected sessions: %#v", sessions)
+	}
+}
+
+func TestClientCreateSessionOmitsBlankTitle(t *testing.T) {
+	client := newTestClient(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/session" || r.Method != http.MethodPost {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if _, ok := body["title"]; ok {
+			t.Fatalf("expected blank title to be omitted, got %#v", body)
+		}
+
+		return response(200, `{"id":"s1","title":"Chat","time":{"created":"2024-01-01T00:00:00Z","updated":"2024-01-01T00:00:01Z"}}`, "application/json"), nil
+	})
+
+	if _, err := client.CreateSession(context.Background(), "   "); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+}
+
+func TestClientCreateSessionTrimsTitle(t *testing.T) {
+	client := newTestClient(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/session" || r.Method != http.MethodPost {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if got := body["title"]; got != "Chat" {
+			t.Fatalf("expected trimmed title, got %#v", body)
+		}
+
+		return response(200, `{"id":"s1","title":"Chat","time":{"created":"2024-01-01T00:00:00Z","updated":"2024-01-01T00:00:01Z"}}`, "application/json"), nil
+	})
+
+	if _, err := client.CreateSession(context.Background(), "  Chat  "); err != nil {
+		t.Fatalf("create session: %v", err)
 	}
 }
 

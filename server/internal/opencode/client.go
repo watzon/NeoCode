@@ -68,7 +68,10 @@ func (c *Client) ListSessions(ctx context.Context) ([]core.Session, error) {
 
 func (c *Client) CreateSession(ctx context.Context, title string) (core.Session, error) {
 	var payload sessionDTO
-	body := map[string]any{"title": emptyToNil(title)}
+	body := map[string]any{}
+	if trimmed := strings.TrimSpace(title); trimmed != "" {
+		body["title"] = trimmed
+	}
 	if err := c.request(ctx, http.MethodPost, "/session", body, &payload, "application/json"); err != nil {
 		return core.Session{}, err
 	}
