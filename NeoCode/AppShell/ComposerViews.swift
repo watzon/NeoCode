@@ -1015,6 +1015,7 @@ struct GrowingTextView: NSViewRepresentable {
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
+        textView.allowsUndo = true
         textView.usesRolloverButtonForSelection = false
         if #available(macOS 15.0, *) {
             textView.writingToolsBehavior = .none
