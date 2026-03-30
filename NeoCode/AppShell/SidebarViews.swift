@@ -210,6 +210,7 @@ struct ProjectTreeNode: View {
     @Environment(\.locale) private var locale
     @State private var isHovering = false
     @State private var showsAllSessions = false
+    @State private var showsRemoveConfirmation = false
 
     private let workspaceToolService = WorkspaceToolService()
 
@@ -286,6 +287,14 @@ struct ProjectTreeNode: View {
         }
         .opacity(isBeingDragged ? 0.7 : 1)
         .animation(.easeOut(duration: 0.12), value: isDropTarget)
+        .alert(localized("Remove Project", locale: locale), isPresented: $showsRemoveConfirmation) {
+            Button(localized("Cancel", locale: locale), role: .cancel) {}
+            Button(localized("Remove", locale: locale), role: .destructive) {
+                store.removeProject(project.id, using: runtime)
+            }
+        } message: {
+            Text(String(format: localized("Remove \"%@\" from the sidebar?", locale: locale), project.name))
+        }
     }
 
     private var disclosureIcon: String {
@@ -330,6 +339,12 @@ struct ProjectTreeNode: View {
 
                 Button(localized("Open Project", locale: locale), action: openProject)
                 Button(localized("Reveal in Finder", locale: locale), action: revealProject)
+
+                Divider()
+
+                Button(localized("Remove Project", locale: locale), role: .destructive) {
+                    removeProjectConfirmation = true
+                }
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 12, weight: .medium))

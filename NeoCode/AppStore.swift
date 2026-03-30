@@ -847,6 +847,24 @@ final class AppStore {
         moveProject(from: sourceIndex, to: projects.count - 1)
     }
 
+    func removeProject(_ projectID: ProjectSummary.ID, using runtime: OpenCodeRuntime) {
+        guard let index = projects.firstIndex(where: { $0.id == projectID }) else { return }
+
+        disconnectLiveState(for: projectID)
+        runtime.stop(projectPath: projectPath(for: projectID))
+        projects.remove(at: index)
+
+        if selectedProjectID == projectID {
+            selectedProjectID = projects.first?.id
+            selectedSessionID = nil
+            loadingTranscriptSessionID = nil
+            primePromptState(for: nil)
+        }
+
+        scheduleProjectPersistence()
+        reevaluateRuntimeRetention(using: runtime)
+    }
+
     func toggleProjectCollapsed(_ projectID: ProjectSummary.ID) {
         setProjectCollapsed(!isProjectCollapsed(projectID), for: projectID)
     }
