@@ -21,6 +21,8 @@ clean:
     rm -rf "{{build_dir}}" "{{dmg_dir}}" DerivedData updates appcast.xml
     @echo "Done"
 
+user_xcconfig := if `test -f User.xcconfig` != "" { "User.xcconfig" } else { "" }
+
 build:
     @echo "Building {{app_name}} (Debug)..."
     xcodebuild \
@@ -28,6 +30,7 @@ build:
         -scheme {{scheme}} \
         -configuration Debug \
         -derivedDataPath DerivedData \
+        {{ if user_xcconfig != "" { "-xcconfig " + user_xcconfig } else { "" } }} \
         build
 
 build-release:
@@ -37,6 +40,7 @@ build-release:
         -scheme {{scheme}} \
         -configuration Release \
         -derivedDataPath DerivedData \
+        {{ if user_xcconfig != "" { "-xcconfig " + user_xcconfig } else { "" } }} \
         build
 
 test:
