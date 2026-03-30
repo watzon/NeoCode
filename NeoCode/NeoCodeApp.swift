@@ -8,6 +8,10 @@
 import AppKit
 import SwiftUI
 
+extension Notification.Name {
+    static let openNeoCodeSettings = Notification.Name("openNeoCodeSettings")
+}
+
 @main
 struct NeoCodeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
@@ -23,6 +27,14 @@ struct NeoCodeApp: App {
         .defaultSize(width: 1280, height: 900)
         .windowResizability(.contentMinSize)
         .windowStyle(.hiddenTitleBar)
+        .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings...") {
+                    NotificationCenter.default.post(name: .openNeoCodeSettings, object: nil)
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
+        }
     }
 }
 
@@ -206,9 +218,12 @@ private struct UnitTestHostView: View {
                         window.alphaValue = 0
                         window.ignoresMouseEvents = true
                         window.orderOut(nil)
-                    }
-                }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .openNeoCodeSettings)) { _ in
+                store.openSettings()
+            }
+    }
+}
     }
 }
 
